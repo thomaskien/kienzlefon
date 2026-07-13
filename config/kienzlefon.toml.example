@@ -1,0 +1,244 @@
+# kienzlefon
+# Version: 1.8.2
+# Changelog:
+# - 1.8.2: Notrufnummern als Woerter und Geburtstag in Fallback-Ansagen gesetzt.
+# - 1.8.1: Konfigurationsvorlage unveraendert fuer das Rechte-Patchrelease uebernommen.
+# - 1.8: Expliziten, standardmaessig deaktivierten Telepraxis-Demomodus ergaenzt.
+# - 1.7.1: Rottelefon-Mitgliedschaft der Sonderqueue als Laufzeitverhalten dokumentiert.
+# - 1.7: Optionales rotes Telefon und priorisierte Sonderqueue ergaenzt.
+# - 1.6: Drei Whisper-Modellbereiche und feldbezogene Initial-Prompts ergaenzt.
+# - 1.5: 16-kHz-Ansagenaufnahme und gemeinsame Lautheitsziele ergaenzt.
+# - 1.4: PIN entfernt und Ansagen-IVR sprachlich ueberarbeitet.
+# - 1.3: Ansagenverwaltung, Zusatztelefone und Wahlregeln ergaenzt.
+# - 1.2: Erfassungs- und Ansagelogik der Zeitprofile dokumentiert.
+# - 1.1: TTS-Pausen sowie IVR- und Notfalltelefonparameter ergaenzt.
+# - 1.0: Vollstaendige Erstkonfiguration fuer IVR, Whisper und Telepraxis.
+
+[pfade]
+spool = "/var/spool/asterisk/kienzlefon"
+runtime = "/run/kienzlefon"
+ansagen = "/var/lib/asterisk/sounds/kienzlefon"
+ansagen_master = "/var/lib/kienzlefon/ansagen-master"
+
+[praxis]
+name = "Praxisname"
+zeitzone = "Europe/Berlin"
+
+[override]
+aktiv = false
+ansage = ""
+telefonzeiten_sperren = true
+
+[ivr]
+menue_durchlaeufe = 2
+tasten_timeout_ms = 6000
+ansage_pause_ms = 700
+queue = "praxis"
+queue_context = "kfx-phone-queue,s,1"
+apotheken_prioritaet = 10
+rotes_telefon_aktiv = true
+rote_nebenstelle = "299"
+rotes_telefon_klingeldauer_sekunden = 20
+rotes_telefon_queue_prioritaet = 100
+fachstellen_ansage = false
+
+[aufnahme]
+format = "wav"
+stille_kurz_sekunden = 3
+stille_lang_sekunden = 6
+maximum_kurz_sekunden = 30
+maximum_lang_sekunden = 180
+verwaist_sekunden = 7200
+
+[whisper]
+modell_standard = "large-v3-turbo"
+modell_namen = "large-v3"
+modell_medikamente = "large-v3-turbo"
+initial_prompt_vorname = "Es folgt ausschließlich der Vorname einer Person."
+initial_prompt_nachname = "Es folgt ausschließlich der Familienname einer Person."
+initial_prompt_medikamente = "Es folgt eine Medikamentenangabe mit Medikamentenname oder Wirkstoff, Wirkstärke und Packungsgröße."
+modellverzeichnis = "/var/lib/kienzlefon/models"
+geraet = "cpu"
+compute_type = "int8"
+cpu_threads = 0
+beam_size = 5
+sprache = "de"
+poll_sekunden = 0.5
+heartbeat_sekunden = 5
+heartbeat_veraltet_sekunden = 20
+maximale_versuche = 3
+
+[telepraxis]
+kanal = "dahl"
+ausgabeverzeichnis = "/srv/telepraxis/dahl/inbox"
+demo = false
+public_key = "/etc/kienzlefon/telepraxis-public.pem"
+
+[tts]
+engine = "piper"
+stimme = "de_DE-thorsten-high"
+stimmenverzeichnis = "/var/lib/kienzlefon/piper-voices"
+uploadverzeichnis = "/var/lib/kienzlefon/ansagen-upload"
+lautstaerke = 1.0
+length_scale = 1.3
+sentence_silence = 0.8
+ziel_lautheit_lufs = -19.0
+max_true_peak_db = -2.0
+
+[asterisk]
+rotes_telefon_passwort = "CHANGE_ME_RED_PHONE_SECRET"
+telefon_transport = "transport-kfx-phone"
+hauptausgang_endpoint = "kfx-phone-in-endpoint"
+hauptausgang_nummer = "CHANGE_ME_MAIN_NUMBER"
+ausgehend_zaehlt_kanalgrenze = true
+erste_queue_nebenstelle = 201
+queue_nebenstellen_anzahl = 1
+
+[ansagen_ivr]
+nebenstelle = "777"
+aufnahme_stille_sekunden = 3
+aufnahme_max_sekunden = 180
+audit_log = "/var/lib/kienzlefon/ansagen-ivr-audit.jsonl"
+
+[zusaetzliche_nebenstellen]
+nebenstellen = []
+passwoerter = []
+
+[sonderqueue]
+# Ein aktiviertes rotes Telefon wird automatisch ebenfalls Mitglied dieser Queue.
+name = "kienzlefon-sonder"
+gewicht = 100
+zusaetzliche_nebenstellen = []
+
+[wahlregeln]
+landesvorwahl = "49"
+ortsvorwahl = "02331"
+praxisrufnummer = "123456"
+min_extern_ziffern = 3
+international_gesperrt = true
+sperre_0900 = true
+sperre_0137 = true
+sperre_118 = true
+sperre_019 = true
+sperre_0180 = false
+sperre_0700 = false
+sperre_032 = false
+audit_log = "/var/lib/kienzlefon/telefonie-audit.jsonl"
+
+[sip_direkte_queue]
+aktiv = false
+rufnummer = ""
+benutzer = ""
+passwort = ""
+domain = ""
+outbound_proxy = ""
+expiration = 300
+ausgehend_verwenden = false
+
+[sip_rotes_telefon]
+aktiv = false
+rufnummer = ""
+benutzer = ""
+passwort = ""
+domain = ""
+outbound_proxy = ""
+expiration = 300
+ausgehend_verwenden = false
+
+# Zeitformat direkt in TOML: ["10:00-16:00"]
+# Mehrere Zeitraeume: ["08:00-12:00", "14:00-17:00"]
+# Im Installer werden Zeiten ohne eckige Klammern eingegeben.
+# Gemeinsame Vormittage Montag bis Freitag stehen jeweils als erster Zeitraum.
+[oeffnungszeiten]
+montag = []
+dienstag = []
+mittwoch = []
+donnerstag = []
+freitag = []
+samstag = []
+sonntag = []
+
+[telefonzeiten]
+montag = []
+dienstag = []
+mittwoch = []
+donnerstag = []
+freitag = []
+samstag = []
+sonntag = []
+
+[apothekenzeiten]
+montag = []
+dienstag = []
+mittwoch = []
+donnerstag = []
+freitag = []
+samstag = []
+sonntag = []
+
+[fachstellenzeiten]
+montag = []
+dienstag = []
+mittwoch = []
+donnerstag = []
+freitag = []
+samstag = []
+sonntag = []
+
+[ansagen]
+greeting_open = "Guten Tag, Sie sind verbunden mit der Praxis {praxisname}. Die Praxis ist momentan geöffnet."
+greeting_closed = "Guten Tag, Sie sind verbunden mit der Praxis {praxisname}. Die Praxis ist momentan geschlossen."
+emergency = "Bei lebensbedrohlichen Notfällen wählen Sie bitte sofort die eins eins zwei."
+urgent_help = "Bei dringenden Beschwerden außerhalb unserer Sprechzeiten wenden Sie sich bitte an den ärztlichen Bereitschaftsdienst unter eins eins sechs, eins eins sieben."
+menu_intro = "Bitte wählen Sie nun durch Tastendruck auf Ihrem Telefon eine der folgenden Möglichkeiten."
+menu_open = "Wenn Sie persönlich mit der Praxis sprechen möchten, drücken Sie 1. Für ein Rezept drücken Sie 2. Für eine Überweisung drücken Sie 3. Für einen Termin drücken Sie 4. Für eine Rückrufbitte oder ein sonstiges Anliegen drücken Sie 5."
+menu_closed = "Für ein Rezept drücken Sie 2. Für eine Überweisung drücken Sie 3. Für einen Termin drücken Sie 4. Für eine Rückrufbitte oder ein sonstiges Anliegen drücken Sie 5."
+pharmacy_access = "Apotheken drücken 8."
+specialist_access = "Krankenhäuser, Rettungsdienste, Notärzte und ärztliche Kollegen drücken 9."
+opening_hours_choice = "Für unsere Öffnungszeiten drücken Sie 6."
+opening_hours_prefix = "Unsere regulären Öffnungszeiten sind:"
+opening_hours_closed = "{tag} ist die Praxis geschlossen."
+phone_hours_prefix = "Unsere Telefonzeiten sind:"
+phone_hours_closed = "{tag} sind wir telefonisch nicht erreichbar."
+phone_hours = ""
+submenu_five = "Für eine Rückrufbitte drücken Sie 1. Für ein sonstiges Anliegen drücken Sie 2."
+recording_hint = "Vor jeder Angabe hören Sie eine kurze Ansage. Die Aufnahme startet danach unmittelbar. Nach einer längeren Sprechpause endet die Aufnahme automatisch. Sie können die Aufnahme auch mit einer beliebigen Taste beenden."
+first_name = "Bitte nennen Sie Ihren Vornamen."
+last_name = "Bitte nennen Sie Ihren Nachnamen."
+birth_date = "Bitte nennen Sie Ihr Geburtsdatum in der Reihenfolge Tag, Monat, Jahr."
+callback_number = "Ihre Rufnummer wurde nicht übertragen. Bitte nennen Sie Ihre Rückrufnummer."
+first_medication = "Bitte nennen Sie das erste Medikament mit Wirkstärke und Packungsgröße."
+next_medication = "Bitte nennen Sie das nächste Medikament mit Wirkstärke und Packungsgröße."
+medication_choice = "Für ein weiteres Medikament drücken Sie 1. Wenn Ihre Bestellung vollständig ist, drücken Sie 2."
+specialty = "Für welche Fachrichtung benötigen Sie die Überweisung?"
+referral_reason = "Bitte nennen Sie den Grund für die Überweisung."
+appointment = "Bitte schildern Sie Ihren Terminwunsch."
+callback_reason = "Bitte schildern Sie den Grund für Ihren Rückrufwunsch."
+other = "Bitte schildern Sie Ihr Anliegen."
+no_selection_open = "Sie haben keine Auswahl getroffen. Wir verbinden Sie jetzt mit der Praxis."
+no_selection_closed = "Bitte sagen Sie Vorname, Nachname und Geburtstag und sagen Sie uns, worum es geht. Wir können Sie auch zurückrufen. Bitte nennen Sie uns gegebenenfalls eine Rückrufnummer. Danach einfach auflegen."
+invalid = "Diese Eingabe ist nicht verfügbar. Bitte versuchen Sie es erneut."
+completed = "Vielen Dank und bis bald!"
+whisper_failure = "Aufgrund einer Störung werden Sie direkt an die Praxis weitergeleitet."
+prescription_information = "Rezepte, die vor 10 Uhr bestellt werden, können in der Regel am Nachmittag desselben Tages als elektronisches Rezept eingelöst werden, sonst am Folgetag. Bitte beachten Sie, dass Ihre Versichertenkarte in diesem Quartal bereits eingelesen sein muss."
+pharmacy_agent = "Anruf von Apotheke."
+specialist_agent = "Anruf von Fachstelle."
+personal_data_fallback = "Ihre Personalangaben konnten nicht vollständig aufgenommen werden. Bitte sagen Sie nun in einer zusammenhängenden Nachricht Vorname, Nachname und Geburtstag und sagen Sie uns, worum es geht. Bitte nennen Sie uns gegebenenfalls eine Rückrufnummer. Danach einfach auflegen."
+blocked_destination = "Dieses Anrufziel ist gesperrt."
+admin_main = "Sie befinden sich in der internen Verwaltung der Telefonansagen. Für die Verwaltung einzelner Ansagen drücken Sie 1. Für die Feiertags- und Sonderansage drücken Sie 2. Zum Beenden drücken Sie 0."
+admin_prompt_select = "Bitte geben Sie die Nummer des gewünschten Ansagebausteins ein. Bestätigen Sie die Eingabe mit der Raute-Taste."
+admin_current_prompt = "Sie hören jetzt die aktuell verwendete Ansage."
+admin_prompt_actions = "Für eine neue Aufnahme drücken Sie 1. Zum Anhören der neuen Aufnahme drücken Sie 2. Zum Aktivieren der neuen Aufnahme drücken Sie 3. Um wieder die automatisch erzeugte Ansage zu verwenden, drücken Sie 4. Zurück mit 0."
+admin_record = "Sprechen Sie nach dem Signalton. Beenden Sie die Aufnahme mit einer beliebigen Taste oder durch eine längere Sprechpause."
+admin_record_ready = "Ihre neue Aufnahme wurde gespeichert, ist aber noch nicht aktiv. Zum Anhören drücken Sie 2. Zum Aktivieren drücken Sie 3."
+admin_no_recording = "Es liegt noch keine neue Aufnahme für diesen Ansagebaustein vor."
+admin_activated = "Die neue Aufnahme wurde aktiviert und wird ab sofort verwendet."
+admin_generated = "Die automatisch erzeugte Ansage wurde aktiviert und wird ab sofort verwendet."
+admin_special_menu = "Für die Feiertags- und Sonderansage stehen folgende Möglichkeiten zur Verfügung. Zum Aktivieren bei weiterhin gültigen Telefonzeiten drücken Sie 1. Zum Aktivieren und gleichzeitigen Sperren der Telefonzeiten drücken Sie 2. Zum Deaktivieren drücken Sie 3. Für den aktuellen Status drücken Sie 4. Zurück mit 0."
+admin_special_keep = "Die Feiertags- und Sonderansage ist jetzt aktiv. Die regulären Telefonzeiten bleiben gültig."
+admin_special_block = "Die Feiertags- und Sonderansage ist jetzt aktiv. Die regulären Telefonzeiten sind gesperrt."
+admin_special_disabled = "Die Feiertags- und Sonderansage wurde deaktiviert."
+admin_invalid = "Diese Eingabe ist nicht verfügbar. Bitte versuchen Sie es erneut."
+admin_special_status_disabled = "Die Feiertags- und Sonderansage ist derzeit deaktiviert."
+admin_special_status_keep = "Die Feiertags- und Sonderansage ist derzeit aktiv. Die regulären Telefonzeiten bleiben gültig."
+admin_special_status_block = "Die Feiertags- und Sonderansage ist derzeit aktiv. Die regulären Telefonzeiten sind gesperrt."

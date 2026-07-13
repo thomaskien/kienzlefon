@@ -1,0 +1,17 @@
+# kienzlefon
+# Version: 1.8.2
+# Changelog:
+# - 1.8.2: Lokale macOS-Metadatendateien von der Veroeffentlichung ausgeschlossen.
+# - 1.0: Erstfassung fuer lokale Entwicklungs- und Laufzeitdateien.
+
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+data/
+models/
