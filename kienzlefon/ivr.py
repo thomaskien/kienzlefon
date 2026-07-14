@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Alle Felder trotz Schweigens weiter aufgenommen und einzeln verarbeitet.
 # - 1.8: Abbruch vor jeder verwertbaren Aufnahme ohne leeren Vorgang abgeschlossen.
 # - 1.7: Anzeige-Caller-ID normalisiert, waehrend die Telepraxis-ID original bleibt.
 # - 1.6: Whisper-Bereitschaft gegen alle konfigurierten Modelle geprueft.
@@ -178,28 +179,22 @@ class IVR:
             return
         self.call = self.spool.create_call(call_type, self.caller_id, category)
         self._play("recording_hint")
-        person_ok = True
         for field, prompt, filename in (
             (FieldName.FIRST_NAME, "first_name", "vorname.wav"),
             (FieldName.LAST_NAME, "last_name", "nachname.wav"),
             (FieldName.BIRTH_DATE, "birth_date", "geburtsdatum.wav"),
         ):
-            result = self._record_field(field, prompt, filename, long=False)
-            if not result:
-                person_ok = False
-                break
+            self._record_field(field, prompt, filename, long=False)
 
-        if self.caller_id is None and person_ok:
-            person_ok = self._record_field(
+        if self.caller_id is None:
+            self._record_field(
                 FieldName.CALLBACK_NUMBER,
                 "callback_number",
                 "telefon.wav",
                 long=False,
             )
 
-        if not person_ok:
-            self._record_personal_data_fallback(call_type)
-        elif call_type is CallType.PRESCRIPTION:
+        if call_type is CallType.PRESCRIPTION:
             self._record_medications()
             self._play("prescription_information")
         elif call_type is CallType.REFERRAL:
@@ -231,16 +226,6 @@ class IVR:
         )
         self._play("completed")
         self._finish_call("stille_oder_auflegen")
-
-    def _record_personal_data_fallback(self, call_type: CallType) -> None:
-        field = {
-            CallType.PRESCRIPTION: FieldName.MEDICATION,
-            CallType.REFERRAL: FieldName.REASON,
-            CallType.APPOINTMENT: FieldName.REASON,
-            CallType.CALLBACK_DETAILS: FieldName.REASON,
-            CallType.OTHER: FieldName.CONCERN,
-        }[call_type]
-        self._record_field(field, "personal_data_fallback", "fallback.wav", long=True)
 
     def _record_medications(self) -> None:
         index = 1
@@ -287,12 +272,12 @@ class IVR:
             ),
         )
         self.call.set_audio_record_status(filename, result.status, result.present)
-        if result.status == "ERROR" or not result.present:
+        if result.status == "ERROR":
             self.call.add_error(
                 "RECORDING_FAILED", "aufnahme", f"Aufnahme fehlgeschlagen: {filename}"
             )
             return False
-        return True
+        return result.present
 
     def _finish_call(self, reason: str) -> None:
         if self.call is None or self.call_queued:

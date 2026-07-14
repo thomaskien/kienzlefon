@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.6
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Leere Personentranskripte blockieren ein langes Anliegen nicht mehr.
 # - 1.6: Feldbezogene Modellwahl, Mehrmodell-Ladung und Initial-Prompts getestet.
 # - 1.1: Entfernung genau eines abschliessenden Whisper-Punkts getestet.
 # - 1.0: Sequentielle Transkription und Medikament-Zeilenumbrueche getestet.
@@ -85,6 +86,61 @@ def test_failed_person_field_does_not_block_fallback_text(app_config) -> None:
     assert ready.load()["grund"] == "Langer Inhalt mit allen Angaben"
     error_outputs = list(app_config.telepraxis.output_directory.glob("*_error_*.json.enc"))
     assert len(error_outputs) == 1
+
+
+def test_silent_personal_transcripts_do_not_block_reason_or_report_errors(app_config) -> None:
+    transcribed: list[str] = []
+
+    class PartialTranscriber:
+        def transcribe(self, path: Path, _field: FieldName | str) -> str:
+            transcribed.append(path.name)
+            if path.name == "grund.wav":
+                return "Seit gestern bestehen starke Beschwerden mit weiteren Einzelheiten."
+            return ""
+
+    spool = Spool(app_config.paths.spool, app_config.practice.timezone)
+    call = spool.create_call(CallType.APPOINTMENT, None, "termin")
+    for field, filename in (
+        (FieldName.FIRST_NAME, "vorname.wav"),
+        (FieldName.LAST_NAME, "nachname.wav"),
+        (FieldName.BIRTH_DATE, "geburtsdatum.wav"),
+        (FieldName.CALLBACK_NUMBER, "telefon.wav"),
+        (FieldName.REASON, "grund.wav"),
+    ):
+        audio = call.begin_audio(field, filename)
+        audio.write_bytes(b"RIFF" + b"0" * 100)
+    spool.finish_recording(call, "abgeschlossen")
+    claimed = spool.claim_next()
+    assert claimed is not None
+
+    Worker(app_config, transcriber=PartialTranscriber()).process(
+        WorkingCall(claimed.path, app_config.practice.timezone)
+    )
+
+    ready = next(iter(spool.calls(CallState.READY)))
+    record = ready.load()
+    assert transcribed == [
+        "vorname.wav",
+        "nachname.wav",
+        "geburtsdatum.wav",
+        "telefon.wav",
+        "grund.wav",
+    ]
+    assert record["vorname"] == ""
+    assert record["nachname"] == ""
+    assert record["geburtsdatum"] == ""
+    assert record["telefon"] == "unbekannt"
+    assert record["grund"] == "Seit gestern bestehen starke Beschwerden mit weiteren Einzelheiten"
+    assert record["_kienzlefon"]["errors"] == []
+    assert [entry["status"] for entry in record["_kienzlefon"]["audio"]] == [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "transcribed",
+    ]
+    assert (app_config.telepraxis.output_directory / f"{call.call_id}.json.enc").is_file()
+    assert not list(app_config.telepraxis.output_directory.glob("*_error_*.json.enc"))
 
 
 def test_output_failure_marks_worker_unready_and_keeps_call(app_config) -> None:

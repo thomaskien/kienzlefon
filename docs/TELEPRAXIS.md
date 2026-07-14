@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.2
+Version: 1.8.3
 Changelog:
+- 1.8.3: Teiltranskription und leere Datenfelder ohne Fehlerdatensatz dokumentiert.
 - 1.8.2: Dynamische Versionskennung auf Kienzlefon 1.8.2 aktualisiert.
 - 1.8.1: Dateimodus und Gruppenzuordnung der Ausgabe dokumentiert.
 - 1.8: Demo-Klartextausgabe und Behandlung leerer Abbrueche dokumentiert.
@@ -20,7 +21,7 @@ Changelog:
 
 # Telepraxis-Dateiformat
 
-Version 1.8.2 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
+Version 1.8.3 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
 direkt eine verschluesselte Datei im konfigurierten Kanalverzeichnis:
 
 ```text
@@ -34,7 +35,7 @@ Telepraxis-Transportdatensatz:
 {
   "received_at": "2026-07-11T11:46:58+02:00",
   "remote_ip": "",
-  "user_agent": "kienzlefon/1.8.2",
+  "user_agent": "kienzlefon/1.8.3",
   "typ": "termin",
   "payload": {
     "typ": "termin",
@@ -53,6 +54,10 @@ Von jedem Whisper-Transkript wird genau ein abschliessender Punkt entfernt.
 Punkte innerhalb eines Textes und alle uebrigen Inhalte bleiben unveraendert.
 Die `id` bleibt die urspruenglich uebertragene Caller-ID. Die rein fuer interne
 Telefone vorgenommene Anzeigeformatierung veraendert diesen Wert nicht.
+
+Schweigend uebersprungene Felder bleiben als leere Zeichenketten im normalen
+Payload. Sie sind kein technischer Fehler. Alle weiteren Audiodateien desselben
+Vorgangs werden trotzdem transkribiert und in ihre festgelegten Felder geschrieben.
 
 Die aeussere Datei ist kompatibel zur Referenzfunktion `openssl_seal()`:
 

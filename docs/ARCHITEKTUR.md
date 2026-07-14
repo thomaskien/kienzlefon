@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.1
+Version: 1.8.3
 Changelog:
+- 1.8.3: Unabhaengige Verarbeitung leerer und befuellter Einzelaufnahmen dokumentiert.
 - 1.8.1: Rechte und systemd-Gruppe der Telepraxis-Ausgabe dokumentiert.
 - 1.8: Demoausgabe und sicheres Verwerfen leerer Abbrueche dokumentiert.
 - 1.7.1: Rotes Telefon als bedingtes Mitglied der Sonderqueue dokumentiert.
@@ -31,6 +32,11 @@ dort. Vor- und Nachname, Medikamente sowie alle uebrigen Felder besitzen
 getrennte Modellzuordnungen. Sind alle Zuordnungen gleich, existiert nur eine
 Modellinstanz. CPU-Threads sind konfigurierbar. Der Worker verarbeitet
 vollstaendige Vorgangsordner nacheinander.
+
+Innerhalb eines Vorgangs werden die Audiodateien unabhaengig voneinander
+verarbeitet. Eine Aufnahme ohne erkannten Text erhaelt den fehlerfreien Status
+`empty`; nachfolgende Aufnahmen werden weiterhin transkribiert. Erfolgreiche
+Transkripte werden in das normale JSON uebernommen, fehlende Felder bleiben leer.
 
 Vor- und Nachnamen werden mit `language="de"`, `task="transcribe"`,
 `beam_size=5` und ihrem jeweiligen editierbaren Initial-Prompt transkribiert.

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.2
+Version: 1.8.3
 Changelog:
+- 1.8.3: Fortsetzung aller Feldaufnahmen trotz schweigend uebersprungener Felder dokumentiert.
 - 1.8.2: Bereitschaftsdienst vor erster und nach letzter Tagesoeffnung dokumentiert.
 - 1.8: Verhalten bei Abbruch vor der ersten Aufnahme dokumentiert.
 - 1.7.1: Weiteres Klingeln des roten Telefons in der Sonderqueue dokumentiert.
@@ -55,6 +56,12 @@ in `medikamente` verbunden.
 Bei Ueberweisungen werden `fachrichtung` und `grund` getrennt aufgenommen.
 Termin, Rueckruf und sonstiges Anliegen verwenden jeweils ihr festgelegtes
 Inhaltsfeld.
+
+Schweigen bei einem einzelnen Personenfeld gilt als fehlende Angabe. Die
+folgenden Personenfelder und das eigentliche Vorgangsfeld werden trotzdem
+aufgenommen. Der Worker verarbeitet alle vorhandenen Aufnahmen; leere
+Einzeltranskripte erzeugen keinen technischen Fehler und blockieren keine
+spaeteren Inhalte. Im fertigen JSON bleiben nicht genannte Felder leer.
 
 Eine laengere Stille beendet standardmaessig die Aufnahme. Zusaetzlich beendet
 jede DTMF-Taste die aktuelle Aufnahme. Die Taste wird verbraucht. Asterisk

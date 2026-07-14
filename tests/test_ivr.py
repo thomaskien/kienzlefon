@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Vollstaendige Feldfolge trotz schweigend uebersprungener Personendaten getestet.
 # - 1.8: Leeren Abbruch verwerfen und technische Fehler weiterhin einreihen getestet.
 # - 1.7: Originale Vorgangs-ID bei normalisierter Telefonanzeige abgesichert.
 # - 1.6.2: Auflegen nach vorhandener Aufnahme ohne falschpositiven IVR-Fehler getestet.
@@ -80,6 +81,53 @@ def test_field_recording_starts_immediately_after_prompt(app_config) -> None:
     ivr.call = ivr.spool.create_call(CallType.CALLBACK_DETAILS, None, "test")
     assert ivr._record_field(FieldName.FIRST_NAME, "first_name", "vorname.wav", long=False)
     assert channel.events == ["ansage", "aufnahme"]
+
+
+class SilentPersonalDataChannel:
+    environment = {"agi_callerid": "unknown"}
+
+    def __init__(self) -> None:
+        self.recorded: list[str] = []
+
+    def stream_file(self, _path: Path, _digits: str = "") -> None:
+        pass
+
+    def record(self, path: Path, *, silence_seconds: int, max_seconds: int) -> RecordingResult:
+        self.recorded.append(path.name)
+        if path.name == "grund.wav":
+            path.write_bytes(b"RIFF" + b"0" * 100)
+            return RecordingResult(path, "SILENCE", True)
+        return RecordingResult(path, "SILENCE", False)
+
+
+class HealthyRecordingIVR(IVR):
+    def _worker_healthy(self) -> bool:
+        return True
+
+
+def test_silent_personal_fields_do_not_skip_actual_concern(app_config) -> None:
+    channel = SilentPersonalDataChannel()
+    ivr = HealthyRecordingIVR(app_config, channel)  # type: ignore[arg-type]
+
+    ivr._record_structured(CallType.APPOINTMENT, "termin")
+
+    assert channel.recorded == [
+        "vorname.wav",
+        "nachname.wav",
+        "geburtsdatum.wav",
+        "telefon.wav",
+        "grund.wav",
+    ]
+    queued = next(iter(ivr.spool.calls(CallState.QUEUE)))
+    record = queued.load()
+    assert record["_kienzlefon"]["errors"] == []
+    assert [entry["status"] for entry in record["_kienzlefon"]["audio"]] == [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "recorded",
+    ]
 
 
 class HangupAfterRecordingIVR(IVR):

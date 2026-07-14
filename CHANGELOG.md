@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.2
+Version: 1.8.3
 Changelog:
+- 1.8.3: Leere Einzelfelder ohne Abbruch nachfolgender Transkriptionen verarbeitet.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und gesprochene Ansagetexte korrigiert.
 - 1.8.1: Gruppen-Schreibrecht der Telepraxis-Ausgabedateien korrigiert.
 - 1.8: Gewarnten Demomodus und Bereinigung vollstaendig leerer Abbrueche ergaenzt.
@@ -19,6 +20,15 @@ Changelog:
 -->
 
 # Changelog
+
+## 1.8.3
+
+- Vorname, Nachname, Geburtsdatum und gegebenenfalls Rueckrufnummer werden auch nach einem schweigend uebersprungenen Feld weiter abgefragt
+- das anschliessende Vorgangsfeld wird unabhaengig von fehlenden Personendaten aufgenommen
+- leere Einzelaufnahmen und leere Whisper-Transkripte gelten als fehlendes Feld, nicht als technischer Fehler
+- jede vorhandene Aufnahme wird der Reihe nach verarbeitet; ein leeres Feld blockiert keine spaetere Transkription
+- das normale Telepraxis-JSON enthaelt alle erkannten Inhalte und laesst nicht genannte Felder leer
+- fuer schweigend uebersprungene Felder entstehen keine wiederholten Fehlerdatensaetze
 
 ## 1.8.2
 

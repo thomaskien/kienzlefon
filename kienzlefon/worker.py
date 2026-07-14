@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Leere Einzeltranskripte uebersprungen, ohne spaetere Felder zu blockieren.
 # - 1.8: Konfigurierten Telepraxis-Demomodus an die Dateiausgabe angebunden.
 # - 1.6: Feldabhaengige Whisper-Modelle und Initial-Prompts dauerhaft geladen.
 # - 1.1: Einen von Whisper angehaengten abschliessenden Punkt entfernen.
@@ -157,7 +158,11 @@ class Worker:
                     self.transcriber.transcribe(audio_path, str(entry["feld"]))
                 )
                 if not transcript:
-                    raise RuntimeError(f"Leeres Whisper-Transkript: {entry['datei']}")
+                    entry["status"] = AudioStatus.EMPTY.value
+                    entry["transkribieren"] = False
+                    entry.pop("fehler", None)
+                    call.save(record)
+                    continue
                 entry["transkript"] = transcript
                 entry["status"] = AudioStatus.TRANSCRIBED.value
                 entry.pop("fehler", None)

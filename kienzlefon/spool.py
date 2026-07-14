@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Fehlende Sprachaufnahme als leeres Feld statt als Fehler markiert.
 # - 1.8: Sicheres Verwerfen vollstaendig leerer, fehlerfreier Aufnahmen ergaenzt.
 # - 1.0: Atomarer Ordner-Spool und verlustarme Vorgangsverwaltung eingefuehrt.
 
@@ -99,8 +100,11 @@ class WorkingCall:
         entry = self._audio_entry(record, filename)
         entry["aufnahme_status"] = status
         entry["datei_vorhanden"] = present
-        if status == "ERROR" or not present:
+        if status == "ERROR":
             entry["status"] = AudioStatus.ERROR.value
+            entry["transkribieren"] = False
+        elif not present:
+            entry["status"] = AudioStatus.EMPTY.value
             entry["transkribieren"] = False
         self.save(record)
 

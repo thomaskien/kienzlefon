@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 1.8.2
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Verlustfreie Teiltranskription bei leeren Einzelfeldern installiert.
 # - 1.8.2: Bereitschaftsdienst- und Ansagetextkorrekturen installiert.
 # - 1.8.1: Gruppenschreibbare Telepraxis-Ausgabe und passende Worker-Gruppe ergaenzt.
 # - 1.8: Gewarnten Demomodus ohne Public Key und unverschluesselte JSON-Ausgabe ergaenzt.
@@ -22,7 +23,7 @@
 
 set -Eeuo pipefail
 
-VERSION="1.8.2"
+VERSION="1.8.3"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -1135,9 +1136,10 @@ install_systemd_unit(){
   output_group="${group_record%%:*}"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
-# Version: 1.8.2
+# Version: 1.8.3
 # Changelog:
-# - 1.8.2: Diensteinheit unveraendert fuer Kienzlefon 1.8.2 uebernommen.
+# - 1.8.3: Diensteinheit unveraendert fuer Kienzlefon 1.8.3 uebernommen.
+# - 1.8.2: Diensteinheit fuer Kienzlefon 1.8.2 uebernommen.
 # - 1.8.1: Primaergruppe aus dem Ausgabeverzeichnis und UMask 0007 gesetzt.
 # - 1.8: Diensteinheit fuer Kienzlefon 1.8 aktualisiert.
 # - 1.7.1: Diensteinheit fuer Kienzlefon 1.7.1 aktualisiert.
@@ -1269,7 +1271,7 @@ main(){
   install_systemd_unit
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 1.8.2 ist installiert"
+  sep "Kienzlefon 1.8.3 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

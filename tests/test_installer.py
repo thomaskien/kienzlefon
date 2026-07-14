@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.2
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Installerfreigabe fuer Version 1.8.3 aktualisiert.
 # - 1.8.2: Installerfreigabe fuer Version 1.8.2 aktualisiert.
 # - 1.8.1: Dynamische Worker-Gruppe, UMask und Installerfreigabe getestet.
 # - 1.8: Demo-Warnung, Demo-TOML und Installerfreigabe fuer Version 1.8 getestet.
@@ -141,7 +142,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.8.2" in result.stdout
+    assert "Version: 1.8.3" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 

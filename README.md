@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.2
+Version: 1.8.3
 Changelog:
+- 1.8.3: Teiltranskription bei schweigend uebersprungenen Feldern dokumentiert.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und Ziffernaussprache dokumentiert.
 - 1.8.1: Gruppen-Schreibrecht der Telepraxis-Ausgabedateien dokumentiert.
 - 1.8: Gewarnten Demomodus und leere Abbruchbereinigung dokumentiert.
@@ -30,7 +31,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **1.8.2**
+Version: **1.8.3**
 
 ## Eigenschaften
 
@@ -43,6 +44,7 @@ Version: **1.8.2**
 - optionale interne Telefone ausserhalb der Queue
 - deutsche Rufnummernnormalisierung mit konfigurierbaren Sperrlisten
 - strukturierte WAV-Aufnahmen fuer Personen- und Vorgangsdaten
+- fehlende Einzelfelder blockieren keine spaeteren Aufnahmen oder Transkriptionen
 - `faster-whisper` mit getrennt konfigurierbaren Modellen fuer Namen,
   Medikamente und alle uebrigen Felder
 - dateibasierter, atomarer Ordner-Spool ohne Datenbank
@@ -52,7 +54,7 @@ Version: **1.8.2**
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine HTTP-Uebertragung und kein LLM in Version 1.8.2
+- keine HTTP-Uebertragung und kein LLM in Version 1.8.3
 
 ## Installation
 

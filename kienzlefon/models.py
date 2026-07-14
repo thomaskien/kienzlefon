@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.0
+# Version: 1.8.3
 # Changelog:
+# - 1.8.3: Leere Aufnahmen als eigenen, fehlerfreien Audiostatus abgebildet.
 # - 1.0: Datenmodelle fuer Aufnahmen, Status und Fehler eingefuehrt.
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ class CallState(StrEnum):
 class AudioStatus(StrEnum):
     RECORDED = "recorded"
     TRANSCRIBED = "transcribed"
+    EMPTY = "empty"
     ERROR = "error"
 
 
