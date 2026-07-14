@@ -20,10 +20,15 @@ Changelog:
 
 # kienzlefon
 
+
+<img src="https://github.com/thomaskien/kienzlefon/blob/main/kienzlefon.png?raw=true" alt="drawing" width="400" />
+
 `kienzlefon` ist ein konfigurationsgesteuertes Asterisk-Telefonsystem fuer
 Arztpraxen. Es setzt auf der Telefoniebasis von Kienzlefax auf, nimmt Angaben
 feldweise als WAV auf, transkribiert lokal mit Whisper und legt jeden Vorgang
 im Produktivmodus als verschluesselte Telepraxis-Datei ab.
+
+Demo-Server: https://kienzlefon.de
 
 Version: **1.8.2**
 
