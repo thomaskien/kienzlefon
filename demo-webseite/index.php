@@ -72,7 +72,7 @@ header('Content-Type: text/html; charset=utf-8');
 
     .header-inner {
       width: 100%;
-      height: 92px;
+      height: 72px;
       margin: 0;
       padding-right: max(20px, calc((100% - 1220px) / 2));
       display: flex;
@@ -82,11 +82,19 @@ header('Content-Type: text/html; charset=utf-8');
       overflow: hidden;
     }
 
+    .header-branding {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 18px;
+      flex: 0 1 auto;
+    }
+
     .brand {
       display: block;
-      width: min(240px, 21vw);
-      height: 76px;
-      flex: 0 1 auto;
+      width: 210px;
+      height: 71px;
+      flex: 0 0 210px;
       overflow: hidden;
       text-decoration: none;
       min-width: 0;
@@ -99,6 +107,17 @@ header('Content-Type: text/html; charset=utf-8');
       object-fit: cover;
       object-position: center 50%;
     }
+
+    .all-projects-link {
+      color: var(--ink-soft);
+      font-size: .9rem;
+      font-weight: 750;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .all-projects-link:hover,
+    .all-projects-link:focus-visible { color: var(--red); }
 
     .top-nav {
       display: flex;
@@ -477,8 +496,9 @@ header('Content-Type: text/html; charset=utf-8');
       }
 
       .brand {
-        width: min(240px, 76vw);
-        height: 68px;
+        width: 210px;
+        height: 71px;
+        flex-basis: 210px;
       }
 
       .top-nav {
@@ -494,6 +514,18 @@ header('Content-Type: text/html; charset=utf-8');
 
       .form-card { max-width: 720px; }
 
+    }
+
+    @media (max-width: 760px) {
+      .header-branding { gap: 8px; }
+
+      .brand {
+        width: 142px;
+        height: 64px;
+        flex-basis: 142px;
+      }
+
+      .all-projects-link { font-size: .82rem; }
     }
 
     @media (max-width: 620px) {
@@ -517,9 +549,12 @@ header('Content-Type: text/html; charset=utf-8');
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="https://kienzlebox.de/kienzlebox-frame.php?projekt=kienzlefon" aria-label="KIENZLEfon auf KIENZLEbox öffnen">
-        <img src="./kienzlefon.png" alt="KIENZLEfon" />
-      </a>
+      <div class="header-branding">
+        <a class="brand" href="https://kienzlebox.de/kienzlebox-frame.php?projekt=kienzlefon" aria-label="KIENZLEfon auf KIENZLEbox öffnen">
+          <img src="./kienzlefon.png" alt="KIENZLEfon" />
+        </a>
+        <a class="all-projects-link" href="https://kienzlebox.de/">Alle Projekte: kienzlebox.de</a>
+      </div>
 
       <nav class="top-nav" aria-label="Demo-Links">
         <a href="./inbox/">Gespeicherte JSON-Dateien</a>
