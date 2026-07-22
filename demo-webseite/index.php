@@ -838,8 +838,7 @@ setInterval(updateCpuWidget, 5000);
     function buildSummary(p) {
       const who = [p.vorname, p.nachname].filter(Boolean).join(" ").trim();
       const dob = p.geburtsdatum ? `Geburtsdatum ${p.geburtsdatum}` : "";
-      const tel = p.telefon ? `Rückrufnummer ${p.telefon}` : "";
-      const base = [who, dob, tel].filter(Boolean).join(", ");
+      const base = [who, dob].filter(Boolean).join(", ");
 
       let topic = "";
       if (p.typ === "rezeptbestellung") topic = `Rezeptwunsch: ${p.medikamente || ""}`.trim();

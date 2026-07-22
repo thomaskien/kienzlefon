@@ -194,6 +194,16 @@ function tp_normalize_phone(?string $value): string
     return $value;
 }
 
+function tp_phone_display(?string $value): string
+{
+    $value = trim((string)$value);
+    if (in_array($value, ['[Telefonnummer anonymisiert]', '#anonymisiert demo#', 'anonymisiert demo'], true)) {
+        return 'anonymisiert demo';
+    }
+
+    return tp_normalize_phone($value);
+}
+
 function tp_valid_tel_href(?string $value): string
 {
     $normalized = tp_normalize_phone($value);
@@ -535,13 +545,13 @@ function tp_build_entry_view(array $entry, string $fileName): array
         'person_copy' => $person['copy'],
         'body' => $body,
         'summary' => $summary,
-        'telephone_display' => tp_normalize_phone($displayPhoneRaw),
+        'telephone_display' => tp_phone_display($displayPhoneRaw),
         'telephone_href' => tp_valid_tel_href($displayPhoneRaw),
         'telephone_raw' => $displayPhoneRaw,
-        'sms_phone_display' => tp_normalize_phone($callbackPhoneRaw),
+        'sms_phone_display' => tp_phone_display($callbackPhoneRaw),
         'sms_phone_href' => tp_valid_tel_href($callbackPhoneRaw),
         'sms_phone_raw' => $callbackPhoneRaw,
-        'transmitted_phone_display' => tp_normalize_phone($transmittedPhoneRaw) !== '' ? tp_normalize_phone($transmittedPhoneRaw) : $transmittedPhoneRaw,
+        'transmitted_phone_display' => tp_phone_display($transmittedPhoneRaw) !== '' ? tp_phone_display($transmittedPhoneRaw) : $transmittedPhoneRaw,
         'transmitted_phone_href' => tp_valid_tel_href($transmittedPhoneRaw),
         'transmitted_phone_raw' => $transmittedPhoneRaw,
         'last_updated_at' => (string)($entry['app']['status_updated_at'] ?? ''),
