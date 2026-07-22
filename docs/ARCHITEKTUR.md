@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.1
+Version: 1.9.2
 Changelog:
+- 1.9.2: Erfolgreichen Nicht-Demo-Zweig der Updatekonfiguration dokumentiert.
 - 1.9.1: Fehlerfreie wav16-Vorpruefung vor dem Worker-Neustart dokumentiert.
 - 1.9: Ausgabeseitige Rufnummernanonymisierung des Demomodus dokumentiert.
 - 1.8.3: Unabhaengige Verarbeitung leerer und befuellter Einzelaufnahmen dokumentiert.

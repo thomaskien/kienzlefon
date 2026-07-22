@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.1
+Version: 1.9.2
 Changelog:
+- 1.9.2: Fehlerfreies Ueberspringen der Demo-Anonymisierung bei Produktivupdates dokumentiert.
 - 1.9.1: Wirksamwerden der Demo-Anonymisierung nach erfolgreichem Worker-Neustart dokumentiert.
 - 1.9: Optionale Rufnummernanonymisierung in Demoausgaben dokumentiert.
 - 1.8.3: Teiltranskription und leere Datenfelder ohne Fehlerdatensatz dokumentiert.
@@ -23,7 +24,7 @@ Changelog:
 
 # Telepraxis-Dateiformat
 
-Version 1.9.1 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
+Version 1.9.2 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
 direkt eine verschluesselte Datei im konfigurierten Kanalverzeichnis:
 
 ```text
@@ -37,7 +38,7 @@ Telepraxis-Transportdatensatz:
 {
   "received_at": "2026-07-11T11:46:58+02:00",
   "remote_ip": "",
-  "user_agent": "kienzlefon/1.9.1",
+  "user_agent": "kienzlefon/1.9.2",
   "typ": "termin",
   "payload": {
     "typ": "termin",
@@ -92,7 +93,8 @@ Audiodateien und Rufnummern innerhalb frei gesprochener Texte bleiben
 unveraendert. Im Produktivmodus ist diese Option unzulaessig. Nach einer
 Installer-Aenderung dieser Option startet Version 1.9.1 den Worker im
 erfolgreichen Installationslauf neu; erst der neu gestartete Prozess verwendet
-die geaenderte TOML-Einstellung.
+die geaenderte TOML-Einstellung. Version 1.9.2 ueberspringt diese Abfrage bei
+`demo = false` fehlerfrei und veraendert den Produktivmodus nicht.
 
 Jeder erkannte technische Fehler wird zusaetzlich als eigener Datensatz mit
 `typ = kienzlefon_error` im konfigurierten Ausgabemodus ausgegeben. Ist das Zielverzeichnis

@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Konfigurationsvorlage unveraendert fuer das Nicht-Demo-Update-Patchrelease uebernommen.
 # - 1.9.1: Konfigurationsvorlage unveraendert fuer das wav16-Installer-Patchrelease uebernommen.
 # - 1.9: Optionale Rufnummernanonymisierung fuer Demoausgaben ergaenzt.
 # - 1.8.2: Notrufnummern als Woerter und Geburtstag in Fallback-Ansagen gesetzt.

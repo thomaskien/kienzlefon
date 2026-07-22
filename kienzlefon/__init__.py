@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Releasekennung auf 1.9.2 angehoben.
 # - 1.9.1: Releasekennung auf 1.9.1 angehoben.
 # - 1.9: Releasekennung auf 1.9 angehoben.
 # - 1.8.3: Releasekennung auf 1.8.3 angehoben.
@@ -21,4 +22,4 @@
 
 """Kienzlefon Kernpaket."""
 
-__version__ = "1.9.1"
+__version__ = "1.9.2"

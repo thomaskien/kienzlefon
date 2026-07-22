@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Nicht-Demo-Updates ueberspringen die Demo-Anonymisierungsabfrage fehlerfrei.
 # - 1.9.1: Falschnegative Asterisk-wav16-Pruefung korrigiert und erfolgreichen Worker-Neustart wiederhergestellt.
 # - 1.9: Optionale Rufnummernanonymisierung fuer neue und bestehende Demo-Konfigurationen ergaenzt.
 # - 1.8.3: Verlustfreie Teiltranskription bei leeren Einzelfeldern installiert.
@@ -25,7 +26,7 @@
 
 set -Eeuo pipefail
 
-VERSION="1.9.1"
+VERSION="1.9.2"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -183,7 +184,7 @@ configure_demo_anonymization(){
   demo_mode="$(${VENV}/bin/python -c \
     'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' \
     "$CONFIG_FILE")"
-  [[ "$demo_mode" == "y" ]] || return
+  [[ "$demo_mode" == "y" ]] || return 0
   current="$(${VENV}/bin/python -c \
     'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("anrufernummern_anonymisieren", False) else "n")' \
     "$CONFIG_FILE")"
@@ -860,8 +861,9 @@ collect_configuration(){
   install -d -m 0755 "$CONFIG_DIR"
   "${VENV}/bin/python" - <<'PY'
 # kienzlefon installer config writer
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.1 uebernommen.
 # - 1.9: Optionale Demo-Anonymisierung sicher in die TOML-Konfiguration geschrieben.
 # - 1.8: Demo-Ausgabemodus und optional leeren Public-Key-Pfad sicher geschrieben.
@@ -1178,8 +1180,9 @@ install_systemd_unit(){
   output_group="${group_record%%:*}"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Diensteinheit unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Diensteinheit fuer den nach korrigierter Formatpruefung gestarteten Worker aktualisiert.
 # - 1.9: Diensteinheit unveraendert fuer Kienzlefon 1.9 uebernommen.
 # - 1.8.3: Diensteinheit fuer Kienzlefon 1.8.3 uebernommen.
@@ -1314,7 +1317,7 @@ main(){
   install_systemd_unit
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 1.9.1 ist installiert"
+  sep "Kienzlefon 1.9.2 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

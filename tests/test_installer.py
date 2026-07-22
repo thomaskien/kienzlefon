@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Demo- und Nicht-Demo-Zweig der Update-Anonymisierungsabfrage ausgefuehrt.
 # - 1.9.1: Asterisk-wav16-Pruefung ohne falschnegatives pipefail getestet.
 # - 1.9: Demo-Anonymisierung bei Neuinstallation und Updateabfrage getestet.
 # - 1.8.3: Installerfreigabe fuer Version 1.8.3 aktualisiert.
@@ -148,7 +149,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.9.1" in result.stdout
+    assert "Version: 1.9.2" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -160,6 +161,63 @@ def test_installer_contains_explicit_demo_warning_and_confirmation() -> None:
     assert "configure_demo_anonymization" in installer
     assert "Audiodateien und in Freitexten genannte Rufnummern" in installer
     assert 'if [[ "$KZF_DEMO_MODE" != "y" ]]; then' in installer
+
+
+def test_demo_anonymization_update_skips_non_demo_with_success(tmp_path: Path) -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = installer.index("configure_demo_anonymization(){")
+    end = installer.index("\n}\n", start) + 3
+    function = installer[start:end]
+    binary_directory = tmp_path / "bin"
+    binary_directory.mkdir()
+    python = binary_directory / "python"
+    python.write_text("#!/bin/sh\nprintf 'n\\n'\n", encoding="utf-8")
+    python.chmod(0o755)
+    migration = binary_directory / "kienzlefon-migration"
+    migration.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+    migration.chmod(0o755)
+    script = f"""set -Eeuo pipefail
+VENV={str(tmp_path)!r}
+CONFIG_FILE={str(tmp_path / 'kienzlefon.toml')!r}
+{function}
+configure_demo_anonymization
+"""
+
+    result = subprocess.run(["bash", "-c", script], check=False)
+
+    assert result.returncode == 0
+
+
+def test_demo_anonymization_update_runs_for_demo(tmp_path: Path) -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = installer.index("configure_demo_anonymization(){")
+    end = installer.index("\n}\n", start) + 3
+    function = installer[start:end]
+    binary_directory = tmp_path / "bin"
+    binary_directory.mkdir()
+    python = binary_directory / "python"
+    python.write_text("#!/bin/sh\nprintf 'y\\n'\n", encoding="utf-8")
+    python.chmod(0o755)
+    arguments = tmp_path / "migration-arguments"
+    migration = binary_directory / "kienzlefon-migration"
+    migration.write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {str(arguments)!r}\n",
+        encoding="utf-8",
+    )
+    migration.chmod(0o755)
+    script = f"""set -Eeuo pipefail
+VENV={str(tmp_path)!r}
+CONFIG_FILE={str(tmp_path / 'kienzlefon.toml')!r}
+SOURCE_TARGET={str(tmp_path)!r}
+ask_yes_no() {{ printf -v "$1" 'y'; }}
+{function}
+configure_demo_anonymization
+"""
+
+    result = subprocess.run(["bash", "-c", script], check=False)
+
+    assert result.returncode == 0
+    assert "--demo-anonymize\ntrue\n" in arguments.read_text(encoding="utf-8")
 
 
 def test_worker_uses_output_directory_group_and_restrictive_umask() -> None:

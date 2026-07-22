@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.9.1
+# Version: 1.9.2
 # Changelog:
+# - 1.9.2: Dynamische Telepraxis-Versionskennung auf 1.9.2 aktualisiert.
 # - 1.9.1: Dynamische Telepraxis-Versionskennung auf 1.9.1 aktualisiert.
 # - 1.9: Optionale Rufnummernanonymisierung fuer normale und Fehler-Demoausgaben getestet.
 # - 1.8.3: Dynamische Telepraxis-Versionskennung auf 1.8.3 aktualisiert.
@@ -70,7 +71,7 @@ def test_encrypted_file_decrypts_to_transport_record(app_config, private_key) ->
     assert hashlib.sha256(plaintext).hexdigest() == wrapper["sha256"]
     record = json.loads(plaintext)
     assert record["remote_ip"] == ""
-    assert record["user_agent"] == "kienzlefon/1.9.1"
+    assert record["user_agent"] == "kienzlefon/1.9.2"
     assert record["typ"] == "termin"
     assert record["payload"]["grund"] == "Termin am Montag"
     assert stat.S_IMODE(target.stat().st_mode) == 0o660
@@ -140,7 +141,7 @@ def test_demo_output_is_plain_transport_json_without_public_key(app_config) -> N
 
     assert target.name == "20260713_120000_000001.json"
     record = json.loads(target.read_text(encoding="utf-8"))
-    assert record["user_agent"] == "kienzlefon/1.9.1"
+    assert record["user_agent"] == "kienzlefon/1.9.2"
     assert record["typ"] == "termin"
     assert record["payload"]["grund"] == "Demonstration"
     assert not (target.parent / "20260713_120000_000001.json.enc").exists()

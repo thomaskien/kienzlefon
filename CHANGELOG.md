@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.1
+Version: 1.9.2
 Changelog:
+- 1.9.2: Abbruch bestehender Nicht-Demo-Installationen bei der Updateabfrage korrigiert.
 - 1.9.1: Falschnegative Asterisk-wav16-Pruefung des Installers korrigiert.
 - 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben ergaenzt.
 - 1.8.3: Leere Einzelfelder ohne Abbruch nachfolgender Transkriptionen verarbeitet.
@@ -22,6 +23,13 @@ Changelog:
 -->
 
 # Changelog
+
+## 1.9.2
+
+- bestehende Nicht-Demo-Konfigurationen ueberspringen die Demo-Anonymisierungsabfrage mit Rueckgabestatus `0`
+- der Installer setzt danach Verzeichnis-, Modell-, Ansagen-, Asterisk- und Worker-Installation regulaer fort
+- bestehende Demo-Konfigurationen fragen die optionale Anonymisierung weiterhin mit dem bisherigen Wert als Vorgabe ab
+- Laufzeittests decken beide Updatezweige ab
 
 ## 1.9.1
 
