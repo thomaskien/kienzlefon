@@ -1,8 +1,12 @@
 <?php
 // telepraxis-receive.php – offene Demo-Version
+// Version: 1.9
+// Changelog:
+// - 1.9: Telefonnummern und Caller-IDs vor der unverschluesselten Demoablage anonymisiert.
 // IONOS: static PSK via Header X-TP-Token (kein Rate-Limit)
 // Webformular: id == "web-formular" -> OTP (1 Tag, 1x) + Rate-Limit 20/10min
 // Speichert jede Anfrage als einzelne UNVERSCHLÜSSELTE JSON-Datei nach ./inbox/
+// Telefonnummern und Caller-IDs werden vor dem Speichern anonymisiert.
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -24,6 +28,112 @@ $WEB_RL_WINDOW_SEC = 10 * 60;
 function scalar_str($v) {
     if (is_array($v) || is_object($v)) return '';
     return trim((string)$v);
+}
+
+function looks_like_phone_number($value) {
+    if (is_array($value) || is_object($value) || is_bool($value) || $value === null) {
+        return false;
+    }
+
+    $digits = preg_replace('/\D+/', '', (string)$value);
+    return is_string($digits) && strlen($digits) >= 7;
+}
+
+function is_phone_field($key, $value = null) {
+    $normalized = strtolower((string)$key);
+    $normalized = preg_replace('/[^a-z0-9]/', '', $normalized);
+    if (!is_string($normalized) || $normalized === '') return false;
+
+    // IONOS verwendet id als Caller-ID; web-formular und andere Text-IDs bleiben erhalten.
+    if ($normalized === 'id') return looks_like_phone_number($value);
+
+    if (in_array($normalized, array('tel', 'telefon', 'telephone', 'phone', 'mobil', 'mobile', 'handy', 'fax', 'ani'), true)) {
+        return true;
+    }
+
+    foreach (array('telefon', 'telephone', 'phone', 'rufnummer', 'caller', 'anrufer', 'callback', 'mobilnummer', 'handynummer', 'faxnummer') as $marker) {
+        if (strpos($normalized, $marker) !== false) return true;
+    }
+
+    return false;
+}
+
+function collect_phone_values($value, &$phoneValues, $key = '', $phoneContext = false) {
+    $phoneContext = $phoneContext || is_phone_field($key, $value);
+
+    if (is_array($value)) {
+        foreach ($value as $childKey => $childValue) {
+            collect_phone_values($childValue, $phoneValues, $childKey, $phoneContext);
+        }
+        return;
+    }
+
+    if (!$phoneContext || is_object($value) || is_bool($value) || $value === null) return;
+
+    $phoneValue = trim((string)$value);
+    if ($phoneValue !== '') $phoneValues[] = $phoneValue;
+}
+
+function is_free_text_field($key) {
+    $normalized = strtolower((string)$key);
+    $normalized = preg_replace('/[^a-z0-9]/', '', $normalized);
+    if (!is_string($normalized)) return false;
+
+    return in_array($normalized, array(
+        'zusammenfassung', 'summary', 'anliegen', 'grund', 'reason', 'message',
+        'nachricht', 'text', 'comment', 'kommentar', 'description', 'beschreibung',
+        'notes', 'notiz'
+    ), true);
+}
+
+function anonymize_phone_patterns($text) {
+    $anonymized = preg_replace_callback(
+        '/(?<![\p{L}\p{N}])(?:\+|00)?\d(?:[ \t()\/.\-]*\d){6,}(?![\p{L}\p{N}])/u',
+        function ($match) {
+            $candidate = trim($match[0]);
+            $compact = preg_replace('/[ \t()]+/', '', $candidate);
+
+            // Datumsangaben sind keine Telefonnummern und bleiben lesbar.
+            if (is_string($compact) && preg_match('/^(?:\d{1,2}[.\/-]\d{1,2}[.\/-](?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})$/', $compact)) {
+                return $match[0];
+            }
+
+            return '#anonymisiert demo#';
+        },
+        (string)$text
+    );
+
+    return is_string($anonymized) ? $anonymized : (string)$text;
+}
+
+function anonymize_phone_data($value, $phoneValues, $key = '', $phoneContext = false) {
+    $phoneContext = $phoneContext || is_phone_field($key, $value);
+
+    if (is_array($value)) {
+        $result = array();
+        foreach ($value as $childKey => $childValue) {
+            $result[$childKey] = anonymize_phone_data($childValue, $phoneValues, $childKey, $phoneContext);
+        }
+        return $result;
+    }
+
+    if ($phoneContext) {
+        if ($value === null || trim((string)$value) === '') return $value;
+        return '#anonymisiert demo#';
+    }
+
+    if (!is_string($value)) return $value;
+
+    $anonymized = $value;
+    foreach ($phoneValues as $phoneValue) {
+        $anonymized = str_replace($phoneValue, '#anonymisiert demo#', $anonymized);
+    }
+
+    if (is_free_text_field($key)) {
+        $anonymized = anonymize_phone_patterns($anonymized);
+    }
+
+    return $anonymized;
 }
 
 function json_out($code, $arr) {
@@ -174,6 +284,16 @@ if ($isWeb) {
     $events[] = $now;
     @file_put_contents($rlFile, json_encode(array('events' => $events)), LOCK_EX);
 }
+
+// Telefonnummern erst nach der Authentifizierung und OTP-Prüfung anonymisieren,
+// dann ausschließlich die bereinigten Nutzdaten in die öffentliche Inbox schreiben.
+$phoneValues = array();
+collect_phone_values($data, $phoneValues);
+$phoneValues = array_values(array_unique($phoneValues));
+usort($phoneValues, function ($a, $b) {
+    return strlen($b) - strlen($a);
+});
+$data = anonymize_phone_data($data, $phoneValues);
 
 // --- Inbox schreiben ---
 if (!is_dir($INBOX_DIR)) {
