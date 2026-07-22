@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.2
+Version: 1.9.3
 Changelog:
+- 1.9.3: Unterdrueckung vollstaendig inhaltsloser fehlerfreier Telepraxis-Eintraege dokumentiert.
 - 1.9.2: Fehlerfreie Updates bestehender Nicht-Demo-Konfigurationen dokumentiert.
 - 1.9.1: Korrigierte Asterisk-wav16-Installationspruefung dokumentiert.
 - 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben dokumentiert.
@@ -34,7 +35,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **1.9.2**
+Version: **1.9.3**
 
 ## Eigenschaften
 
@@ -58,7 +59,7 @@ Version: **1.9.2**
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine HTTP-Uebertragung und kein LLM in Version 1.9.2
+- keine HTTP-Uebertragung und kein LLM in Version 1.9.3
 
 ## Installation
 
@@ -103,6 +104,9 @@ Version 1.9.1 prueft das fuer breitbandige Telefonaufnahmen erforderliche
 `wav16`-Format ohne einen falschnegativen Abbruch durch Bash-`pipefail`.
 Version 1.9.2 ueberspringt die nur fuer Demo-Konfigurationen vorgesehene
 Anonymisierungsabfrage bei Produktivkonfigurationen mit erfolgreichem Status.
+Version 1.9.3 erzeugt fuer einen fehlerfreien Anruf ohne ein einziges nicht
+leeres Whisper-Transkript keinen Telepraxis-Eintrag. Caller-ID, IVR-Kategorie
+und leere WAV-Dateien gelten dabei nicht als Inhalt.
 
 ## Konfiguration
 

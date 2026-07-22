@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Vollstaendig inhaltslose fehlerfreie Vorgaenge ohne Telepraxis-Datei abgeschlossen.
 # - 1.9: Konfigurierte Demo-Anonymisierung an die Dateiausgabe uebergeben.
 # - 1.8.3: Leere Einzeltranskripte uebersprungen, ohne spaetere Felder zu blockieren.
 # - 1.8: Konfigurierten Telepraxis-Demomodus an die Dateiausgabe angebunden.
@@ -173,6 +174,14 @@ class Worker:
 
             self._apply_transcripts(record)
             call.save(record)
+            if not record["_kienzlefon"]["errors"] and not self._has_transcribed_content(record):
+                self.spool.transition(call, CallState.READY)
+                self.heartbeat.set_ready(True)
+                LOGGER.info(
+                    "Vorgang %s ohne erkannten Inhalt ohne Telepraxis-Ausgabe abgeschlossen",
+                    call.call_id,
+                )
+                return
             report_call_errors(call, self.encryptor)
             self.encryptor.write_payload(record, call.call_id)
             self.spool.transition(call, CallState.READY)
@@ -249,6 +258,14 @@ class Worker:
                     LOGGER.exception(
                         "Vorgang %s konnte nicht erneut eingereiht werden", call.call_id
                     )
+
+    @staticmethod
+    def _has_transcribed_content(record: dict[str, Any]) -> bool:
+        return any(
+            entry.get("status") == AudioStatus.TRANSCRIBED.value
+            and bool(clean_transcript(str(entry.get("transkript", ""))))
+            for entry in record["_kienzlefon"]["audio"]
+        )
 
     @staticmethod
     def _apply_transcripts(record: dict[str, Any]) -> None:

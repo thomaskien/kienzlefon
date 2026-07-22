@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.3
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Vollstaendig leere Transkriptionen ohne Telepraxis-Ausgabe getestet.
 # - 1.8.3: Leere Personentranskripte blockieren ein langes Anliegen nicht mehr.
 # - 1.6: Feldbezogene Modellwahl, Mehrmodell-Ladung und Initial-Prompts getestet.
 # - 1.1: Entfernung genau eines abschliessenden Whisper-Punkts getestet.
@@ -141,6 +142,67 @@ def test_silent_personal_transcripts_do_not_block_reason_or_report_errors(app_co
     ]
     assert (app_config.telepraxis.output_directory / f"{call.call_id}.json.enc").is_file()
     assert not list(app_config.telepraxis.output_directory.glob("*_error_*.json.enc"))
+
+
+def test_fully_silent_call_does_not_create_telepraxis_output(app_config) -> None:
+    class SilentTranscriber:
+        def transcribe(self, _path: Path, _field: FieldName | str) -> str:
+            return ""
+
+    spool = Spool(app_config.paths.spool, app_config.practice.timezone)
+    call = spool.create_call(CallType.PRESCRIPTION, "+4923311234", "rezept")
+    for field, filename, present in (
+        (FieldName.FIRST_NAME, "vorname.wav", False),
+        (FieldName.LAST_NAME, "nachname.wav", True),
+        (FieldName.BIRTH_DATE, "geburtsdatum.wav", False),
+        (FieldName.MEDICATION, "medikament-01.wav", True),
+    ):
+        audio = call.begin_audio(field, filename)
+        if present:
+            audio.write_bytes(b"RIFF" + b"0" * 100)
+        call.set_audio_record_status(filename, "DTMF", present)
+    queued = spool.finish_recording(call, "aufgelegt_oder_abgebrochen")
+    claimed = spool.claim_next()
+    assert claimed is not None
+
+    Worker(app_config, transcriber=SilentTranscriber()).process(
+        WorkingCall(claimed.path, app_config.practice.timezone)
+    )
+
+    ready = next(iter(spool.calls(CallState.READY)))
+    record = ready.load()
+    assert ready.call_id == queued.call_id
+    assert record["_kienzlefon"]["errors"] == []
+    assert record["_kienzlefon"]["status"] == CallState.READY.value
+    assert [entry["status"] for entry in record["_kienzlefon"]["audio"]] == [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+    ]
+    assert not app_config.telepraxis.output_directory.exists()
+
+
+def test_fully_silent_call_with_technical_error_is_still_reported(app_config) -> None:
+    class SilentTranscriber:
+        def transcribe(self, _path: Path, _field: FieldName | str) -> str:
+            return ""
+
+    spool = Spool(app_config.paths.spool, app_config.practice.timezone)
+    call = spool.create_call(CallType.PRESCRIPTION, "+4923311234", "rezept")
+    audio = call.begin_audio(FieldName.MEDICATION, "medikament-01.wav")
+    audio.write_bytes(b"RIFF" + b"0" * 100)
+    call.set_audio_record_status("medikament-01.wav", "DTMF", True)
+    call.add_error("TEST_ERROR", "test", "Technischer Testfehler")
+    spool.finish_recording(call, "aufgelegt_oder_abgebrochen")
+    claimed = spool.claim_next()
+    assert claimed is not None
+
+    Worker(app_config, transcriber=SilentTranscriber()).process(
+        WorkingCall(claimed.path, app_config.practice.timezone)
+    )
+
+    assert len(list(app_config.telepraxis.output_directory.glob("*_error_*.json.enc"))) == 1
 
 
 def test_output_failure_marks_worker_unready_and_keeps_call(app_config) -> None:

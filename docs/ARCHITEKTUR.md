@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.2
+Version: 1.9.3
 Changelog:
+- 1.9.3: Worker-Abschluss ohne Telepraxis-Datei fuer vollstaendig leere Anrufe dokumentiert.
 - 1.9.2: Erfolgreichen Nicht-Demo-Zweig der Updatekonfiguration dokumentiert.
 - 1.9.1: Fehlerfreie wav16-Vorpruefung vor dem Worker-Neustart dokumentiert.
 - 1.9: Ausgabeseitige Rufnummernanonymisierung des Demomodus dokumentiert.
@@ -40,6 +41,9 @@ Innerhalb eines Vorgangs werden die Audiodateien unabhaengig voneinander
 verarbeitet. Eine Aufnahme ohne erkannten Text erhaelt den fehlerfreien Status
 `empty`; nachfolgende Aufnahmen werden weiterhin transkribiert. Erfolgreiche
 Transkripte werden in das normale JSON uebernommen, fehlende Felder bleiben leer.
+Enthaelt ein fehlerfreier Vorgang nach Verarbeitung aller Aufnahmen kein einziges
+nicht leeres Transkript, wird er intern als `ready` abgeschlossen, ohne eine
+Telepraxis-Datei zu erzeugen.
 
 Vor- und Nachnamen werden mit `language="de"`, `task="transcribe"`,
 `beam_size=5` und ihrem jeweiligen editierbaren Initial-Prompt transkribiert.

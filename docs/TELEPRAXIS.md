@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.2
+Version: 1.9.3
 Changelog:
+- 1.9.3: Keine Telepraxis-Datei fuer vollstaendig inhaltslose fehlerfreie Anrufe dokumentiert.
 - 1.9.2: Fehlerfreies Ueberspringen der Demo-Anonymisierung bei Produktivupdates dokumentiert.
 - 1.9.1: Wirksamwerden der Demo-Anonymisierung nach erfolgreichem Worker-Neustart dokumentiert.
 - 1.9: Optionale Rufnummernanonymisierung in Demoausgaben dokumentiert.
@@ -24,7 +25,7 @@ Changelog:
 
 # Telepraxis-Dateiformat
 
-Version 1.9.2 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
+Version 1.9.3 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
 direkt eine verschluesselte Datei im konfigurierten Kanalverzeichnis:
 
 ```text
@@ -38,7 +39,7 @@ Telepraxis-Transportdatensatz:
 {
   "received_at": "2026-07-11T11:46:58+02:00",
   "remote_ip": "",
-  "user_agent": "kienzlefon/1.9.2",
+  "user_agent": "kienzlefon/1.9.3",
   "typ": "termin",
   "payload": {
     "typ": "termin",
@@ -61,6 +62,14 @@ Telefone vorgenommene Anzeigeformatierung veraendert diesen Wert nicht.
 Schweigend uebersprungene Felder bleiben als leere Zeichenketten im normalen
 Payload. Sie sind kein technischer Fehler. Alle weiteren Audiodateien desselben
 Vorgangs werden trotzdem transkribiert und in ihre festgelegten Felder geschrieben.
+
+Ergibt keine einzige vorhandene Aufnahme ein nicht leeres Whisper-Transkript
+und enthaelt der Vorgang keinen technischen Fehler, erzeugt der Worker keine
+Telepraxis-Datei. Caller-ID, IVR-Kategorie, die Standardzusammenfassung und
+technisch vorhandene stille WAV-Dateien gelten nicht als fachlicher Inhalt.
+Der Vorgang wird intern als verarbeitet abgeschlossen. Sobald mindestens ein
+Transkript vorhanden ist, wird das normale JSON mit den uebrigen leeren Feldern
+ausgegeben. Technische Fehler werden weiterhin immer gemeldet.
 
 Die aeussere Datei ist kompatibel zur Referenzfunktion `openssl_seal()`:
 

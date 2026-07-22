@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.2
+Version: 1.9.3
 Changelog:
+- 1.9.3: Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe unterdrueckt.
 - 1.9.2: Abbruch bestehender Nicht-Demo-Installationen bei der Updateabfrage korrigiert.
 - 1.9.1: Falschnegative Asterisk-wav16-Pruefung des Installers korrigiert.
 - 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben ergaenzt.
@@ -23,6 +24,14 @@ Changelog:
 -->
 
 # Changelog
+
+## 1.9.3
+
+- nach Abschluss aller Whisper-Auftraege wird geprueft, ob mindestens ein nicht leeres Transkript vorliegt
+- Caller-ID, IVR-Kategorie, Standardzusammenfassung und technisch vorhandene stille WAV-Dateien gelten nicht als Inhalt
+- vollstaendig inhaltslose fehlerfreie Vorgaenge werden intern als `ready` abgeschlossen, ohne eine Telepraxis-Datei zu erzeugen
+- jedes vorhandene Teiltranskript fuehrt weiterhin zur normalen Ausgabe mit leeren uebrigen Feldern
+- technische Fehlerausgaben und bestehende Fehlerwege bleiben unveraendert
 
 ## 1.9.2
 

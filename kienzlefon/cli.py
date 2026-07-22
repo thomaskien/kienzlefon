@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.2
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Migrationsausgabe auf Patchrelease 1.9.3 aktualisiert.
 # - 1.9.2: Migrationsausgabe auf Patchrelease 1.9.2 aktualisiert.
 # - 1.9.1: Migrationsausgabe auf Patchrelease 1.9.1 aktualisiert.
 # - 1.9: Demo-Anonymisierung in Konfigurationspruefung und Status aufgenommen.
@@ -321,7 +322,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 1.9.2 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 1.9.3 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -348,4 +349,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 1.9.2 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 1.9.3 ergaenzt: {target}")

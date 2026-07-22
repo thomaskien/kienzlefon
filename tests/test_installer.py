@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.9.2
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Installerfreigabe fuer die Leeranrufunterdrueckung aktualisiert.
 # - 1.9.2: Demo- und Nicht-Demo-Zweig der Update-Anonymisierungsabfrage ausgefuehrt.
 # - 1.9.1: Asterisk-wav16-Pruefung ohne falschnegatives pipefail getestet.
 # - 1.9: Demo-Anonymisierung bei Neuinstallation und Updateabfrage getestet.
@@ -149,7 +150,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.9.2" in result.stdout
+    assert "Version: 1.9.3" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 

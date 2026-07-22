@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 1.9.2
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Worker ohne Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe installiert.
 # - 1.9.2: Nicht-Demo-Updates ueberspringen die Demo-Anonymisierungsabfrage fehlerfrei.
 # - 1.9.1: Falschnegative Asterisk-wav16-Pruefung korrigiert und erfolgreichen Worker-Neustart wiederhergestellt.
 # - 1.9: Optionale Rufnummernanonymisierung fuer neue und bestehende Demo-Konfigurationen ergaenzt.
@@ -26,7 +27,7 @@
 
 set -Eeuo pipefail
 
-VERSION="1.9.2"
+VERSION="1.9.3"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -861,8 +862,9 @@ collect_configuration(){
   install -d -m 0755 "$CONFIG_DIR"
   "${VENV}/bin/python" - <<'PY'
 # kienzlefon installer config writer
-# Version: 1.9.2
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.3 uebernommen.
 # - 1.9.2: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.1 uebernommen.
 # - 1.9: Optionale Demo-Anonymisierung sicher in die TOML-Konfiguration geschrieben.
@@ -1180,8 +1182,9 @@ install_systemd_unit(){
   output_group="${group_record%%:*}"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
-# Version: 1.9.2
+# Version: 1.9.3
 # Changelog:
+# - 1.9.3: Diensteinheit fuer den Worker mit Leeranrufunterdrueckung aktualisiert.
 # - 1.9.2: Diensteinheit unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Diensteinheit fuer den nach korrigierter Formatpruefung gestarteten Worker aktualisiert.
 # - 1.9: Diensteinheit unveraendert fuer Kienzlefon 1.9 uebernommen.
@@ -1317,7 +1320,7 @@ main(){
   install_systemd_unit
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 1.9.2 ist installiert"
+  sep "Kienzlefon 1.9.3 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
