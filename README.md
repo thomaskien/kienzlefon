@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.3
+Version: 1.9
 Changelog:
+- 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben dokumentiert.
 - 1.8.3: Teiltranskription bei schweigend uebersprungenen Feldern dokumentiert.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und Ziffernaussprache dokumentiert.
 - 1.8.1: Gruppen-Schreibrecht der Telepraxis-Ausgabedateien dokumentiert.
@@ -31,7 +32,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **1.8.3**
+Version: **1.9**
 
 ## Eigenschaften
 
@@ -50,11 +51,12 @@ Version: **1.8.3**
 - dateibasierter, atomarer Ordner-Spool ohne Datenbank
 - OpenSSL-kompatible `AES-256-CBC`/RSA-Ausgabe als `*.json.enc`
 - ausdruecklich zu bestaetigender Demomodus mit unverschluesselter `*.json`-Ausgabe
+- optionale Anonymisierung von `id` und `telefon` in Demo-JSONs
 - lokale Piper-TTS-Ansagen in WAV, SLN16, G.722, A-law und mu-law
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine HTTP-Uebertragung und kein LLM in Version 1.8.3
+- keine HTTP-Uebertragung und kein LLM in Version 1.9
 
 ## Installation
 
@@ -72,7 +74,10 @@ Praxisname, Zeitprofile, Telepraxis-Kanal, Ausgabemodus, die Nutzung eines roten
 Telefons und optionale direkte externe Rufnummern interaktiv ab. Im normalen
 Produktivmodus wird zusaetzlich der Public Key abgefragt. Der Demo-Modus legt
 alle Daten unverschluesselt ab und darf auf keinen Fall mit echten
-Patientendaten verwendet werden. Seit Version 1.6 werden die
+Patientendaten verwendet werden. Optional ersetzt Version 1.9 in den
+ausgegebenen Demo-JSONs die Felder `id` und `telefon` durch `#anonymisiert demo#`.
+Audiodateien und in Freitexten genannte Rufnummern werden dadurch nicht
+veraendert. Seit Version 1.6 werden die
 Whisper-Modelle fuer Namen, Medikamente und alle uebrigen Aufnahmen getrennt ab.
 `large-v3-turbo` ist etwa dreimal so schnell und speichersparender;
 `large-v3` kann bei Eigennamen genauer sein.

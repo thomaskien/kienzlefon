@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.2
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Rufnummernanonymisierung fuer Demoausgaben ergaenzt.
 # - 1.8.2: Notrufnummern als Woerter und Geburtstag in Fallback-Ansagen gesetzt.
 # - 1.8.1: Konfigurationsvorlage unveraendert fuer das Rechte-Patchrelease uebernommen.
 # - 1.8: Expliziten, standardmaessig deaktivierten Telepraxis-Demomodus ergaenzt.
@@ -72,6 +73,7 @@ maximale_versuche = 3
 kanal = "dahl"
 ausgabeverzeichnis = "/srv/telepraxis/dahl/inbox"
 demo = false
+anrufernummern_anonymisieren = false
 public_key = "/etc/kienzlefon/telepraxis-public.pem"
 
 [tts]

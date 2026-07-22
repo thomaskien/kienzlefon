@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
+# - 1.9: Konfigurierte Demo-Anonymisierung an die Dateiausgabe uebergeben.
 # - 1.8.3: Leere Einzeltranskripte uebersprungen, ohne spaetere Felder zu blockieren.
 # - 1.8: Konfigurierten Telepraxis-Demomodus an die Dateiausgabe angebunden.
 # - 1.6: Feldabhaengige Whisper-Modelle und Initial-Prompts dauerhaft geladen.
@@ -91,6 +92,7 @@ class Worker:
             config.telepraxis.output_directory,
             config.practice.timezone,
             demo_mode=config.telepraxis.demo,
+            anonymize_phone_numbers=config.telepraxis.anonymize_phone_numbers,
         )
         self.transcriber = transcriber
         self.stop_event = threading.Event()

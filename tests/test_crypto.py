@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Rufnummernanonymisierung fuer normale und Fehler-Demoausgaben getestet.
 # - 1.8.3: Dynamische Telepraxis-Versionskennung auf 1.8.3 aktualisiert.
 # - 1.8.2: Dynamische Telepraxis-Versionskennung auf 1.8.2 aktualisiert.
 # - 1.8.1: Modus 0660 und Zielverzeichnisgruppe der Telepraxis-Ausgabe getestet.
@@ -68,7 +69,7 @@ def test_encrypted_file_decrypts_to_transport_record(app_config, private_key) ->
     assert hashlib.sha256(plaintext).hexdigest() == wrapper["sha256"]
     record = json.loads(plaintext)
     assert record["remote_ip"] == ""
-    assert record["user_agent"] == "kienzlefon/1.8.3"
+    assert record["user_agent"] == "kienzlefon/1.9"
     assert record["typ"] == "termin"
     assert record["payload"]["grund"] == "Termin am Montag"
     assert stat.S_IMODE(target.stat().st_mode) == 0o660
@@ -138,7 +139,7 @@ def test_demo_output_is_plain_transport_json_without_public_key(app_config) -> N
 
     assert target.name == "20260713_120000_000001.json"
     record = json.loads(target.read_text(encoding="utf-8"))
-    assert record["user_agent"] == "kienzlefon/1.8.3"
+    assert record["user_agent"] == "kienzlefon/1.9"
     assert record["typ"] == "termin"
     assert record["payload"]["grund"] == "Demonstration"
     assert not (target.parent / "20260713_120000_000001.json.enc").exists()
@@ -167,6 +168,66 @@ def test_demo_output_is_plain_transport_json_without_public_key(app_config) -> N
     error_target = writer.write_payload(error_payload, "demo_error")
     assert error_target.suffix == ".json"
     assert json.loads(error_target.read_text(encoding="utf-8"))["typ"] == "kienzlefon_error"
+
+
+def test_demo_output_optionally_anonymizes_phone_fields_only(app_config) -> None:
+    writer = TelepraxisEncryptor(
+        None,
+        app_config.telepraxis.output_directory,
+        app_config.practice.timezone,
+        demo_mode=True,
+        anonymize_phone_numbers=True,
+    )
+    payload = {
+        "typ": "termin",
+        "id": "+4923311234",
+        "telefon": "023311234",
+        "grund": "Rueckruf unter 023315678",
+    }
+
+    target = writer.write_payload(payload, "anonymous-demo")
+    record = json.loads(target.read_text(encoding="utf-8"))
+
+    assert record["payload"]["id"] == "#anonymisiert demo#"
+    assert record["payload"]["telefon"] == "#anonymisiert demo#"
+    assert record["payload"]["grund"] == "Rueckruf unter 023315678"
+    assert payload["id"] == "+4923311234"
+    assert payload["telefon"] == "023311234"
+
+    error_payload = writer.error_payload(
+        call_id="anonymous-demo",
+        caller_id="+4923311234",
+        phone="023311234",
+        source_type="termin",
+        error={
+            "code": "TEST_ERROR",
+            "phase": "test",
+            "meldung": "Demofehler",
+            "zeit": "2026-07-22T12:00:01+02:00",
+        },
+    )
+    error_target = writer.write_payload(error_payload, "anonymous-demo-error")
+    error_record = json.loads(error_target.read_text(encoding="utf-8"))
+    assert error_record["payload"]["id"] == "#anonymisiert demo#"
+    assert error_record["payload"]["telefon"] == "#anonymisiert demo#"
+
+
+def test_productive_output_never_uses_demo_anonymization(app_config) -> None:
+    writer = TelepraxisEncryptor(
+        app_config.telepraxis.public_key,
+        app_config.telepraxis.output_directory,
+        app_config.practice.timezone,
+        anonymize_phone_numbers=True,
+    )
+
+    record = json.loads(
+        writer.build_plaintext_record(
+            {"typ": "termin", "id": "+4923311234", "telefon": "023311234"}
+        )
+    )
+
+    assert record["payload"]["id"] == "+4923311234"
+    assert record["payload"]["telefon"] == "023311234"
 
 
 def test_corrupt_existing_demo_output_is_not_silently_accepted(app_config) -> None:

@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.2
+# Version: 1.9
 # Changelog:
+# - 1.9: Fehlende Demo-Anonymisierung ergaenzt und boolesche Werte sicher aktualisiert.
 # - 1.8.2: Freigegebene Notruf- und Fallback-Standardtexte konservativ aktualisiert.
 # - 1.8: Fehlenden Telepraxis-Demomodus konservativ aus der Vorlage ergaenzt.
 # - 1.7: Fehlende Rottelefon- und Sonderqueue-Werte konservativ ergaenzt.
@@ -135,6 +136,25 @@ def set_string(target: Path, section: str, key: str, value: str) -> None:
         re.M | re.S,
     )
     updated, count = pattern.subn(rf'\g<1>"{escaped}"', text, count=1)
+    if count != 1:
+        raise ValueError(f"TOML-Feld fehlt nach Migration: [{section}].{key}")
+    temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
+    try:
+        temporary.write_text(updated, encoding="utf-8")
+        os.chmod(temporary, target.stat().st_mode & 0o777)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def set_boolean(target: Path, section: str, key: str, value: bool) -> None:
+    text = target.read_text(encoding="utf-8")
+    pattern = re.compile(
+        rf"(^\[{re.escape(section)}\]\n(?:(?!^\[).)*?^{re.escape(key)}\s*=\s*)[^\n]*$",
+        re.M | re.S,
+    )
+    literal = "true" if value else "false"
+    updated, count = pattern.subn(rf"\g<1>{literal}", text, count=1)
     if count != 1:
         raise ValueError(f"TOML-Feld fehlt nach Migration: [{section}].{key}")
     temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")

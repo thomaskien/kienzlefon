@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
+# - 1.9: Demo-Anonymisierung bei Neuinstallation und Updateabfrage getestet.
 # - 1.8.3: Installerfreigabe fuer Version 1.8.3 aktualisiert.
 # - 1.8.2: Installerfreigabe fuer Version 1.8.2 aktualisiert.
 # - 1.8.1: Dynamische Worker-Gruppe, UMask und Installerfreigabe getestet.
@@ -55,6 +56,7 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
             "KZF_CHANNEL": "dahl",
             "KZF_OUTPUT_DIR": "/srv/telepraxis/dahl/inbox",
             "KZF_DEMO_MODE": "n",
+            "KZF_DEMO_ANONYMIZE": "n",
             "KZF_TTS_VOICE": "de_DE-thorsten-high",
             "KZF_TTS_LENGTH_SCALE": "1.4",
             "KZF_TTS_SENTENCE_SILENCE": "0.9",
@@ -113,6 +115,7 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
     assert result["whisper"]["modell_namen"] == "large-v3"
     assert result["whisper"]["modell_medikamente"] == "large-v3-turbo"
     assert result["telepraxis"]["demo"] is False
+    assert result["telepraxis"]["anrufernummern_anonymisieren"] is False
     assert result["telepraxis"]["public_key"] == str(tmp_path / "public.pem")
     assert result["ivr"]["ansage_pause_ms"] == 750
     assert result["ivr"]["rotes_telefon_klingeldauer_sekunden"] == 25
@@ -124,10 +127,12 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
     assert "pin" not in result["ansagen_ivr"]
 
     environment["KZF_DEMO_MODE"] = "y"
+    environment["KZF_DEMO_ANONYMIZE"] = "y"
     subprocess.run([os.sys.executable, str(writer)], check=True, env=environment)
     with target.open("rb") as handle:
         demo_result = tomllib.load(handle)
     assert demo_result["telepraxis"]["demo"] is True
+    assert demo_result["telepraxis"]["anrufernummern_anonymisieren"] is True
     assert demo_result["telepraxis"]["public_key"] == ""
 
 
@@ -142,7 +147,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.8.3" in result.stdout
+    assert "Version: 1.9" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -150,6 +155,9 @@ def test_installer_contains_explicit_demo_warning_and_confirmation() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
     assert "AUF KEINEN FALL fuer echte Patientendaten" in installer
     assert "Demo-Modus trotz unverschluesselter Ausgabe wirklich aktivieren?" in installer
+    assert "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" in installer
+    assert "configure_demo_anonymization" in installer
+    assert "Audiodateien und in Freitexten genannte Rufnummern" in installer
     assert 'if [[ "$KZF_DEMO_MODE" != "y" ]]; then' in installer
 
 

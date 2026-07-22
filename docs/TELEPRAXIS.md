@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.3
+Version: 1.9
 Changelog:
+- 1.9: Optionale Rufnummernanonymisierung in Demoausgaben dokumentiert.
 - 1.8.3: Teiltranskription und leere Datenfelder ohne Fehlerdatensatz dokumentiert.
 - 1.8.2: Dynamische Versionskennung auf Kienzlefon 1.8.2 aktualisiert.
 - 1.8.1: Dateimodus und Gruppenzuordnung der Ausgabe dokumentiert.
@@ -21,7 +22,7 @@ Changelog:
 
 # Telepraxis-Dateiformat
 
-Version 1.8.3 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
+Version 1.9 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
 direkt eine verschluesselte Datei im konfigurierten Kanalverzeichnis:
 
 ```text
@@ -35,7 +36,7 @@ Telepraxis-Transportdatensatz:
 {
   "received_at": "2026-07-11T11:46:58+02:00",
   "remote_ip": "",
-  "user_agent": "kienzlefon/1.8.3",
+  "user_agent": "kienzlefon/1.9",
   "typ": "termin",
   "payload": {
     "typ": "termin",
@@ -82,6 +83,12 @@ Bei einer ausdruecklich bestaetigten Demo-Installation steht in der TOML
 Transportdatensatz atomar als `<vorgang_id>.json` abgelegt. Auch technische
 Fehlerdatensaetze sind in diesem Modus unverschluesselt. Der Demo-Modus darf
 auf keinen Fall fuer echte Patientendaten verwendet werden.
+
+Optional kann zusaetzlich `anrufernummern_anonymisieren = true` gesetzt werden.
+Dann ersetzt die Demoausgabe in regulaeren und Fehlerdatensaetzen ausschliesslich
+die Payload-Felder `id` und `telefon` durch `#anonymisiert demo#`. Interne Spooldaten,
+Audiodateien und Rufnummern innerhalb frei gesprochener Texte bleiben
+unveraendert. Im Produktivmodus ist diese Option unzulaessig.
 
 Jeder erkannte technische Fehler wird zusaetzlich als eigener Datensatz mit
 `typ = kienzlefon_error` im konfigurierten Ausgabemodus ausgegeben. Ist das Zielverzeichnis

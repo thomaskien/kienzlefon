@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.1
+# Version: 1.9
 # Changelog:
+# - 1.9: Rufnummern in der Demoausgabe optional und irreversibel anonymisiert.
 # - 1.8.1: Telepraxis-Ausgabedateien gruppenschreibbar mit 0660 angelegt.
 # - 1.8: Atomare unverschluesselte JSON-Ausgabe fuer den expliziten Demomodus ergaenzt.
 # - 1.1: Telepraxis-user_agent an die zentrale Paketversion gebunden.
@@ -9,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -38,11 +40,13 @@ class TelepraxisEncryptor:
         timezone: ZoneInfo,
         *,
         demo_mode: bool = False,
+        anonymize_phone_numbers: bool = False,
     ):
         self.public_key_path = public_key_path
         self.output_directory = output_directory
         self.timezone = timezone
         self.demo_mode = demo_mode
+        self.anonymize_phone_numbers = demo_mode and anonymize_phone_numbers
         self.public_key = None if demo_mode else self._load_public_key()
 
     def _load_public_key(self) -> RSAPublicKey:
@@ -59,13 +63,19 @@ class TelepraxisEncryptor:
         return key
 
     def build_plaintext_record(self, payload: dict[str, Any]) -> bytes:
-        typ = str(payload.get("typ", "unknown")) or "unknown"
+        output_payload = copy.deepcopy(payload)
+        if self.anonymize_phone_numbers:
+            for field in ("id", "telefon"):
+                value = str(output_payload.get(field, "")).strip()
+                if value and value != "unbekannt":
+                    output_payload[field] = "#anonymisiert demo#"
+        typ = str(output_payload.get("typ", "unknown")) or "unknown"
         record = {
             "received_at": datetime.now(self.timezone).isoformat(timespec="seconds"),
             "remote_ip": "",
             "user_agent": f"kienzlefon/{__version__}",
             "typ": typ,
-            "payload": payload,
+            "payload": output_payload,
         }
         return json.dumps(record, ensure_ascii=False, indent=4).encode("utf-8")
 

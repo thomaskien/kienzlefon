@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Rufnummernanonymisierung fuer neue und bestehende Demo-Konfigurationen ergaenzt.
 # - 1.8.3: Verlustfreie Teiltranskription bei leeren Einzelfeldern installiert.
 # - 1.8.2: Bereitschaftsdienst- und Ansagetextkorrekturen installiert.
 # - 1.8.1: Gruppenschreibbare Telepraxis-Ausgabe und passende Worker-Gruppe ergaenzt.
@@ -23,7 +24,7 @@
 
 set -Eeuo pipefail
 
-VERSION="1.8.3"
+VERSION="1.9"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -174,6 +175,26 @@ update_existing_whisper_models(){
     --standard-model "$KZF_MODEL_STANDARD" \
     --name-model "$KZF_MODEL_NAMES" \
     --medication-model "$KZF_MODEL_MEDICATIONS"
+}
+
+configure_demo_anonymization(){
+  local demo_mode="" current="" default="n" choice="" value="false"
+  demo_mode="$(${VENV}/bin/python -c \
+    'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' \
+    "$CONFIG_FILE")"
+  [[ "$demo_mode" == "y" ]] || return
+  current="$(${VENV}/bin/python -c \
+    'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("anrufernummern_anonymisieren", False) else "n")' \
+    "$CONFIG_FILE")"
+  [[ "$current" == "y" ]] && default="j"
+  printf '\nDie optionale Anonymisierung ersetzt in ausgegebenen Demo-JSONs id und telefon durch #anonymisiert demo#.\n'
+  printf 'Audiodateien und in Freitexten genannte Rufnummern werden dadurch nicht veraendert.\n'
+  ask_yes_no choice "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" "$default"
+  [[ "$choice" == "y" ]] && value="true"
+  "${VENV}/bin/kienzlefon-migration" \
+    --config "$CONFIG_FILE" \
+    --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
+    --demo-anonymize "$value"
 }
 
 ask_secret(){
@@ -717,6 +738,7 @@ collect_configuration(){
       fi
       configure_additional_extensions
       configure_special_queue
+      configure_demo_anonymization
       return
     fi
   fi
@@ -732,6 +754,12 @@ collect_configuration(){
     ask_yes_no demo_confirm \
       "Demo-Modus trotz unverschluesselter Ausgabe wirklich aktivieren?" "n"
     [[ "$demo_confirm" == "y" ]] || die "Demo-Modus wurde nicht bestaetigt."
+    printf 'Die Anonymisierung ersetzt id und telefon in ausgegebenen JSON-Dateien durch #anonymisiert demo#.\n'
+    printf 'Audiodateien und in Freitexten genannte Rufnummern bleiben unveraendert.\n'
+    ask_yes_no KZF_DEMO_ANONYMIZE \
+      "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" "j"
+  else
+    KZF_DEMO_ANONYMIZE="n"
   fi
   ask_value KZF_TTS_VOICE "Piper-Stimme" "de_DE-thorsten-high"
   ask_value KZF_TTS_LENGTH_SCALE "Piper length_scale (groesser=langsamer)" "1.3"
@@ -820,13 +848,14 @@ collect_configuration(){
   export KZF_RED_ENABLED KZF_RED_EXTENSION KZF_RED_RING_SECONDS KZF_RED_PRIORITY KZF_RED_PASSWORD
   export KZF_MAIN_ENDPOINT KZF_MAIN_NUMBER KZF_OUT_COUNTS
   export KZF_FIRST_EXTENSION KZF_EXTENSION_COUNT CONFIG_FILE PUBLIC_KEY_FILE SOURCE_TARGET
-  export KZF_AREA_CODE KZF_PRACTICE_NUMBER KZF_DEMO_MODE
+  export KZF_AREA_CODE KZF_PRACTICE_NUMBER KZF_DEMO_MODE KZF_DEMO_ANONYMIZE
 
   install -d -m 0755 "$CONFIG_DIR"
   "${VENV}/bin/python" - <<'PY'
 # kienzlefon installer config writer
-# Version: 1.8
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Demo-Anonymisierung sicher in die TOML-Konfiguration geschrieben.
 # - 1.8: Demo-Ausgabemodus und optional leeren Public-Key-Pfad sicher geschrieben.
 # - 1.7.1: Konfigurationsschreiber fuer Kienzlefon 1.7.1 aktualisiert.
 # - 1.7: Nutzung des roten Telefons sicher in TOML geschrieben.
@@ -898,6 +927,11 @@ set_value("telepraxis", "kanal", os.environ["KZF_CHANNEL"])
 set_value("telepraxis", "ausgabeverzeichnis", os.environ["KZF_OUTPUT_DIR"])
 demo_mode = os.environ["KZF_DEMO_MODE"] == "y"
 set_value("telepraxis", "demo", demo_mode)
+set_value(
+    "telepraxis",
+    "anrufernummern_anonymisieren",
+    demo_mode and os.environ["KZF_DEMO_ANONYMIZE"] == "y",
+)
 set_value("telepraxis", "public_key", "" if demo_mode else os.environ["PUBLIC_KEY_FILE"])
 set_value("tts", "stimme", os.environ["KZF_TTS_VOICE"])
 set_value("tts", "length_scale", float(os.environ["KZF_TTS_LENGTH_SCALE"]))
@@ -1136,9 +1170,10 @@ install_systemd_unit(){
   output_group="${group_record%%:*}"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
-# - 1.8.3: Diensteinheit unveraendert fuer Kienzlefon 1.8.3 uebernommen.
+# - 1.9: Diensteinheit unveraendert fuer Kienzlefon 1.9 uebernommen.
+# - 1.8.3: Diensteinheit fuer Kienzlefon 1.8.3 uebernommen.
 # - 1.8.2: Diensteinheit fuer Kienzlefon 1.8.2 uebernommen.
 # - 1.8.1: Primaergruppe aus dem Ausgabeverzeichnis und UMask 0007 gesetzt.
 # - 1.8: Diensteinheit fuer Kienzlefon 1.8 aktualisiert.
@@ -1271,7 +1306,7 @@ main(){
   install_systemd_unit
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 1.8.3 ist installiert"
+  sep "Kienzlefon 1.9 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
@@ -1298,6 +1333,12 @@ PY
   printf 'Telepraxis-Ausgabe: %s\n' "$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["telepraxis"]["ausgabeverzeichnis"])' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
     printf 'Telepraxis-Modus: DEMO, unverschluesselte JSON-Ausgabe; keine echten Patientendaten verwenden!\n'
+    "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    anonymous = tomllib.load(handle)["telepraxis"].get("anrufernummern_anonymisieren", False)
+print("Demo-Anrufernummern: #anonymisiert demo#" if anonymous else "Demo-Anrufernummern: unveraendert")
+PY
   else
     printf 'Telepraxis-Modus: Produktiv, verschluesselte JSON-Ausgabe\n'
   fi

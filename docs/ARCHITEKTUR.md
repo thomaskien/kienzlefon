@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.3
+Version: 1.9
 Changelog:
+- 1.9: Ausgabeseitige Rufnummernanonymisierung des Demomodus dokumentiert.
 - 1.8.3: Unabhaengige Verarbeitung leerer und befuellter Einzelaufnahmen dokumentiert.
 - 1.8.1: Rechte und systemd-Gruppe der Telepraxis-Ausgabe dokumentiert.
 - 1.8: Demoausgabe und sicheres Verwerfen leerer Abbrueche dokumentiert.
@@ -91,6 +92,9 @@ verarbeitet. Neue Nachrichten werden nicht still aufgestaut.
 `call.json` wird stets in eine neue temporaere Datei geschrieben, mit `fsync`
 gesichert und per `os.replace` aktiviert. Auf dieselbe Weise wird die fertige
 `*.json.enc`-Produktivdatei oder unverschluesselte `.json`-Demodatei geschrieben.
+Eine aktivierte Demo-Anonymisierung arbeitet ausschliesslich auf einer Kopie des
+fertigen Ausgabe-Payloads und ersetzt dort `id` und `telefon`. Die internen
+Vorgangsdaten und produktive Ausgaben werden nicht veraendert.
 Vorgangsordner wechseln nur per atomarem
 Verzeichnis-Rename zwischen `recording`, `queue`, `processing`, `ready` und
 `error`.

@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.3
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Rufnummernanonymisierung fuer Demoausgaben veroeffentlicht.
 # - 1.8.3: Patchrelease fuer verlustfreie Teiltranskription bei leeren Feldern.
 # - 1.8.2: Patchrelease fuer Bereitschaftsdienst-Logik und Ansagetexte.
 # - 1.8.1: Patchrelease fuer gruppenschreibbare Telepraxis-Ausgabedateien.
@@ -23,7 +24,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kienzlefon"
-version = "1.8.3"
+version = "1.9"
 description = "Konfigurationsgesteuertes Asterisk-IVR mit lokaler Whisper-Transkription"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -71,9 +71,10 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .header-inner {
-      width: min(1220px, calc(100% - 40px));
+      width: 100%;
       height: 92px;
-      margin: 0 auto;
+      margin: 0;
+      padding-right: max(20px, calc((100% - 1220px) / 2));
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -123,12 +124,12 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .hero-inner {
-      width: min(1220px, calc(100% - 40px));
+      width: min(1280px, calc(100% - 48px));
       margin: 0 auto;
-      padding: 20px 0 22px;
+      padding: clamp(32px, 4vw, 56px) 0 clamp(38px, 5vw, 64px);
       display: grid;
-      grid-template-columns: minmax(0, 1.08fr) minmax(410px, .92fr);
-      gap: 30px;
+      grid-template-columns: minmax(0, 1.08fr) minmax(390px, .92fr);
+      column-gap: clamp(40px, 6vw, 96px);
       align-items: start;
     }
 
@@ -144,14 +145,14 @@ header('Content-Type: text/html; charset=utf-8');
     h1 {
       max-width: 780px;
       margin: 0;
-      font-size: clamp(2rem, 4vw, 3.55rem);
-      line-height: .98;
-      letter-spacing: -.055em;
+      font-size: clamp(1.9rem, 3.5vw, 3.1rem);
+      line-height: 1.04;
+      letter-spacing: -.045em;
     }
 
     .lead {
       max-width: 720px;
-      margin: 12px 0 0;
+      margin: 16px 0 0;
       color: var(--ink-soft);
       font-size: clamp(.98rem, 1.45vw, 1.12rem);
     }
@@ -159,8 +160,8 @@ header('Content-Type: text/html; charset=utf-8');
     .feature-list {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px 18px;
-      margin: 17px 0 0;
+      gap: 12px 24px;
+      margin: 24px 0 0;
       padding: 0;
       list-style: none;
     }
@@ -170,7 +171,7 @@ header('Content-Type: text/html; charset=utf-8');
       padding-left: 29px;
       font-size: .94rem;
       font-weight: 720;
-      line-height: 1.28;
+      line-height: 1.4;
     }
 
     .feature-list li::before {
@@ -191,7 +192,7 @@ header('Content-Type: text/html; charset=utf-8');
 
     .hero-actions {
       display: block;
-      margin-top: 18px;
+      margin-top: 28px;
     }
 
     .hero-actions .button-primary {
@@ -242,7 +243,7 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .tech-line {
-      margin-top: 11px;
+      margin-top: 16px;
       color: #697586;
       font-size: .92rem;
       font-weight: 750;
@@ -250,7 +251,7 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .hero-demo-intro {
-      margin-top: 24px;
+      margin-top: 32px;
     }
 
     .hero-demo-intro h2 {
@@ -260,8 +261,12 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .hero-demo-intro p {
-      margin: 4px 0 0;
+      margin: 7px 0 0;
       color: var(--ink-soft);
+    }
+
+    .hero-demo-intro .button {
+      margin-top: 14px;
     }
 
     .form-card {
@@ -273,7 +278,7 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     .form-card-header {
-      padding: 14px 20px 11px;
+      padding: 20px 24px 16px;
       border-bottom: 1px solid var(--line);
     }
 
@@ -289,11 +294,11 @@ header('Content-Type: text/html; charset=utf-8');
       font-size: .84rem;
     }
 
-    .form-body { padding: 3px 20px 15px; }
+    .form-body { padding: 8px 24px 24px; }
 
     label {
       display: block;
-      margin: 8px 0 3px;
+      margin: 12px 0 5px;
       color: #202b39;
       font-size: .82rem;
       font-weight: 780;
@@ -330,7 +335,7 @@ header('Content-Type: text/html; charset=utf-8');
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      gap: 14px;
     }
 
     .hidden { display: none; }
@@ -338,7 +343,7 @@ header('Content-Type: text/html; charset=utf-8');
     #sendBtn {
       width: 100%;
       min-height: 43px;
-      margin-top: 12px;
+      margin-top: 18px;
       padding: 9px 16px;
       color: #fff;
       background: var(--red);
@@ -462,11 +467,12 @@ header('Content-Type: text/html; charset=utf-8');
 
     @media (max-width: 960px) {
       .header-inner {
+        width: 100%;
         height: auto;
         min-height: 92px;
         align-items: flex-start;
         flex-direction: column;
-        padding: 8px 0 10px;
+        padding: 0 12px 10px 0;
         overflow: visible;
       }
 
@@ -475,12 +481,15 @@ header('Content-Type: text/html; charset=utf-8');
         height: 68px;
       }
 
-      .top-nav { justify-content: flex-start; }
+      .top-nav {
+        justify-content: flex-start;
+        padding-left: 12px;
+      }
 
       .hero-inner {
         grid-template-columns: 1fr;
-        gap: 24px;
-        padding-top: 18px;
+        gap: 36px;
+        padding-top: 30px;
       }
 
       .form-card { max-width: 720px; }
@@ -488,14 +497,15 @@ header('Content-Type: text/html; charset=utf-8');
     }
 
     @media (max-width: 620px) {
-      .header-inner,
       .hero-inner,
       .footer-inner {
         width: min(100% - 24px, 1220px);
       }
 
+      .header-inner { width: 100%; }
+
       .top-nav { gap: 8px 14px; font-size: .87rem; }
-      .hero-inner { padding: 16px 0 20px; }
+      .hero-inner { padding: 26px 0 34px; }
       .row { grid-template-columns: 1fr; gap: 0; }
       .feature-list { grid-template-columns: 1fr; }
       .form-card-header, .form-body { padding-left: 18px; padding-right: 18px; }
@@ -507,7 +517,7 @@ header('Content-Type: text/html; charset=utf-8');
 <body>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="#top" aria-label="KIENZLEfon Startseite">
+      <a class="brand" href="https://kienzlebox.de/kienzlebox-frame.php?projekt=kienzlefon" aria-label="KIENZLEfon auf KIENZLEbox öffnen">
         <img src="./kienzlefon.png" alt="KIENZLEfon" />
       </a>
 
@@ -552,6 +562,9 @@ header('Content-Type: text/html; charset=utf-8');
           <div class="hero-demo-intro">
             <h2 id="telepraxis-title">Demo der Benutzeroberfläche</h2>
             <p>Eingegangene Anfragen erscheinen unten. Die Texterkennung dauert einen Moment.</p>
+            <a class="button button-secondary" href="./telepraxis-app-demo.php" target="_blank" rel="noopener noreferrer">
+              Benutzeroberfläche in neuem Fenster öffnen
+            </a>
           </div>
         </div>
 
@@ -560,7 +573,7 @@ header('Content-Type: text/html; charset=utf-8');
         <section class="form-card" aria-labelledby="kontakt-title">
 
           <div class="form-card-header">
-            <h2 id="kontakt-title">Kontaktformular</h2>
+            <h2 id="kontakt-title">Demo-Kontaktformular</h2>
             <p>Alternativ zum Testanruf kann hier direkt eine Demo-Anfrage gesendet werden.</p>
           </div>
 
@@ -638,7 +651,7 @@ header('Content-Type: text/html; charset=utf-8');
 
                     <div class="cpu-widget">
     <div class="cpu-header">
-        <span>Server-CPU</span>
+        <span>CPU (langsamer Server!)</span>
         <strong id="cpu-value">–</strong>
     </div>
 
@@ -736,7 +749,7 @@ async function updateCpuWidget() {
             fill.style.backgroundColor = '#27864a';
         }
 
-        status.textContent = 'Zuletzt aktualisiert: ' +
+        status.textContent = 'Normaler Server ca. 1,5x so schnell   ...   Zuletzt aktualisiert: ' +
             new Date(data.timestamp).toLocaleTimeString('de-DE');
 
     } catch (error) {

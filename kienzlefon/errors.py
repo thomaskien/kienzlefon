@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8
+# Version: 1.9
 # Changelog:
+# - 1.9: Konfigurierte Demo-Anonymisierung auch auf Fehlerausgaben angewendet.
 # - 1.8: Fehlerausgabe an den konfigurierten Demo- oder Produktivmodus angebunden.
 # - 1.0: Einheitliche lokale und verschluesselte Fehlererfassung eingefuehrt.
 
@@ -56,6 +57,7 @@ def record_system_error(
             config.telepraxis.output_directory,
             config.practice.timezone,
             demo_mode=config.telepraxis.demo,
+            anonymize_phone_numbers=config.telepraxis.anonymize_phone_numbers,
         )
         report_call_errors(call, encryptor)
     except Exception:

@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.2
+# Version: 1.9
 # Changelog:
+# - 1.9: Optionale Anonymisierung der Rufnummern in der Demoausgabe konfigurierbar gemacht.
 # - 1.8.2: Bereitschaftsdienst auch vor der ersten Tagesoeffnung aktiviert.
 # - 1.8: Expliziten Telepraxis-Demomodus ohne Public Key ergaenzt.
 # - 1.7: Optionales rotes Telefon und priorisierte Sonderqueue konfigurierbar gemacht.
@@ -167,6 +168,7 @@ class TelepraxisConfig:
     channel: str
     output_directory: Path
     demo: bool
+    anonymize_phone_numbers: bool
     public_key: Path | None
 
 
@@ -497,6 +499,15 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if not isinstance(demo_value, bool):
         raise ConfigError("[telepraxis].demo muss true oder false sein")
     demo_mode = demo_value
+    anonymize_value = telepraxis.get("anrufernummern_anonymisieren", False)
+    if not isinstance(anonymize_value, bool):
+        raise ConfigError(
+            "[telepraxis].anrufernummern_anonymisieren muss true oder false sein"
+        )
+    if anonymize_value and not demo_mode:
+        raise ConfigError(
+            "[telepraxis].anrufernummern_anonymisieren ist nur bei demo=true zulaessig"
+        )
     public_key_value = str(telepraxis.get("public_key", "")).strip()
     if not demo_mode and not public_key_value:
         raise ConfigError("[telepraxis].public_key ist im Produktivmodus erforderlich")
@@ -557,6 +568,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             channel=str(_required(telepraxis, "kanal", "telepraxis")),
             output_directory=_path(base, _required(telepraxis, "ausgabeverzeichnis", "telepraxis")),
             demo=demo_mode,
+            anonymize_phone_numbers=anonymize_value,
             public_key=_path(base, public_key_value) if public_key_value else None,
         ),
         tts=TTSConfig(

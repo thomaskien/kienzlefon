@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.3
+Version: 1.9
 Changelog:
+- 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben ergaenzt.
 - 1.8.3: Leere Einzelfelder ohne Abbruch nachfolgender Transkriptionen verarbeitet.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und gesprochene Ansagetexte korrigiert.
 - 1.8.1: Gruppen-Schreibrecht der Telepraxis-Ausgabedateien korrigiert.
@@ -20,6 +21,16 @@ Changelog:
 -->
 
 # Changelog
+
+## 1.9
+
+- neue TOML-Option `[telepraxis].anrufernummern_anonymisieren`
+- ausschliesslich im Demomodus aktivierbar; Produktivausgaben bleiben unveraendert
+- ersetzt in normalen und Fehler-Demo-JSONs die Felder `id` und `telefon` durch `#anonymisiert demo#`
+- veraendert weder interne Spooldaten noch Audiodateien oder Rufnummern innerhalb von Freitexten
+- Installer fragt die Option bei neuen Demo-Installationen ab
+- bei Ueberinstallation einer bestehenden Demo-Konfiguration wird die Option ebenfalls mit dem bisherigen Wert als Vorgabe abgefragt
+- Migration ergaenzt den fehlenden Wert konservativ als `false`, ohne vorhandene Einstellungen zu ueberschreiben
 
 ## 1.8.3
 

@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8
+# Version: 1.9
 # Changelog:
+# - 1.9: Demo-Anonymisierung in Konfigurationspruefung und Status aufgenommen.
 # - 1.8: Konfigurationspruefung und Status um den Telepraxis-Demomodus ergaenzt.
 # - 1.7: AGI-Einstieg fuer die eingehende Anzeige-Caller-ID ergaenzt.
 # - 1.6: Mehrmodell-Download, Statusausgabe und Modellmigration ergaenzt.
@@ -35,7 +36,7 @@ from .errors import record_system_error
 from .health import worker_is_healthy
 from .ivr import IVR
 from .models import CallState
-from .migration import migrate_config, set_string
+from .migration import migrate_config, set_boolean, set_string
 from .prompts import PromptGenerator
 from .spool import Spool
 from .worker import Worker
@@ -127,6 +128,7 @@ def config_main() -> None:
             config.telepraxis.output_directory,
             config.practice.timezone,
             demo_mode=config.telepraxis.demo,
+            anonymize_phone_numbers=config.telepraxis.anonymize_phone_numbers,
         )
     except (OSError, ConfigError, ValueError, RuntimeError) as exc:
         print(f"FEHLER: {exc}", file=sys.stderr)
@@ -153,6 +155,7 @@ def status_main() -> None:
         "calls": {state.value: len(tuple(spool.calls(state))) for state in CallState},
         "output_directory": str(config.telepraxis.output_directory),
         "demo_mode": config.telepraxis.demo,
+        "demo_phone_numbers_anonymized": config.telepraxis.anonymize_phone_numbers,
     }
     print(json.dumps(status, ensure_ascii=False, indent=2))
     raise SystemExit(0 if healthy else 1)
@@ -316,13 +319,14 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 1.7 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 1.9 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
     parser.add_argument("--standard-model")
     parser.add_argument("--name-model")
     parser.add_argument("--medication-model")
+    parser.add_argument("--demo-anonymize", choices=("true", "false"))
     arguments = parser.parse_args()
     target = Path(arguments.config)
     migrate_config(target, Path(arguments.template))
@@ -335,4 +339,11 @@ def migrate_main() -> None:
     ):
         if value is not None:
             set_string(target, section, key, value)
-    print(f"Konfiguration auf Version 1.7 ergaenzt: {target}")
+    if arguments.demo_anonymize is not None:
+        set_boolean(
+            target,
+            "telepraxis",
+            "anrufernummern_anonymisieren",
+            arguments.demo_anonymize == "true",
+        )
+    print(f"Konfiguration auf Version 1.9 ergaenzt: {target}")

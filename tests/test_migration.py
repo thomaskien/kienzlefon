@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.2
+# Version: 1.9
 # Changelog:
+# - 1.9: Demo-Anonymisierung konservativ migriert und boolesch aktualisiert.
 # - 1.8.2: Notruf- und Fallback-Standardtexte konservativ migriert.
 # - 1.8: Fehlenden Demomodus konservativ als deaktiviert migriert.
 # - 1.7: Optionales Rottelefon und Sonderqueue konservativ migriert.
@@ -15,7 +16,7 @@ import re
 import tomllib
 from pathlib import Path
 
-from kienzlefon.migration import migrate_config, set_string
+from kienzlefon.migration import migrate_config, set_boolean, set_string
 
 
 def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> None:
@@ -27,6 +28,7 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     source = re.sub(r"^max_true_peak_db\s*=.*\n", "", source, flags=re.M)
     source = source.replace("rotes_telefon_aktiv = true\n", "")
     source = source.replace("demo = false\n", "")
+    source = source.replace("anrufernummern_anonymisieren = false\n", "")
     source = re.sub(r"\n\[sonderqueue\].*?(?=\n\[wahlregeln\])", "", source, flags=re.S)
     source = source.replace(
         'blocked_destination = "Dieses Anrufziel ist gesperrt."\n', ""
@@ -47,6 +49,7 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     assert result["sonderqueue"]["name"] == "kienzlefon-sonder"
     assert result["sonderqueue"]["zusaetzliche_nebenstellen"] == []
     assert result["telepraxis"]["demo"] is False
+    assert result["telepraxis"]["anrufernummern_anonymisieren"] is False
 
 
 def test_migration_removes_pin_and_only_replaces_old_defaults(tmp_path: Path) -> None:
@@ -150,3 +153,22 @@ def test_set_string_preserves_following_toml_sections(tmp_path: Path) -> None:
     assert result["whisper"]["modell_medikamente"] == "large-v3"
     assert result["telepraxis"]["kanal"] == "dahl"
     assert "ansagen" in result
+
+
+def test_set_boolean_updates_demo_anonymization_only(tmp_path: Path) -> None:
+    target = tmp_path / "kienzlefon.toml"
+    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    source = source.replace("demo = false", "demo = true")
+    source = source.replace(
+        'public_key = "/etc/kienzlefon/telepraxis-public.pem"', 'public_key = ""'
+    )
+    target.write_text(source, encoding="utf-8")
+
+    set_boolean(target, "telepraxis", "anrufernummern_anonymisieren", True)
+
+    with target.open("rb") as handle:
+        result = tomllib.load(handle)
+    assert result["telepraxis"]["demo"] is True
+    assert result["telepraxis"]["anrufernummern_anonymisieren"] is True
+    assert result["telepraxis"]["public_key"] == ""
+    assert result["whisper"]["modell_standard"] == "large-v3-turbo"

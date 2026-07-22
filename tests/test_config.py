@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.8.2
+# Version: 1.9
 # Changelog:
+# - 1.9: Demo-Anonymisierung und ihre Beschraenkung auf den Demomodus getestet.
 # - 1.8.2: Bereitschaftsdienst vor erster und nach letzter Tagesoeffnung getestet.
 # - 1.8: Demoausgabe ohne Public Key und Produktivpflicht fuer den Key getestet.
 # - 1.7: Optionales rotes Telefon und Sonderqueue-Standardwerte abgesichert.
@@ -82,6 +83,7 @@ def test_override_blocks_phone_hours(app_config) -> None:
     assert app_config.special_queue.weight == 100
     assert app_config.special_queue.additional_extensions == ()
     assert app_config.telepraxis.demo is False
+    assert app_config.telepraxis.anonymize_phone_numbers is False
     assert app_config.telepraxis.public_key is not None
 
 
@@ -96,7 +98,40 @@ def test_demo_mode_does_not_require_public_key(tmp_path: Path) -> None:
 
     config = load_config(config_path)
     assert config.telepraxis.demo is True
+    assert config.telepraxis.anonymize_phone_numbers is False
     assert config.telepraxis.public_key is None
+
+
+def test_demo_mode_can_anonymize_phone_numbers(tmp_path: Path) -> None:
+    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    source = source.replace("demo = false", "demo = true")
+    source = source.replace(
+        "anrufernummern_anonymisieren = false",
+        "anrufernummern_anonymisieren = true",
+    )
+    source = source.replace(
+        'public_key = "/etc/kienzlefon/telepraxis-public.pem"', 'public_key = ""'
+    )
+    config_path = tmp_path / "anonymous-demo.toml"
+    config_path.write_text(source, encoding="utf-8")
+
+    config = load_config(config_path)
+
+    assert config.telepraxis.demo is True
+    assert config.telepraxis.anonymize_phone_numbers is True
+
+
+def test_phone_number_anonymization_requires_demo_mode(tmp_path: Path) -> None:
+    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    source = source.replace(
+        "anrufernummern_anonymisieren = false",
+        "anrufernummern_anonymisieren = true",
+    )
+    config_path = tmp_path / "invalid-anonymization.toml"
+    config_path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="nur bei demo=true"):
+        load_config(config_path)
 
 
 def test_productive_mode_requires_public_key(tmp_path: Path) -> None:
