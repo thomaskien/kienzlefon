@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9
+# Version: 1.9.1
 # Changelog:
+# - 1.9.1: Migrationsausgabe auf Patchrelease 1.9.1 aktualisiert.
 # - 1.9: Demo-Anonymisierung in Konfigurationspruefung und Status aufgenommen.
 # - 1.8: Konfigurationspruefung und Status um den Telepraxis-Demomodus ergaenzt.
 # - 1.7: AGI-Einstieg fuer die eingehende Anzeige-Caller-ID ergaenzt.
@@ -319,7 +320,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 1.9 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 1.9.1 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -346,4 +347,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 1.9 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 1.9.1 ergaenzt: {target}")

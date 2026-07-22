@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9
+Version: 1.9.1
 Changelog:
+- 1.9.1: Korrigierte Asterisk-wav16-Installationspruefung dokumentiert.
 - 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben dokumentiert.
 - 1.8.3: Teiltranskription bei schweigend uebersprungenen Feldern dokumentiert.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und Ziffernaussprache dokumentiert.
@@ -32,7 +33,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **1.9**
+Version: **1.9.1**
 
 ## Eigenschaften
 
@@ -56,7 +57,7 @@ Version: **1.9**
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine HTTP-Uebertragung und kein LLM in Version 1.9
+- keine HTTP-Uebertragung und kein LLM in Version 1.9.1
 
 ## Installation
 
@@ -97,6 +98,8 @@ konfigurierte Piper-Stimme. Bei weniger als 16 GB warnt der Installer vor der
 gleichzeitigen Verwendung beider Whisper-Modelle, erlaubt sie aber nach
 ausdruecklicher Bestaetigung.
 Je nach Server und Internetanbindung kann dieser Schritt laenger dauern.
+Version 1.9.1 prueft das fuer breitbandige Telefonaufnahmen erforderliche
+`wav16`-Format ohne einen falschnegativen Abbruch durch Bash-`pipefail`.
 
 ## Konfiguration
 

@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.9
+# Version: 1.9.1
 # Changelog:
+# - 1.9.1: Asterisk-wav16-Pruefung ohne falschnegatives pipefail getestet.
 # - 1.9: Demo-Anonymisierung bei Neuinstallation und Updateabfrage getestet.
 # - 1.8.3: Installerfreigabe fuer Version 1.8.3 aktualisiert.
 # - 1.8.2: Installerfreigabe fuer Version 1.8.2 aktualisiert.
@@ -147,7 +148,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.9" in result.stdout
+    assert "Version: 1.9.1" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -218,6 +219,25 @@ def test_installer_checks_wav16_and_loudnorm_support() -> None:
     assert "ffmpeg -hide_banner -filters 2>/dev/null | grep -q" not in installer
     assert "core show file formats" in installer
     assert "Aufnahmeformat wav16" in installer
+
+
+def test_asterisk_format_check_is_safe_with_pipefail() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = installer.index("asterisk_supports_format(){")
+    end = installer.index("\n}\n", start) + 3
+    function = installer[start:end]
+    script = f"""set -o pipefail
+asterisk() {{
+  printf '%s\\n' \\
+    'Format     Name       Extensions' \\
+    '------     ----       ----------' \\
+    'slin16     wav16      wav16'
+}}
+{function}
+asterisk_supports_format wav16
+"""
+    result = subprocess.run(["bash", "-c", script], check=False)
+    assert result.returncode == 0
 
 
 def test_ffmpeg_filter_check_is_safe_with_pipefail() -> None:

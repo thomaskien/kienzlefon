@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9
+Version: 1.9.1
 Changelog:
+- 1.9.1: Falschnegative Asterisk-wav16-Pruefung des Installers korrigiert.
 - 1.9: Optionale Anonymisierung der Anrufernummern in Demoausgaben ergaenzt.
 - 1.8.3: Leere Einzelfelder ohne Abbruch nachfolgender Transkriptionen verarbeitet.
 - 1.8.2: Bereitschaftsdienst-Zeitlogik und gesprochene Ansagetexte korrigiert.
@@ -21,6 +22,13 @@ Changelog:
 -->
 
 # Changelog
+
+## 1.9.1
+
+- Asterisk-Formatliste wird vor der Suche nach `wav16` vollstaendig eingelesen
+- kein falschnegativer Installer-Abbruch mehr durch `grep -q` in Verbindung mit `pipefail`
+- der Installer erreicht dadurch wieder die Installation und den Neustart des Whisper-Workers
+- bei aktivierter Demo-Anonymisierung verwendet der neu gestartete Worker die aktuelle TOML-Konfiguration und ersetzt `id` und `telefon` wie vorgesehen
 
 ## 1.9
 

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9
+Version: 1.9.1
 Changelog:
+- 1.9.1: Fehlerfreie wav16-Vorpruefung vor dem Worker-Neustart dokumentiert.
 - 1.9: Ausgabeseitige Rufnummernanonymisierung des Demomodus dokumentiert.
 - 1.8.3: Unabhaengige Verarbeitung leerer und befuellter Einzelaufnahmen dokumentiert.
 - 1.8.1: Rechte und systemd-Gruppe der Telepraxis-Ausgabe dokumentiert.
