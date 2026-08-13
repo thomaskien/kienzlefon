@@ -1,6 +1,7 @@
 # kienzlefon
 # Version: 2.0
 # Changelog:
+# - 2.0: Laufende Ansagenerzeugung menschenlesbar und maschinenlesbar ausgegeben.
 # - 2.0: TTS-Modell und Qwen-Sprecher in die konservative Migration aufgenommen.
 # - 1.9.3: Migrationsausgabe auf Patchrelease 1.9.3 aktualisiert.
 # - 1.9.2: Migrationsausgabe auf Patchrelease 1.9.2 aktualisiert.
@@ -41,7 +42,7 @@ from .health import worker_is_healthy
 from .ivr import IVR
 from .models import CallState
 from .migration import migrate_config, set_boolean, set_string
-from .prompts import PromptGenerator
+from .prompts import PROMPT_PROGRESS_PREFIX, PromptGenerator
 from .spool import Spool
 from .worker import Worker
 
@@ -102,12 +103,46 @@ def prompts_main() -> None:
     _logging()
     parser = _parser("Kienzlefon Ansagen erzeugen")
     parser.add_argument("--all", action="store_true", help="Alle Ansagen neu erzeugen")
+    parser.add_argument("--machine-progress", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     config: AppConfig | None = None
+
+    def progress(event: dict[str, object]) -> None:
+        if arguments.machine_progress:
+            print(
+                PROMPT_PROGRESS_PREFIX
+                + json.dumps(event, ensure_ascii=False, separators=(",", ":")),
+                flush=True,
+            )
+            return
+        current = int(event["current"])
+        total = int(event["total"])
+        phase = str(event["phase"])
+        name = str(event.get("name", ""))
+        label = str(event.get("label", "")) or name
+        prefix = f"[{current}/{total}]" if total else "[0/0]"
+        messages = {
+            "plan": (
+                f"{total} Verarbeitungsschritt(e) erforderlich."
+                if total
+                else "Keine Ansage muss neu erzeugt werden."
+            ),
+            "qwen_prepare": "Whisper-Worker wird für Qwen3-TTS vorbereitet.",
+            "qwen_ready": "Whisper-Worker ist beendet; Qwen3-TTS kann arbeiten.",
+            "generate": f"Automatische Ansage wird erzeugt: {label}",
+            "manual": f"Manuelle Ansage wird verarbeitet: {label}",
+            "scheduled_tts": f"TTS-Fassung der Sonderansage wird erzeugt: {label}",
+            "qwen_restore": "Ansagen fertig; Whisper-Worker wird wieder gestartet.",
+            "complete": "Ansagenverarbeitung abgeschlossen.",
+        }
+        print(f"{prefix} {messages.get(phase, phase)}", flush=True)
+
     try:
         config = _load(arguments.config)
         print("Ansagen werden auf Aenderungen geprueft.", flush=True)
-        generated, skipped = PromptGenerator(config).generate(force=arguments.all)
+        generated, skipped = PromptGenerator(config, progress=progress).generate(
+            force=arguments.all
+        )
         print(f"Ansagen erzeugt: {generated}; unveraendert: {skipped}")
     except Exception as exc:
         logging.exception("Ansagenerzeugung fehlgeschlagen")

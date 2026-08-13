@@ -227,6 +227,36 @@ def test_parallel_prompt_generation_is_rejected(app_config) -> None:
             PromptGenerator(app_config).generate()
 
 
+def test_prompt_generation_reports_plan_and_current_announcement(
+    app_config, monkeypatch
+) -> None:
+    events: list[dict[str, object]] = []
+    generator = PromptGenerator(app_config, progress=events.append)
+    monkeypatch.setattr(
+        "kienzlefon.prompts.rendered_prompts",
+        lambda _config: {"greeting_open": "Neue Begrüßung"},
+    )
+
+    def generate_one(name: str, _text: str, staging: Path) -> None:
+        master = staging / "masters" / f"{name}.wav"
+        master.parent.mkdir(parents=True, exist_ok=True)
+        master.write_bytes(b"wav")
+        for suffix in ("sln16", "g722", "alaw", "ulaw"):
+            prompt = staging / "prompts" / f"{name}.{suffix}"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_bytes(suffix.encode("ascii"))
+
+    monkeypatch.setattr(generator, "_generate_one", generate_one)
+
+    assert generator.generate() == (1, 0)
+    assert [(event["phase"], event["current"], event["total"]) for event in events] == [
+        ("plan", 0, 1),
+        ("generate", 1, 1),
+        ("complete", 1, 1),
+    ]
+    assert events[1]["name"] == "greeting_open"
+
+
 def test_qwen_batch_stops_and_restores_worker_only_once(
     app_config, monkeypatch
 ) -> None:

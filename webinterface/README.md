@@ -54,5 +54,10 @@ freigegebenen Sprecher auswählbar. Ein Wechsel erzeugt alle automatischen TTS-F
 manuelle Aufnahmen werden weder überschrieben noch gelöscht. Ohne Text-, Modell- oder
 Sprecheränderung beendet sich die Ansagenaktualisierung ohne Qwen-Start.
 
+Während einer laufenden Erzeugung aktualisiert die Statusanzeige fortlaufend die
+Schrittnummer und den Namen der gerade verarbeiteten Ansage. Auch das Vorbereiten
+und der Wiederanlauf des Whisper-Workers werden angezeigt; ein langer Qwen-Aufruf
+bleibt dadurch nicht mehr als unbestimmter Hintergrundvorgang stehen.
+
 Die Installation verändert den bisherigen Hauptinstaller nicht. Eine Übernahme dorthin ist erst
 nach dem Praxistest vorgesehen.

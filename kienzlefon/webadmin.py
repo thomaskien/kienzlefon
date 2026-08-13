@@ -10,7 +10,9 @@ import json
 import os
 import re
 import secrets
+import selectors
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
@@ -23,7 +25,12 @@ from zoneinfo import ZoneInfo
 
 from .agi import AgiChannel, AgiHangup
 from .config import QWEN_SPEAKERS, WEEKDAYS, AppConfig, load_config
-from .prompts import PROMPT_CATALOG, PromptGenerator, rendered_prompts
+from .prompts import (
+    PROMPT_CATALOG,
+    PROMPT_PROGRESS_PREFIX,
+    PromptGenerator,
+    rendered_prompts,
+)
 from .spool import write_json_atomic
 
 DEFAULT_CONFIG = Path("/etc/kienzlefon/kienzlefon.toml")
@@ -1096,9 +1103,7 @@ class WebAdminWorker:
         try:
             with self.audio_lock_path.open("a+b") as audio_lock:
                 fcntl.flock(audio_lock.fileno(), fcntl.LOCK_EX)
-                result = _run_command(
-                    [self.prompts_command, "--config", str(self.config_path)], timeout=14_400
-                )
+                result = self._run_prompts_with_progress(job_id, timeout=14_400)
         except Exception as exc:
             self._status(job_id, "ansagenerzeugung_fehlgeschlagen", detail=str(exc))
             raise
@@ -1108,6 +1113,113 @@ class WebAdminWorker:
             )
             raise WebAdminError("Ansagenerzeugung fehlgeschlagen")
         self._status(job_id, "ansagen_aktuell")
+
+    def _run_prompts_with_progress(
+        self, job_id: str, *, timeout: int
+    ) -> subprocess.CompletedProcess[bytes]:
+        command = [
+            self.prompts_command,
+            "--config",
+            str(self.config_path),
+            "--machine-progress",
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise WebAdminError(
+                f"Programm konnte nicht sicher ausgeführt werden: {command[0]}: {exc}"
+            ) from exc
+
+        assert process.stdout is not None
+        captured = bytearray()
+        pending = bytearray()
+        deadline = time.monotonic() + timeout
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                for key, _events in selector.select(timeout=min(1.0, remaining)):
+                    chunk = os.read(key.fd, 65_536)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    captured.extend(chunk)
+                    if len(captured) > 65_536:
+                        del captured[:-65_536]
+                    pending.extend(chunk)
+                    while b"\n" in pending:
+                        raw_line, _, remainder = pending.partition(b"\n")
+                        pending = bytearray(remainder)
+                        self._consume_prompt_progress(job_id, raw_line)
+                    if len(pending) > 16_384:
+                        del pending[:-16_384]
+            remaining = max(0.1, deadline - time.monotonic())
+            returncode = process.wait(timeout=remaining)
+            if pending:
+                self._consume_prompt_progress(job_id, bytes(pending))
+        except subprocess.TimeoutExpired as exc:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            raise WebAdminError(
+                f"Ansagenerzeugung hat das Zeitlimit von {timeout} Sekunden überschritten"
+            ) from exc
+        finally:
+            selector.close()
+            process.stdout.close()
+        return subprocess.CompletedProcess(command, returncode, bytes(captured), b"")
+
+    def _consume_prompt_progress(self, job_id: str, raw_line: bytes) -> None:
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line.startswith(PROMPT_PROGRESS_PREFIX):
+            return
+        try:
+            event = json.loads(line.removeprefix(PROMPT_PROGRESS_PREFIX))
+            if not isinstance(event, Mapping):
+                return
+            current = int(event.get("current", 0))
+            total = int(event.get("total", 0))
+            phase = str(event.get("phase", ""))
+            name = str(event.get("name", ""))[:100]
+            supplied_label = str(event.get("label", ""))[:100]
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return
+        if current < 0 or total < 0 or current > total:
+            return
+        label = supplied_label or _prompt_label(name)
+        counter = f"{current}/{total}" if total else "0/0"
+        details = {
+            "plan": (
+                f"{total} Verarbeitungsschritt(e) erforderlich."
+                if total
+                else "Keine Ansage muss neu erzeugt werden."
+            ),
+            "qwen_prepare": "Whisper-Worker wird für Qwen3-TTS vorbereitet.",
+            "qwen_ready": "Whisper-Worker ist beendet; Qwen3-TTS arbeitet jetzt.",
+            "generate": f"Automatische Ansage wird erzeugt: {label}",
+            "manual": f"Manuelle Ansage wird verarbeitet: {label}",
+            "scheduled_tts": f"TTS-Fassung der Sonderansage wird erzeugt: {label}",
+            "qwen_restore": "Ansagen fertig; Whisper-Worker wird wieder gestartet.",
+            "complete": "Ansagenverarbeitung abgeschlossen.",
+        }
+        detail = details.get(phase)
+        if detail is not None:
+            self._status(
+                job_id,
+                "ansagen_werden_aktualisiert",
+                detail=f"[{counter}] {detail}",
+            )
 
     def _apply_save(self, job_id: str, job: Mapping[str, Any]) -> None:
         config = load_config(self.config_path)

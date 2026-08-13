@@ -1,6 +1,7 @@
 # kienzlefon
 # Version: 2.0
 # Changelog:
+# - 2.0: Live-Fortschritt fuer Planung, aktuelle Ansage und Qwen-Wartungsphasen ergaenzt.
 # - 2.0: Differenzielle Qwen3-TTS-Erzeugung mit globaler Sprecherwahl ergaenzt.
 # - 1.5: 16-kHz-Master und gemeinsame zweistufige Lautheitsnormalisierung eingefuehrt.
 # - 1.4: PIN-Bausteine durch klare deutsche Administrationsansagen ersetzt.
@@ -28,7 +29,7 @@ import wave
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import AppConfig, TimeWindow, WEEKDAYS, WeeklySchedule
 from .health import worker_is_healthy
@@ -36,6 +37,7 @@ from .spool import write_json_atomic
 
 LOGGER = logging.getLogger(__name__)
 PAUSE_MARKER = re.compile(r"\{pause:(\d+)\}")
+PROMPT_PROGRESS_PREFIX = "KIENZLEFON_FORTSCHRITT "
 
 # Nummern bleiben releaseuebergreifend stabil; neue Bausteine werden nur angehaengt.
 PROMPT_CATALOG = (
@@ -157,8 +159,13 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
 
 
 class PromptGenerator:
-    def __init__(self, config: AppConfig):
+    def __init__(
+        self,
+        config: AppConfig,
+        progress: Callable[[dict[str, Any]], None] | None = None,
+    ):
         self.config = config
+        self.progress = progress
         self.manifest_path = config.paths.prompt_masters / "manifest.json"
         self._scheduled_tts_overrides: dict[str, Path] = {}
         self._cached_qwen_identity: str | None = None
@@ -198,44 +205,56 @@ class PromptGenerator:
         for name in removed:
             updated.pop(name, None)
         changed: list[str] = []
+        planned: list[tuple[str, str, str, Path | None]] = []
         skipped = 0
-        qwen_work = bool(scheduled_tts_to_refresh)
-        if self.config.tts.engine == "qwen" and not qwen_work:
-            for name, text in sorted(rendered.items()):
-                if self._manual_source(name) is not None:
-                    continue
-                digest = self._digest(name, text)
-                if (
-                    force
-                    or updated.get(name, {}).get("sha256") != digest
-                    or not self._outputs_exist(name)
-                ):
-                    qwen_work = True
-                    break
+        for name, prompt_text in sorted(rendered.items()):
+            human_source = self._manual_source(name)
+            digest = self._digest(name, prompt_text)
+            if (
+                not force
+                and updated.get(name, {}).get("sha256") == digest
+                and self._outputs_exist(name)
+            ):
+                skipped += 1
+                continue
+            planned.append((name, prompt_text, digest, human_source))
+
+        total = len(scheduled_tts_to_refresh) + len(planned)
+        self._progress(0, total, "plan")
+        qwen_work = self.config.tts.engine == "qwen" and (
+            bool(scheduled_tts_to_refresh)
+            or any(human_source is None for _name, _text, _digest, human_source in planned)
+        )
+        if qwen_work:
+            self._progress(0, total, "qwen_prepare")
         with self._qwen_maintenance(qwen_work):
+            if qwen_work:
+                self._progress(0, total, "qwen_ready")
             with tempfile.TemporaryDirectory(
                 prefix="kienzlefon-prompts-", dir=self.config.paths.prompt_masters
             ) as staging_name:
                 staging = Path(staging_name)
+                current = 0
                 if scheduled_tts_to_refresh:
-                    self._stage_scheduled_tts(rendered, staging, scheduled_tts_to_refresh)
-                for name, text in sorted(rendered.items()):
-                    human_source = self._manual_source(name)
+                    current = self._stage_scheduled_tts(
+                        rendered,
+                        staging,
+                        scheduled_tts_to_refresh,
+                        current=current,
+                        total=total,
+                    )
+                for name, prompt_text, digest, human_source in planned:
+                    current += 1
                     if human_source is not None:
+                        self._progress(current, total, "manual", name=name)
                         LOGGER.warning(
                             "Gespeicherte WAV-Datei hat Vorrang vor neuer TTS-Erzeugung: %s",
                             human_source,
                         )
-                    digest = self._digest(name, text)
-                    if (
-                        not force
-                        and updated.get(name, {}).get("sha256") == digest
-                        and self._outputs_exist(name)
-                    ):
-                        skipped += 1
-                        continue
-                    self._generate_one(name, text, staging)
-                    updated[name] = {"sha256": digest, "text": text}
+                    else:
+                        self._progress(current, total, "generate", name=name)
+                    self._generate_one(name, prompt_text, staging)
+                    updated[name] = {"sha256": digest, "text": prompt_text}
                     changed.append(name)
                 for name in changed:
                     self._replace(
@@ -258,6 +277,9 @@ class PromptGenerator:
                     for suffix in ("sln16", "g722", "alaw", "ulaw"):
                         (self.config.paths.prompts / f"{name}.{suffix}").unlink(missing_ok=True)
                     LOGGER.info("Nicht mehr verwendete Ansage entfernt: %s", name)
+            if qwen_work:
+                self._progress(total, total, "qwen_restore")
+        self._progress(total, total, "complete")
         write_json_atomic(
             self.manifest_path,
             {
@@ -526,18 +548,54 @@ class PromptGenerator:
             return False
 
     def _stage_scheduled_tts(
-        self, rendered: dict[str, str], staging: Path, names: set[str]
-    ) -> None:
+        self,
+        rendered: dict[str, str],
+        staging: Path,
+        names: set[str],
+        *,
+        current: int,
+        total: int,
+    ) -> int:
         for entry in self.config.scheduled_overrides:
             if entry.prompt_name not in names:
                 continue
             text = rendered.get(entry.prompt_name)
             if text is None:
                 continue
+            current += 1
+            self._progress(
+                current,
+                total,
+                "scheduled_tts",
+                name=entry.prompt_name,
+                label=entry.name,
+            )
             target = staging / "scheduled-tts" / f"{entry.identifier}.wav"
             target.parent.mkdir(parents=True, exist_ok=True)
             self.synthesize_text_file(text, target, f"sonderansage-{entry.identifier[:8]}")
             self._scheduled_tts_overrides[entry.prompt_name] = target
+        return current
+
+    def _progress(
+        self,
+        current: int,
+        total: int,
+        phase: str,
+        *,
+        name: str = "",
+        label: str = "",
+    ) -> None:
+        if self.progress is None:
+            return
+        self.progress(
+            {
+                "current": current,
+                "total": total,
+                "phase": phase,
+                "name": name,
+                "label": label,
+            }
+        )
 
     @staticmethod
     def normalize_audio_file(

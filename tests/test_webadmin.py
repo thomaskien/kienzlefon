@@ -170,6 +170,42 @@ def test_worker_applies_only_allowed_values_and_runs_generator(app_config, tmp_p
     ).hexdigest()
 
 
+def test_web_worker_streams_current_prompt_into_job_status(
+    app_config, tmp_path: Path, monkeypatch
+) -> None:
+    command = tmp_path / "prompt-progress"
+    command.write_text(
+        """#!/bin/sh
+printf '%s\n' 'KIENZLEFON_FORTSCHRITT {"current":0,"total":2,"phase":"plan","name":"","label":""}'
+printf '%s\n' 'KIENZLEFON_FORTSCHRITT {"current":1,"total":2,"phase":"generate","name":"greeting_open","label":""}'
+printf '%s\n' 'KIENZLEFON_FORTSCHRITT {"current":2,"total":2,"phase":"qwen_restore","name":"","label":""}'
+""",
+        encoding="utf-8",
+    )
+    command.chmod(0o755)
+    worker = _worker(app_config, tmp_path, prompts_command=str(command))
+    statuses: list[tuple[str, str]] = []
+    original_status = worker._status
+
+    def capture_status(job_id: str, code: str, *, detail: str = "") -> None:
+        statuses.append((code, detail))
+        original_status(job_id, code, detail=detail)
+
+    monkeypatch.setattr(worker, "_status", capture_status)
+
+    worker._generate_prompts("1" * 32)
+
+    assert (
+        "ansagen_werden_aktualisiert",
+        "[1/2] Automatische Ansage wird erzeugt: Begrüßung bei geöffneter Praxis",
+    ) in statuses
+    assert (
+        "ansagen_werden_aktualisiert",
+        "[2/2] Ansagen fertig; Whisper-Worker wird wieder gestartet.",
+    ) in statuses
+    assert statuses[-1] == ("ansagen_aktuell", "")
+
+
 def test_worker_rejects_non_allowlisted_fields_without_changing_config(
     app_config, tmp_path: Path
 ) -> None:

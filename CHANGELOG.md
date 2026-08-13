@@ -37,6 +37,7 @@ Changelog:
 - fuer eine Qwen-Sammelerzeugung wird ein zuvor aktiver Whisper-Worker nur einmal gestoppt und nach Abschluss oder Fehler einmal wieder gestartet
 - Wartungsmarker und gemeinsame Dateisperren verhindern neue Aufnahme- und ASR-Auftraege waehrend des Umschaltens
 - manuelle Aufnahmen werden bei Modell- oder Sprecherwechsel weder geloescht noch ueberschrieben
+- Terminal und Webinterface zeigen waehrend der Erzeugung Schrittzahl, aktuelle Ansage sowie Qwen-/Whisper-Umschaltphasen live an
 
 ## 1.9.3
 

@@ -170,6 +170,17 @@ Alle Ansagen bewusst neu erzeugen:
 sudo kienzlefon-ansagen --all
 ```
 
+Während der Verarbeitung wird der aktuelle Schritt unmittelbar vor der jeweiligen
+Ansage ausgegeben. Bei Qwen3-TTS erscheinen außerdem das vorübergehende Beenden und
+der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
+
+```text
+[0/4] 4 Verarbeitungsschritt(e) erforderlich.
+[0/4] Whisper-Worker wird für Qwen3-TTS vorbereitet.
+[1/4] Automatische Ansage wird erzeugt: greeting_open
+[2/4] Automatische Ansage wird erzeugt: phone_hours
+```
+
 Kienzlefon 2.0 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
 installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
 mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
