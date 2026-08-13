@@ -171,7 +171,13 @@ class PromptGenerator:
         self._cached_qwen_identity: str | None = None
         self._maintenance_depth = 0
 
-    def generate(self, force: bool = False) -> tuple[int, int]:
+    def generate(
+        self,
+        force: bool = False,
+        *,
+        only: set[str] | None = None,
+        new_qwen_variant: bool = False,
+    ) -> tuple[int, int]:
         self.config.paths.prompt_masters.mkdir(parents=True, exist_ok=True)
         lock_path = self.config.paths.prompt_masters / ".generation.lock"
         with lock_path.open("a+b") as generation_lock:
@@ -182,48 +188,79 @@ class PromptGenerator:
                 )
             except BlockingIOError as exc:
                 raise RuntimeError("Eine andere Ansagenerzeugung laeuft bereits") from exc
-            return self._generate_locked(force)
+            return self._generate_locked(force, only, new_qwen_variant)
 
-    def _generate_locked(self, force: bool) -> tuple[int, int]:
+    def _generate_locked(
+        self,
+        force: bool,
+        only: set[str] | None,
+        new_qwen_variant: bool,
+    ) -> tuple[int, int]:
         self._scheduled_tts_overrides.clear()
         self.config.paths.prompts.mkdir(parents=True, exist_ok=True)
         manifest = self._load_manifest()
         updated = dict(manifest.get("prompts", {}))
         rendered = rendered_prompts(self.config)
+        selected = set(rendered) if only is None else set(only)
+        unknown = sorted(selected - set(rendered))
+        if unknown:
+            raise RuntimeError("Unbekannte Ansage(n): " + ", ".join(unknown))
         tts_identity = self._tts_identity()
         scheduled_tts_to_refresh = {
             entry.prompt_name
             for entry in self.config.scheduled_overrides
-            if force
-            or manifest.get("tts_identity") != tts_identity
-            or updated.get(entry.prompt_name, {}).get("text")
-            != rendered.get(entry.prompt_name)
-            or entry.tts_path is None
-            or not entry.tts_path.is_file()
+            if entry.prompt_name in selected
+            and (
+                force
+                or manifest.get("tts_identity") != tts_identity
+                or updated.get(entry.prompt_name, {}).get("text")
+                != rendered.get(entry.prompt_name)
+                or entry.tts_path is None
+                or not entry.tts_path.is_file()
+            )
         }
         removed = sorted(set(updated) - set(rendered))
         for name in removed:
             updated.pop(name, None)
         changed: list[str] = []
-        planned: list[tuple[str, str, str, Path | None]] = []
+        planned: list[tuple[str, str, str, Path | None, int, bool]] = []
         skipped = 0
         for name, prompt_text in sorted(rendered.items()):
+            if name not in selected:
+                continue
             human_source = self._manual_source(name)
-            digest = self._digest(name, prompt_text)
+            automated_qwen = self._is_automated_qwen_source(name, human_source)
+            previous = updated.get(name, {})
+            qwen_variant = self._manifest_qwen_variant(previous)
+            if new_qwen_variant and automated_qwen:
+                qwen_variant += 1
+            digest = self._digest(name, prompt_text, qwen_variant=qwen_variant)
             if (
                 not force
-                and updated.get(name, {}).get("sha256") == digest
+                and previous.get("sha256") == digest
                 and self._outputs_exist(name)
             ):
                 skipped += 1
                 continue
-            planned.append((name, prompt_text, digest, human_source))
+            planned.append(
+                (
+                    name,
+                    prompt_text,
+                    digest,
+                    human_source,
+                    qwen_variant,
+                    automated_qwen,
+                )
+            )
 
         total = len(scheduled_tts_to_refresh) + len(planned)
         self._progress(0, total, "plan")
         qwen_work = self.config.tts.engine == "qwen" and (
             bool(scheduled_tts_to_refresh)
-            or any(human_source is None for _name, _text, _digest, human_source in planned)
+            or any(
+                automated_qwen
+                for _name, _text, _digest, _source, _variant, automated_qwen in planned
+            )
         )
         if qwen_work:
             self._progress(0, total, "qwen_prepare")
@@ -240,10 +277,21 @@ class PromptGenerator:
                         rendered,
                         staging,
                         scheduled_tts_to_refresh,
+                        qwen_variants={
+                            name: variant
+                            for name, _text, _digest, _source, variant, _auto in planned
+                        },
                         current=current,
                         total=total,
                     )
-                for name, prompt_text, digest, human_source in planned:
+                for (
+                    name,
+                    prompt_text,
+                    digest,
+                    human_source,
+                    qwen_variant,
+                    automated_qwen,
+                ) in planned:
                     current += 1
                     if human_source is not None:
                         self._progress(current, total, "manual", name=name)
@@ -253,8 +301,34 @@ class PromptGenerator:
                         )
                     else:
                         self._progress(current, total, "generate", name=name)
-                    self._generate_one(name, prompt_text, staging)
-                    updated[name] = {"sha256": digest, "text": prompt_text}
+                    qwen_seed = (
+                        self._effective_qwen_seed(qwen_variant)
+                        if automated_qwen
+                        else None
+                    )
+                    if qwen_seed is None:
+                        self._generate_one(name, prompt_text, staging)
+                    else:
+                        self._generate_one(
+                            name,
+                            prompt_text,
+                            staging,
+                            qwen_seed=qwen_seed,
+                        )
+                    # Bei gespeicherten TTS-Sonderansagen zeigt _manual_source
+                    # jetzt auf die gerade erzeugte Staging-Datei. Deshalb wird
+                    # der Digest nach der Erzeugung noch einmal aus der finalen
+                    # Quelle gebildet.
+                    final_digest = self._digest(
+                        name,
+                        prompt_text,
+                        qwen_variant=qwen_variant,
+                    )
+                    updated[name] = {
+                        "sha256": final_digest,
+                        "text": prompt_text,
+                        "qwen_variant": qwen_variant,
+                    }
                     changed.append(name)
                 for name in changed:
                     self._replace(
@@ -311,7 +385,14 @@ class PromptGenerator:
         )
         return len(changed), skipped
 
-    def _generate_one(self, name: str, text: str, staging: Path) -> None:
+    def _generate_one(
+        self,
+        name: str,
+        text: str,
+        staging: Path,
+        *,
+        qwen_seed: int | None = None,
+    ) -> None:
         with tempfile.TemporaryDirectory(
             prefix=f"kienzlefon-prompt-{name}-", dir=staging
         ) as temporary_name:
@@ -323,7 +404,13 @@ class PromptGenerator:
             if human_source is not None:
                 shutil.copyfile(human_source, source_wav)
             else:
-                self._synthesize(parts, source_wav, temporary, name)
+                self._synthesize(
+                    parts,
+                    source_wav,
+                    temporary,
+                    name,
+                    qwen_seed=qwen_seed,
+                )
             self.normalize_audio(source_wav, master_wav, name)
             conversions = {
                 f"{name}.sln16": ["-ar", "16000", "-ac", "1", "-f", "s16le", "-c:a", "pcm_s16le"],
@@ -381,7 +468,14 @@ class PromptGenerator:
             peak_db=self.config.tts.max_true_peak_db,
         )
 
-    def synthesize_text_file(self, text: str, output: Path, name: str) -> None:
+    def synthesize_text_file(
+        self,
+        text: str,
+        output: Path,
+        name: str,
+        *,
+        qwen_seed: int | None = None,
+    ) -> None:
         """Create one normalized browser-compatible WAV without changing active prompts."""
         with self._qwen_maintenance(self.config.tts.engine == "qwen"):
             self.config.paths.prompt_masters.mkdir(parents=True, exist_ok=True)
@@ -391,7 +485,13 @@ class PromptGenerator:
             ) as temporary_name:
                 temporary = Path(temporary_name)
                 source_wav = temporary / "source.wav"
-                self._synthesize(split_pause_markers(text), source_wav, temporary, name)
+                self._synthesize(
+                    split_pause_markers(text),
+                    source_wav,
+                    temporary,
+                    name,
+                    qwen_seed=qwen_seed,
+                )
                 self.normalize_audio(source_wav, output, name)
 
     @contextmanager
@@ -553,6 +653,7 @@ class PromptGenerator:
         staging: Path,
         names: set[str],
         *,
+        qwen_variants: dict[str, int],
         current: int,
         total: int,
     ) -> int:
@@ -572,7 +673,17 @@ class PromptGenerator:
             )
             target = staging / "scheduled-tts" / f"{entry.identifier}.wav"
             target.parent.mkdir(parents=True, exist_ok=True)
-            self.synthesize_text_file(text, target, f"sonderansage-{entry.identifier[:8]}")
+            qwen_seed = (
+                self._effective_qwen_seed(qwen_variants.get(entry.prompt_name, 0))
+                if self.config.tts.engine == "qwen" and entry.source == "tts"
+                else None
+            )
+            self.synthesize_text_file(
+                text,
+                target,
+                f"sonderansage-{entry.identifier[:8]}",
+                qwen_seed=qwen_seed,
+            )
             self._scheduled_tts_overrides[entry.prompt_name] = target
         return current
 
@@ -715,7 +826,7 @@ class PromptGenerator:
         ]
         return master.is_file() and all(path.is_file() for path in outputs)
 
-    def _digest(self, name: str, text: str) -> str:
+    def _digest(self, name: str, text: str, *, qwen_variant: int = 0) -> str:
         human_source = self._manual_source(name)
         human_digest = ""
         if human_source is not None:
@@ -746,8 +857,28 @@ class PromptGenerator:
                 str(self.config.tts.max_true_peak_db),
                 human_digest,
             )
+            # Variante 0 bleibt absichtlich mit vorhandenen 2.0-Manifesten
+            # kompatibel. Erst eine ausdrueckliche neue Variante erweitert den
+            # Digest und loest dadurch keine ungewollte Komplettgenerierung aus.
+            if qwen_variant:
+                parts = (*parts, f"qwen-variant:{qwen_variant}")
         value = "\0".join(parts)
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _manifest_qwen_variant(entry: Any) -> int:
+        if not isinstance(entry, dict):
+            return 0
+        value = entry.get("qwen_variant", 0)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return 0
+        return value
+
+    def _effective_qwen_seed(self, variant: int) -> int:
+        # Der Generator akzeptiert nichtnegative Ganzzahlen. Der Variantenzaehler
+        # bleibt im Manifest erhalten, waehrend die wirksame Seed-Zahl kompakt
+        # und fuer jedes erneute Erzeugen verschieden bleibt.
+        return (self.config.tts.qwen_seed + variant) % (2**31)
 
     def _tts_identity(self) -> str:
         if self.config.tts.engine == "piper":
@@ -804,6 +935,23 @@ class PromptGenerator:
         except OSError as exc:
             raise RuntimeError(f"Qwen3-TTS-Generator ist nicht lesbar: {generator}: {exc}") from exc
 
+    def _is_automated_qwen_source(
+        self, name: str, source: Path | None
+    ) -> bool:
+        if self.config.tts.engine != "qwen":
+            return False
+        scheduled = next(
+            (
+                entry
+                for entry in self.config.scheduled_overrides
+                if entry.prompt_name == name
+            ),
+            None,
+        )
+        if scheduled is not None:
+            return scheduled.source == "tts"
+        return source is None
+
     def _manual_source(self, name: str) -> Path | None:
         scheduled = next(
             (
@@ -847,10 +995,12 @@ class PromptGenerator:
         output: Path,
         temporary: Path,
         name: str,
+        *,
+        qwen_seed: int | None = None,
     ) -> None:
         if len(parts) == 1 and isinstance(parts[0], str):
             self._run(
-                self._tts_command(parts[0], output),
+                self._tts_command(parts[0], output, qwen_seed=qwen_seed),
                 f"{self.config.tts.engine}-Erzeugung fehlgeschlagen fuer {name}",
             )
             return
@@ -860,20 +1010,25 @@ class PromptGenerator:
             if not isinstance(part, str):
                 continue
             path = temporary / f"segment-{index:03d}.wav"
+            segment_seed = None if qwen_seed is None else qwen_seed + index
             self._run(
-                self._tts_command(part, path),
+                self._tts_command(part, path, qwen_seed=segment_seed),
                 f"{self.config.tts.engine}-Erzeugung fehlgeschlagen fuer {name}, "
                 f"Segment {index + 1}",
             )
             audio_parts[index] = path
         self._join_with_pauses(parts, audio_parts, output, name)
 
-    def _tts_command(self, text: str, output: Path) -> list[str]:
+    def _tts_command(
+        self, text: str, output: Path, *, qwen_seed: int | None = None
+    ) -> list[str]:
         if self.config.tts.engine == "qwen":
-            return self._qwen_command(text, output)
+            return self._qwen_command(text, output, seed=qwen_seed)
         return self._piper_command(text, output)
 
-    def _qwen_command(self, text: str, output: Path) -> list[str]:
+    def _qwen_command(
+        self, text: str, output: Path, *, seed: int | None = None
+    ) -> list[str]:
         generator = self.config.tts.qwen_generator
         if not generator.is_file() or not os.access(generator, os.X_OK):
             raise RuntimeError(
@@ -889,7 +1044,7 @@ class PromptGenerator:
             "--language",
             self.config.tts.qwen_language,
             "--seed",
-            str(self.config.tts.qwen_seed),
+            str(self.config.tts.qwen_seed if seed is None else seed),
             "--output",
             str(output),
         ]

@@ -103,8 +103,24 @@ def prompts_main() -> None:
     _logging()
     parser = _parser("Kienzlefon Ansagen erzeugen")
     parser.add_argument("--all", action="store_true", help="Alle Ansagen neu erzeugen")
+    parser.add_argument(
+        "--prompt",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Nur diese Ansage neu erzeugen (mehrfach verwendbar)",
+    )
+    parser.add_argument(
+        "--new-variant",
+        action="store_true",
+        help="Bei Qwen3-TTS einen neuen Seed fuer die gewaehlte Ansage verwenden",
+    )
     parser.add_argument("--machine-progress", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
+    if arguments.all and arguments.prompt:
+        parser.error("--all und --prompt koennen nicht gemeinsam verwendet werden")
+    if arguments.new_variant and not (arguments.all or arguments.prompt):
+        parser.error("--new-variant erfordert --all oder mindestens ein --prompt")
     config: AppConfig | None = None
 
     def progress(event: dict[str, object]) -> None:
@@ -140,8 +156,13 @@ def prompts_main() -> None:
     try:
         config = _load(arguments.config)
         print("Ansagen werden auf Aenderungen geprueft.", flush=True)
+        selected = set(arguments.prompt) if arguments.prompt else None
         generated, skipped = PromptGenerator(config, progress=progress).generate(
-            force=arguments.all
+            force=arguments.all or bool(selected),
+            only=selected,
+            # Ein ausdrueckliches Neu-Erzeugen soll bei einem stochastischen
+            # Modell nicht wieder dieselbe deterministische Datei liefern.
+            new_qwen_variant=arguments.all or arguments.new_variant,
         )
         print(f"Ansagen erzeugt: {generated}; unveraendert: {skipped}")
     except Exception as exc:

@@ -206,6 +206,39 @@ printf '%s\n' 'KIENZLEFON_FORTSCHRITT {"current":2,"total":2,"phase":"qwen_resto
     assert statuses[-1] == ("ansagen_aktuell", "")
 
 
+def test_web_worker_requests_new_qwen_variant_for_only_selected_prompt(
+    app_config, tmp_path: Path, monkeypatch
+) -> None:
+    text = app_config.source.read_text(encoding="utf-8")
+    app_config.source.write_text(
+        text.replace('engine = "piper"', 'engine = "qwen"', 1),
+        encoding="utf-8",
+    )
+    worker = _worker(app_config, tmp_path)
+    requested: list[tuple[str, tuple[str, ...]]] = []
+
+    def generate(job_id: str, *, arguments: tuple[str, ...] = ()) -> None:
+        requested.append((job_id, arguments))
+
+    monkeypatch.setattr(worker, "_generate_prompts", generate)
+    monkeypatch.setattr(worker, "export", lambda: {})
+    job_id = "9" * 32
+    _queue(
+        worker,
+        job_id,
+        {
+            "action": "regenerate_prompt",
+            "config_hash": hashlib.sha256(app_config.source.read_bytes()).hexdigest(),
+            "prompt": "first_name",
+        },
+    )
+
+    assert worker.run_once() is True
+    assert requested == [
+        (job_id, ("--prompt", "first_name", "--new-variant"))
+    ]
+
+
 def test_worker_rejects_non_allowlisted_fields_without_changing_config(
     app_config, tmp_path: Path
 ) -> None:
@@ -866,6 +899,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     )
     assert audio.stdout == b"browser-audio"
     assert "Auf TTS umschalten" in result.stdout
+    assert "Noch einmal neu generieren" in result.stdout
     node = shutil.which("node")
     if node:
         match = re.search(r'<script nonce="[^"]+">\n(.*?)\n</script>', result.stdout, re.S)

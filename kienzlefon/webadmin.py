@@ -278,6 +278,7 @@ def _read_override_presets(config: AppConfig) -> list[dict[str, Any]]:
         presets.append(
             {
                 "id": entry.identifier,
+                "prompt_name": entry.prompt_name,
                 "name": entry.name,
                 "announcement": entry.announcement,
                 "active": entry.active,
@@ -1044,6 +1045,8 @@ class WebAdminWorker:
                 self._start_recording(job_id, job)
             elif action == "activate_candidate":
                 self._activate_candidate(job_id, job)
+            elif action == "regenerate_prompt":
+                self._regenerate_prompt(job_id, job)
             elif action == "save_override_preset":
                 self._save_override_preset(job_id, job)
             elif action == "record_override_preset":
@@ -1098,12 +1101,18 @@ class WebAdminWorker:
         finally:
             os.close(directory_fd)
 
-    def _generate_prompts(self, job_id: str) -> None:
+    def _generate_prompts(
+        self, job_id: str, *, arguments: tuple[str, ...] = ()
+    ) -> None:
         self._status(job_id, "ansagen_werden_aktualisiert")
         try:
             with self.audio_lock_path.open("a+b") as audio_lock:
                 fcntl.flock(audio_lock.fileno(), fcntl.LOCK_EX)
-                result = self._run_prompts_with_progress(job_id, timeout=14_400)
+                result = self._run_prompts_with_progress(
+                    job_id,
+                    timeout=14_400,
+                    arguments=arguments,
+                )
         except Exception as exc:
             self._status(job_id, "ansagenerzeugung_fehlgeschlagen", detail=str(exc))
             raise
@@ -1115,13 +1124,18 @@ class WebAdminWorker:
         self._status(job_id, "ansagen_aktuell")
 
     def _run_prompts_with_progress(
-        self, job_id: str, *, timeout: int
+        self,
+        job_id: str,
+        *,
+        timeout: int,
+        arguments: tuple[str, ...] = (),
     ) -> subprocess.CompletedProcess[bytes]:
         command = [
             self.prompts_command,
             "--config",
             str(self.config_path),
             "--machine-progress",
+            *arguments,
         ]
         try:
             process = subprocess.Popen(
@@ -1179,6 +1193,45 @@ class WebAdminWorker:
             selector.close()
             process.stdout.close()
         return subprocess.CompletedProcess(command, returncode, bytes(captured), b"")
+
+    def _regenerate_prompt(self, job_id: str, job: Mapping[str, Any]) -> None:
+        allowed = {"action", "id", "config_hash", "prompt"}
+        if set(job) - allowed:
+            raise WebAdminError("Auftrag enthält nicht freigegebene Felder")
+        if str(job.get("config_hash", "")) != _config_hash(self.config_path):
+            raise WebAdminError("Die Konfiguration wurde zwischenzeitlich geändert")
+        name = str(job.get("prompt", ""))
+        config = load_config(self.config_path)
+        if not PROMPT_NAME.fullmatch(name) or name not in rendered_prompts(config):
+            raise WebAdminError("Unbekannte Ansage")
+        if config.tts.engine != "qwen":
+            raise WebAdminError(
+                "Eine neue TTS-Variante ist nur mit Qwen3-TTS verfügbar"
+            )
+        scheduled = next(
+            (
+                entry
+                for entry in config.scheduled_overrides
+                if entry.prompt_name == name
+            ),
+            None,
+        )
+        manual_active = (
+            scheduled.source == "manuell"
+            if scheduled is not None
+            else PromptGenerator(config)._manual_source(name) is not None
+        )
+        if manual_active:
+            raise WebAdminError(
+                "Für diese Ansage ist eine manuelle Aufnahme aktiv; bitte zuerst TTS wählen"
+            )
+        try:
+            self._generate_prompts(
+                job_id,
+                arguments=("--prompt", name, "--new-variant"),
+            )
+        finally:
+            self.export()
 
     def _consume_prompt_progress(self, job_id: str, raw_line: bytes) -> None:
         line = raw_line.decode("utf-8", errors="replace").strip()

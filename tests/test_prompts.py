@@ -24,7 +24,13 @@ from pathlib import Path
 
 import pytest
 
-from kienzlefon.config import PromptConfig, TimeWindow, WeeklySchedule, load_config
+from kienzlefon.config import (
+    OverrideConfig,
+    PromptConfig,
+    TimeWindow,
+    WeeklySchedule,
+    load_config,
+)
 from kienzlefon.prompts import PROMPT_CATALOG, PromptGenerator, rendered_prompts, split_pause_markers
 
 
@@ -215,6 +221,170 @@ def test_unchanged_qwen_prompts_are_not_synthesized(app_config, monkeypatch) -> 
         lambda *_args: (_ for _ in ()).throw(AssertionError("Qwen darf nicht starten")),
     )
 
+    assert generator.generate() == (0, 1)
+
+
+def test_targeted_qwen_regeneration_advances_only_selected_variant(
+    app_config, monkeypatch
+) -> None:
+    generator_path = app_config.source.parent / "kienzlefon-qwen3-tts-generate"
+    generator_path.write_text("#!/bin/sh\n# kienzlefon-worker.service\n", encoding="utf-8")
+    generator_path.chmod(0o755)
+    config = replace(
+        app_config,
+        tts=replace(app_config.tts, engine="qwen", qwen_generator=generator_path),
+    )
+    generator = PromptGenerator(config)
+    rendered = {
+        "first_name": "Bitte nennen Sie Ihren Vornamen.",
+        "specialist_agent": "Anruf von Fachstelle.",
+    }
+    generator.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    generator.manifest_path.write_text(
+        json.dumps(
+            {
+                "tts_identity": generator._tts_identity(),
+                "prompts": {
+                    name: {"sha256": generator._digest(name, text), "text": text}
+                    for name, text in rendered.items()
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("kienzlefon.prompts.rendered_prompts", lambda _config: rendered)
+    monkeypatch.setattr(generator, "_outputs_exist", lambda _name: True)
+    generated: list[tuple[str, int | None]] = []
+
+    def generate_one(
+        name: str,
+        _text: str,
+        staging: Path,
+        *,
+        qwen_seed: int | None = None,
+    ) -> None:
+        generated.append((name, qwen_seed))
+        master = staging / "masters" / f"{name}.wav"
+        master.parent.mkdir(parents=True, exist_ok=True)
+        master.write_bytes(b"wav")
+        for suffix in ("sln16", "g722", "alaw", "ulaw"):
+            prompt = staging / "prompts" / f"{name}.{suffix}"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_bytes(suffix.encode("ascii"))
+
+    monkeypatch.setattr(generator, "_generate_one", generate_one)
+
+    assert generator.generate(
+        force=True,
+        only={"first_name"},
+        new_qwen_variant=True,
+    ) == (1, 0)
+    assert generated == [("first_name", 43)]
+    first_manifest = json.loads(generator.manifest_path.read_text(encoding="utf-8"))
+    assert first_manifest["prompts"]["first_name"]["qwen_variant"] == 1
+    assert "qwen_variant" not in first_manifest["prompts"]["specialist_agent"]
+
+    assert generator.generate(
+        force=True,
+        only={"first_name"},
+        new_qwen_variant=True,
+    ) == (1, 0)
+    assert generated[-1] == ("first_name", 44)
+    second_manifest = json.loads(generator.manifest_path.read_text(encoding="utf-8"))
+    assert second_manifest["prompts"]["first_name"]["qwen_variant"] == 2
+
+    assert generator.generate() == (0, 2)
+    assert generated == [("first_name", 43), ("first_name", 44)]
+
+
+def test_targeted_scheduled_qwen_regeneration_uses_new_variant(
+    app_config, monkeypatch
+) -> None:
+    generator_path = app_config.source.parent / "kienzlefon-qwen3-tts-generate"
+    generator_path.write_text("#!/bin/sh\n# kienzlefon-worker.service\n", encoding="utf-8")
+    generator_path.chmod(0o755)
+    preset_id = "1" * 32
+    preset_directory = app_config.paths.prompt_masters / "sonderansagen" / preset_id
+    preset_directory.mkdir(parents=True)
+    tts_path = preset_directory / "tts.wav"
+    tts_path.write_bytes(b"old-tts")
+    scheduled = OverrideConfig(
+        active=True,
+        announcement="Geplante Ansage.",
+        block_phone_hours=False,
+        expires_at=None,
+        position="statt_begruessung",
+        identifier=preset_id,
+        name="Planung",
+        source="tts",
+        tts_path=tts_path,
+    )
+    config = replace(
+        app_config,
+        scheduled_overrides=(scheduled,),
+        tts=replace(app_config.tts, engine="qwen", qwen_generator=generator_path),
+    )
+    generator = PromptGenerator(config)
+    rendered = {scheduled.prompt_name: scheduled.announcement}
+    generator.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    generator.manifest_path.write_text(
+        json.dumps(
+            {
+                "tts_identity": generator._tts_identity(),
+                "prompts": {
+                    scheduled.prompt_name: {
+                        "sha256": generator._digest(
+                            scheduled.prompt_name, scheduled.announcement
+                        ),
+                        "text": scheduled.announcement,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("kienzlefon.prompts.rendered_prompts", lambda _config: rendered)
+    monkeypatch.setattr(generator, "_outputs_exist", lambda _name: True)
+    seeds: list[int | None] = []
+
+    def synthesize(
+        _text: str,
+        output: Path,
+        _name: str,
+        *,
+        qwen_seed: int | None = None,
+    ) -> None:
+        seeds.append(qwen_seed)
+        output.write_bytes(b"new-tts")
+
+    def generate_one(
+        name: str,
+        _text: str,
+        staging: Path,
+        *,
+        qwen_seed: int | None = None,
+    ) -> None:
+        assert qwen_seed == 43
+        master = staging / "masters" / f"{name}.wav"
+        master.parent.mkdir(parents=True, exist_ok=True)
+        master.write_bytes(b"wav")
+        for suffix in ("sln16", "g722", "alaw", "ulaw"):
+            prompt = staging / "prompts" / f"{name}.{suffix}"
+            prompt.parent.mkdir(parents=True, exist_ok=True)
+            prompt.write_bytes(suffix.encode("ascii"))
+
+    monkeypatch.setattr(generator, "synthesize_text_file", synthesize)
+    monkeypatch.setattr(generator, "_generate_one", generate_one)
+
+    assert generator.generate(
+        force=True,
+        only={scheduled.prompt_name},
+        new_qwen_variant=True,
+    ) == (1, 0)
+    assert seeds == [43]
+    assert tts_path.read_bytes() == b"new-tts"
+    manifest = json.loads(generator.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["prompts"][scheduled.prompt_name]["qwen_variant"] == 1
     assert generator.generate() == (0, 1)
 
 

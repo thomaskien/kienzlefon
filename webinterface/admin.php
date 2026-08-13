@@ -133,6 +133,7 @@ function queue_job(array $payload): string
         'save',
         'record',
         'activate_candidate',
+        'regenerate_prompt',
         'save_override_preset',
         'record_override_preset',
         'delete_override_preset',
@@ -648,6 +649,7 @@ if ($effectivePresetId !== '') {
                     <div class="announcement-controls">
                         <div class="source-control"><label for="source-<?= h($source['name']) ?>">Aktive Audioquelle</label><select id="source-<?= h($source['name']) ?>" data-source="<?= h($source['name']) ?>"><option value="tts" <?= ($source['source'] ?? '') === 'tts' ? 'selected' : '' ?>>Automatisch (TTS)</option><option value="manuell" <?= ($source['source'] ?? '') === 'manuell' ? 'selected' : '' ?> <?= empty($source['manual_available']) ? 'disabled' : '' ?>>Manuelle Aufnahme</option></select></div>
                         <button class="button secondary use-tts" data-prompt="<?= h($source['name']) ?>" type="button">Auf TTS umschalten</button>
+                        <?php if (($source['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($source['name']) ?>" type="button">Noch einmal neu generieren</button><?php endif; ?>
                         <button class="button record-announcement" data-prompt="<?= h($source['name']) ?>" data-extension-select="record-extension" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Genau diese Ansage aufnehmen</button>
                         <?php if (!empty($source['candidate_available'])): ?><button class="button activate-candidate" data-prompt="<?= h($source['name']) ?>" type="button">Neue Aufnahme aktivieren</button><?php endif; ?>
                     </div>
@@ -679,6 +681,7 @@ if ($effectivePresetId !== '') {
                     <div class="source-control"><label for="override-source">Aktive Audioquelle</label><select id="override-source"><option value="tts" <?= ($state['override']['source'] ?? '') === 'tts' ? 'selected' : '' ?>>Automatisch (TTS)</option><option value="manuell" <?= ($state['override']['source'] ?? '') === 'manuell' ? 'selected' : '' ?> <?= empty($state['override']['manual_available']) ? 'disabled' : '' ?>>Manuelle Aufnahme</option></select></div>
                     <div class="source-control"><label for="override-record-extension">Aufnahme-Nebenstelle</label><select id="override-record-extension" <?= empty($state['extensions']) ? 'disabled' : '' ?>><?php foreach (($state['extensions'] ?? []) as $extension): ?><option value="<?= h($extension) ?>"><?= h($extension) ?></option><?php endforeach; ?></select></div>
                     <button class="button secondary" id="use-override-tts" type="button">Auf TTS umschalten</button>
+                    <?php if (($state['override']['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="override" type="button">Noch einmal neu generieren</button><?php endif; ?>
                     <button class="button record-announcement" data-prompt="override" data-extension-select="override-record-extension" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Genau diese Sonderansage aufnehmen</button>
                     <?php if (!empty($state['override']['candidate_available'])): ?><button class="button activate-candidate" data-prompt="override" type="button">Neue Sonderansage aktivieren</button><?php endif; ?>
                 </div>
@@ -720,6 +723,7 @@ if ($effectivePresetId !== '') {
                         </div>
                         <div class="announcement-controls">
                             <button class="button secondary load-preset" data-preset-id="<?= h($preset['id']) ?>" data-preset-source="tts" type="button">Mit TTS bearbeiten</button>
+                            <?php if (($preset['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($preset['prompt_name'] ?? ('override_' . $preset['id'])) ?>" type="button">TTS noch einmal neu generieren</button><?php endif; ?>
                             <?php if (!empty($preset['manual_available'])): ?><button class="button secondary load-preset" data-preset-id="<?= h($preset['id']) ?>" data-preset-source="manuell" type="button">Mit WAV bearbeiten</button><?php endif; ?>
                             <button class="button secondary rerecord-preset" data-preset-id="<?= h($preset['id']) ?>" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Neu aufnehmen</button>
                             <button class="button danger delete-preset" data-preset-id="<?= h($preset['id']) ?>" type="button">Löschen</button>
@@ -773,6 +777,7 @@ document.getElementById('save-override-preset').addEventListener('click', () => 
 document.getElementById('record-new-override-preset').addEventListener('click', () => safely(recordOverridePreset));
 document.getElementById('clear-override-preset').addEventListener('click', () => { editingPresetId = ''; selectedManualPreset = ''; document.getElementById('override-preset-name').value = ''; document.getElementById('override-preset-active').checked = false; document.getElementById('override-preset-priority').value = '100'; document.getElementById('override-preset-valid-from').value = ''; document.getElementById('override-preset-expiry').value = ''; document.getElementById('override-preset-position').value = 'statt_begruessung'; document.getElementById('override-preset-block').checked = false; document.getElementById('override-preset-source').value = 'tts'; showFlash('Neue Eingabe', 'Geben Sie einen neuen Namen ein. Der aktuelle TTS-Text bleibt als Ausgangspunkt erhalten.'); });
 document.querySelectorAll('.use-tts').forEach(button => button.addEventListener('click', () => safely(async () => { const card = button.closest('.announcement-card'); card.querySelector('[data-source]').value = 'tts'; await savePrompts(); })));
+document.querySelectorAll('.regenerate-tts').forEach(button => button.addEventListener('click', () => safely(async () => { if (!confirm('Für genau diese Ansage eine neue TTS-Variante erzeugen und nach erfolgreicher Prüfung aktivieren?')) return; await queue({action:'regenerate_prompt', config_hash:configHash, prompt:button.dataset.prompt}); })));
 document.getElementById('use-override-tts').addEventListener('click', () => safely(async () => { document.getElementById('override-source').value = 'tts'; selectedManualPreset = ''; await saveOverride(); }));
 document.getElementById('override-source').addEventListener('change', event => { if (event.target.value !== 'manuell') selectedManualPreset = ''; });
 document.querySelectorAll('.record-announcement').forEach(button => button.addEventListener('click', () => safely(async () => { const extension = document.getElementById(button.dataset.extensionSelect).value; await queue({action:'record', prompt:button.dataset.prompt, extension}); })));
