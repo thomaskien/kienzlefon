@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.1.1
+Version: 2.1.2
 Changelog:
+- 2.1.2: Passwortloser WireGuard-Zugriff bleibt nach einem Systemneustart erhalten.
 - 2.1.1: Hauptinstaller bietet Webinterface-Installation oder -Aktualisierung immer an.
 - 2.1: Gezielte Qwen-Varianten, Webinterface 1.1 und WireGuard-KI-Client ergaenzt.
 - 2.0: Qwen3-TTS, globale Sprecherwahl, Webinterface 1.0 und differenzielle Ansagenerzeugung ergaenzt.
@@ -27,6 +28,16 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.1.2
+
+- `/run/kienzlefon-webinterface/state.json` wird nach jedem Systemstart neu aus der geschuetzten Konfiguration exportiert
+- der Exportdienst ist nun selbst fuer `multi-user.target` aktiviert und laeuft nach `systemd-tmpfiles-setup.service`
+- der Export wird vor dem schlanken PHP-Systemdienst sowie vor Apache und Nginx eingeordnet
+- ein manueller Start des PHP-Systemdienstes zieht den Exportdienst ebenfalls als Abhaengigkeit heran
+- damit faellt das Webinterface nach einem Reboot nicht mehr wegen fehlenden Laufzeitstatus auf Kennwortschutz zurueck
+- Kienzlefon traegt die Patchversion 2.1.2, der separate Webinterface-Installer die Patchversion 1.1.2
+- der Qwen3-TTS-Installer und seine Generator-Schnittstelle bleiben unveraendert auf v1.5
 
 ## 2.1.1
 

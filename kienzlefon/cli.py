@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.1.1
+# Version: 2.1.2
 # Changelog:
+# - 2.1.2: Versionsausgabe der Konfigurationsmigration aktualisiert.
 # - 2.1.1: Versionsausgabe der Konfigurationsmigration aktualisiert.
 # - 2.1: Gezielte Qwen-Neugenerierung mit neuer Variante je Ansage ergaenzt.
 # - 2.0: Laufende Ansagenerzeugung menschenlesbar und maschinenlesbar ausgegeben.
@@ -381,7 +382,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.1.1 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.1.2 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -414,4 +415,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.1.1 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.1.2 ergaenzt: {target}")

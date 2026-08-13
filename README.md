@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.1.1
+Version: 2.1.2
 
+- 2.1.2: Passwortloser WireGuard-Zugriff bleibt nach einem Systemneustart erhalten.
 - 2.1.1: Hauptinstaller bietet Installation oder Aktualisierung des Webinterfaces immer an.
 - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client ergaenzt.
 - 2.0: Lokales Qwen3-TTS, globale Sprecherwahl und differenzielle Ansagenerzeugung ergaenzt.
@@ -39,7 +40,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.1.1**
+Version: **2.1.2**
 
 ## Eigenschaften
 
@@ -184,7 +185,7 @@ der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
 [2/4] Automatische Ansage wird erzeugt: phone_hours
 ```
 
-Kienzlefon 2.1.1 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
+Kienzlefon 2.1.2 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
 installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
 mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
 
@@ -272,6 +273,11 @@ separate Installer kann weiterhin direkt ausgefuehrt werden:
 ```bash
 sudo ./kienzlefon-webinterface-installer.sh
 ```
+
+Der Webinterface-Installer 1.1.2 aktiviert den Export des fluechtigen
+Laufzeitstatus als Boot-Dienst. Dadurch werden nach dem Leeren von `/run` bei
+einem Systemneustart insbesondere der konfigurierte Passwortmodus und die
+WireGuard-Bindung vor dem Webserverstart wiederhergestellt.
 
 Es bearbeitet nur Zeiten und Ansagen. Ansagen koennen direkt im Browser
 abgespielt und ueber eine freigegebene Nebenstelle neu aufgenommen werden.

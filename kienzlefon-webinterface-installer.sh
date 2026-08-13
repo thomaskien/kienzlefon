@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Separater Installer fuer das Kienzlefon-Webinterface.
-# Version: 1.1.1
+# Version: 1.1.2
 # Changelog:
+# - 1.1.2: Laufzeitstatus wird nach jedem Systemstart vor den Webservern neu exportiert.
 # - 1.1.1: Bestaetigte Aufrufe aus dem Kienzlefon-Hauptinstaller werden unterstuetzt.
 # - 1.1: Gezielte neue Qwen-Varianten je Ansage und Sonderansage ergaenzt.
 # - 1.0: Globale TTS-Modell- und Sprecherwahl sowie sichere Qwen3-TTS-Ausfuehrung.
@@ -26,7 +27,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"
@@ -354,6 +355,8 @@ EOF
   cat >/etc/systemd/system/kienzlefon-webinterface-refresh.service <<EOF
 [Unit]
 Description=Kienzlefon Webinterface Ansicht und Kennwort-Hash aktualisieren
+After=systemd-tmpfiles-setup.service
+Before=kienzlefon-webinterface.service apache2.service nginx.service
 
 [Service]
 Type=oneshot
@@ -367,6 +370,9 @@ PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=${RUNTIME_DIR}
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
   cat >/etc/systemd/system/kienzlefon-webinterface-refresh.path <<EOF
@@ -417,7 +423,7 @@ install_standalone() {
 [Unit]
 Description=Kienzlefon Webinterface
 After=network-online.target kienzlefon-webinterface-refresh.service
-Wants=network-online.target
+Wants=network-online.target kienzlefon-webinterface-refresh.service
 
 [Service]
 Type=simple
@@ -586,8 +592,7 @@ main() {
     printf 'Asterisk wird einmal neu gestartet, damit die neue Dateifreigabe wirksam ist.\n'
     systemctl restart asterisk
   fi
-  systemctl enable --now kienzlefon-webinterface-worker.path kienzlefon-webinterface-refresh.path
-  systemctl start kienzlefon-webinterface-refresh.service
+  systemctl enable --now kienzlefon-webinterface-worker.path kienzlefon-webinterface-refresh.path kienzlefon-webinterface-refresh.service
   case "$SERVER_MODE" in
     standalone) install_standalone ;;
     apache) install_apache ;;

@@ -681,7 +681,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="1.1.1"' in installer
+    assert 'VERSION="1.1.2"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -716,6 +716,37 @@ def test_web_installer_skips_certificate_successfully_without_tls() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_web_installer_restores_volatile_state_on_every_boot() -> None:
+    installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
+    refresh_start = installer.index(
+        "cat >/etc/systemd/system/kienzlefon-webinterface-refresh.service"
+    )
+    refresh_end = installer.index(
+        "cat >/etc/systemd/system/kienzlefon-webinterface-refresh.path",
+        refresh_start,
+    )
+    refresh_unit = installer[refresh_start:refresh_end]
+    standalone_start = installer.index(
+        "cat >/etc/systemd/system/kienzlefon-webinterface.service"
+    )
+    standalone_end = installer.index("systemctl disable --now", standalone_start)
+    standalone_unit = installer[standalone_start:standalone_end]
+
+    assert "After=systemd-tmpfiles-setup.service" in refresh_unit
+    assert "Before=kienzlefon-webinterface.service apache2.service nginx.service" in (
+        refresh_unit
+    )
+    assert "[Install]\nWantedBy=multi-user.target" in refresh_unit
+    assert "Wants=network-online.target kienzlefon-webinterface-refresh.service" in (
+        standalone_unit
+    )
+    assert (
+        "systemctl enable --now kienzlefon-webinterface-worker.path "
+        "kienzlefon-webinterface-refresh.path kienzlefon-webinterface-refresh.service"
+        in installer
+    )
 
 
 def test_php_renders_passwordless_dashboard_only_on_configured_address(

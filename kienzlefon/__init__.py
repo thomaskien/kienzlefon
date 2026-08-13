@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.1.1
+# Version: 2.1.2
 # Changelog:
+# - 2.1.2: Releasekennung auf 2.1.2 angehoben.
 # - 2.1.1: Releasekennung auf 2.1.1 angehoben.
 # - 2.1: Releasekennung auf 2.1 angehoben.
 # - 2.0: Releasekennung auf 2.0 angehoben.
@@ -26,4 +27,4 @@
 
 """Kienzlefon Kernpaket."""
 
-__version__ = "2.1.1"
+__version__ = "2.1.2"

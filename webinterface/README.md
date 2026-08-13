@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface 1.1.1
+# Kienzlefon-Webinterface 1.1.2
 
 Diese Fassung bleibt ein eigener, schlanker Installationsbaustein. Der Kienzlefon-Hauptinstaller
 bietet seine Installation oder Aktualisierung bei jedem Lauf ausdrücklich an. Sie besteht aus einer
@@ -68,3 +68,9 @@ bleibt dadurch nicht mehr als unbestimmter Hintergrundvorgang stehen.
 Bei einem direkten Aufruf verlangt der separate Installer weiterhin seine eigene Bestätigung.
 Nach einer bereits bestätigten Auswahl im Hauptinstaller entfällt ausschließlich diese doppelte
 Startfrage; Betriebsart, Netzwerkbindung und Zugriffsschutz werden weiterhin interaktiv festgelegt.
+
+Der von PHP benoetigte Laufzeitstatus liegt absichtlich unter `/run` und wird
+bei einem Neustart geloescht. Seit Installer 1.1.2 wird
+`kienzlefon-webinterface-refresh.service` deshalb bei jedem Boot nach dem
+Anlegen der Laufzeitverzeichnisse und vor dem Webserver ausgefuehrt. Der
+passwortlose WireGuard-Modus bleibt dadurch auch nach einem Reboot wirksam.

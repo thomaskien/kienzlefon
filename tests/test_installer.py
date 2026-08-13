@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 2.1.1
+# Version: 2.1.2
 # Changelog:
+# - 2.1.2: Patchrelease fuer den Webinterface-Boot-Refresh freigegeben.
 # - 2.1.1: Optionale Webinterface-Installation und ihre Erfolgswege getestet.
 # - 1.9.3: Installerfreigabe fuer die Leeranrufunterdrueckung aktualisiert.
 # - 1.9.2: Demo- und Nicht-Demo-Zweig der Update-Anonymisierungsabfrage ausgefuehrt.
@@ -155,7 +156,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.1.1" in result.stdout
+    assert "Version: 2.1.2" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
