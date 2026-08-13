@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9
+# Version: 2.0
 # Changelog:
+# - 2.0: Piper und lokales Qwen3-TTS mit globaler, validierter Sprecherwahl unterstuetzt.
 # - 1.9: Optionale Anonymisierung der Rufnummern in der Demoausgabe konfigurierbar gemacht.
 # - 1.8.2: Bereitschaftsdienst auch vor der ersten Tagesoeffnung aktiviert.
 # - 1.8: Expliziten Telepraxis-Demomodus ohne Public Key ergaenzt.
@@ -15,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import tomllib
@@ -27,6 +29,18 @@ from zoneinfo import ZoneInfo
 from .models import CallType, FieldName
 
 SUPPORTED_WHISPER_MODELS = frozenset({"large-v3-turbo", "large-v3"})
+SUPPORTED_TTS_ENGINES = frozenset({"piper", "qwen"})
+QWEN_SPEAKERS = (
+    "ryan",
+    "vivian",
+    "serena",
+    "aiden",
+    "eric",
+    "dylan",
+    "uncle_fu",
+    "ono_anna",
+    "sohee",
+)
 DEFAULT_MENU_INTRO = (
     "Bitte wählen Sie nun durch Tastendruck auf Ihrem Telefon eine der folgenden Möglichkeiten."
 )
@@ -35,6 +49,7 @@ UNKNOWN_CALLER_IDS = frozenset(
     {"", "anonymous", "unknown", "unavailable", "private", "restricted", "withheld"}
 )
 TIME_RANGE = re.compile(r"^(\d{2}):(\d{2})-(\d{2}):(\d{2})$")
+SCHEDULED_OVERRIDE_ID = re.compile(r"^[a-f0-9]{32}$")
 
 
 class ConfigError(ValueError):
@@ -95,6 +110,26 @@ class OverrideConfig:
     active: bool
     announcement: str
     block_phone_hours: bool
+    expires_at: datetime | None
+    position: str
+    identifier: str = "legacy"
+    name: str = "Bisherige Sonderansage"
+    valid_from: datetime | None = None
+    priority: int = -1
+    source: str = "tts"
+    tts_path: Path | None = None
+    manual_path: Path | None = None
+
+    @property
+    def prompt_name(self) -> str:
+        return "override" if self.identifier == "legacy" else f"override_{self.identifier}"
+
+    def is_valid(self, value: datetime) -> bool:
+        if not self.active:
+            return False
+        if self.valid_from is not None and value < self.valid_from:
+            return False
+        return self.expires_at is None or value < self.expires_at
 
 
 @dataclass(frozen=True)
@@ -176,6 +211,10 @@ class TelepraxisConfig:
 class TTSConfig:
     engine: str
     voice: str
+    qwen_voice: str
+    qwen_language: str
+    qwen_seed: int
+    qwen_generator: Path
     voice_directory: Path
     upload_directory: Path
     volume: float
@@ -265,6 +304,7 @@ class AppConfig:
     paths: PathsConfig
     practice: PracticeConfig
     override: OverrideConfig
+    scheduled_overrides: tuple[OverrideConfig, ...]
     ivr: IVRConfig
     recording: RecordingConfig
     whisper: WhisperConfig
@@ -276,6 +316,7 @@ class AppConfig:
     special_queue: SpecialQueueConfig
     dial_rules: DialRulesConfig
     prompts: PromptConfig
+    prompt_sources: Mapping[str, str]
     opening_hours: WeeklySchedule
     phone_hours: WeeklySchedule
     pharmacy_hours: WeeklySchedule
@@ -297,12 +338,27 @@ class AppConfig:
     def now(self) -> datetime:
         return datetime.now(self.practice.timezone)
 
+    def override_is_active(self, value: datetime | None = None) -> bool:
+        return self.current_override(value) is not None
+
+    def current_override(self, value: datetime | None = None) -> OverrideConfig | None:
+        current = _localize(value or self.now(), self.practice.timezone)
+        candidates = [
+            entry for entry in self.scheduled_overrides if entry.is_valid(current)
+        ]
+        if self.override.is_valid(current):
+            candidates.append(self.override)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda entry: entry.priority)
+
     def practice_is_open(self, value: datetime | None = None) -> bool:
         current = _localize(value or self.now(), self.practice.timezone)
         return self.opening_hours.is_active(current)
 
     def phone_is_open(self, value: datetime | None = None) -> bool:
-        if self.override.active and self.override.block_phone_hours:
+        current_override = self.current_override(value)
+        if current_override is not None and current_override.block_phone_hours:
             return False
         current = _localize(value or self.now(), self.practice.timezone)
         return self.phone_hours.is_active(current)
@@ -378,6 +434,10 @@ REQUIRED_PROMPTS = frozenset(
         "admin_special_status_disabled",
         "admin_special_status_keep",
         "admin_special_status_block",
+        "webadmin_record",
+        "webadmin_record_actions",
+        "webadmin_record_saved",
+        "webadmin_record_discarded",
     }
 )
 
@@ -406,6 +466,134 @@ def _path(base: Path, value: Any) -> Path:
     if not candidate.is_absolute():
         candidate = base / candidate
     return candidate.resolve()
+
+
+def _optional_local_datetime(
+    value: Any, timezone: ZoneInfo, label: str = "[override].ablauf"
+) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ConfigError(f"{label} muss ein ISO-Datum mit Uhrzeit sein") from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone)
+    return parsed.astimezone(timezone)
+
+
+def _scheduled_overrides(
+    prompt_masters: Path, timezone: ZoneInfo
+) -> tuple[OverrideConfig, ...]:
+    root = prompt_masters / "sonderansagen"
+    if not root.exists():
+        return ()
+    if not root.is_dir() or root.is_symlink():
+        raise ConfigError("Ablage der geplanten Sonderansagen ist unsicher")
+    entries: list[OverrideConfig] = []
+    for directory in sorted(root.iterdir(), key=lambda path: path.name):
+        if (
+            not SCHEDULED_OVERRIDE_ID.fullmatch(directory.name)
+            or not directory.is_dir()
+            or directory.is_symlink()
+        ):
+            continue
+        metadata_path = directory / "metadata.json"
+        if not metadata_path.is_file() or metadata_path.is_symlink():
+            raise ConfigError(
+                f"Metadaten der Sonderansage {directory.name} fehlen oder sind unsicher"
+            )
+        try:
+            if metadata_path.stat().st_size > 65_536:
+                raise ConfigError(
+                    f"Metadaten der Sonderansage {directory.name} sind zu gross"
+                )
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ConfigError(
+                f"Metadaten der Sonderansage {directory.name} sind unlesbar"
+            ) from exc
+        if not isinstance(metadata, Mapping):
+            raise ConfigError(f"Metadaten der Sonderansage {directory.name} sind ungueltig")
+        name = metadata.get("name")
+        announcement = metadata.get("announcement")
+        active = metadata.get("active", False)
+        priority = metadata.get("priority", 100)
+        block_phone_hours = metadata.get("block_phone_hours")
+        position = metadata.get("position", "statt_begruessung")
+        source = metadata.get("source", "tts")
+        if not isinstance(name, str) or not name.strip() or len(name) > 100:
+            raise ConfigError(f"Name der Sonderansage {directory.name} ist ungueltig")
+        if not isinstance(announcement, str) or not announcement.strip():
+            raise ConfigError(f"Text der Sonderansage {directory.name} fehlt")
+        if not isinstance(active, bool):
+            raise ConfigError(f"Aktivstatus der Sonderansage {directory.name} ist ungueltig")
+        if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 1000:
+            raise ConfigError(f"Prioritaet der Sonderansage {directory.name} ist ungueltig")
+        if not isinstance(block_phone_hours, bool):
+            raise ConfigError(
+                f"Telefonzeitensperre der Sonderansage {directory.name} ist ungueltig"
+            )
+        if position not in {
+            "statt_begruessung",
+            "vor_begruessung",
+            "nach_begruessung",
+        }:
+            raise ConfigError(f"Position der Sonderansage {directory.name} ist ungueltig")
+        if source not in {"tts", "manuell"}:
+            raise ConfigError(f"Audioquelle der Sonderansage {directory.name} ist ungueltig")
+        valid_from = _optional_local_datetime(
+            metadata.get("valid_from", ""),
+            timezone,
+            f"gueltig_ab der Sonderansage {directory.name}",
+        )
+        expires_at = _optional_local_datetime(
+            metadata.get("expires_at", ""),
+            timezone,
+            f"ablauf der Sonderansage {directory.name}",
+        )
+        if valid_from is not None and expires_at is not None and valid_from >= expires_at:
+            raise ConfigError(
+                f"Gueltigkeitsbeginn der Sonderansage {directory.name} muss vor dem Ablauf liegen"
+            )
+        tts_path = directory / "tts.wav"
+        manual_path = directory / "manuell.wav"
+        if not tts_path.is_file() or tts_path.is_symlink():
+            raise ConfigError(f"TTS-WAV der Sonderansage {directory.name} fehlt")
+        if source == "manuell" and (
+            not manual_path.is_file() or manual_path.is_symlink()
+        ):
+            raise ConfigError(f"Manuelle WAV der Sonderansage {directory.name} fehlt")
+        entries.append(
+            OverrideConfig(
+                active=active,
+                announcement=announcement.strip(),
+                block_phone_hours=block_phone_hours,
+                expires_at=expires_at,
+                position=str(position),
+                identifier=directory.name,
+                name=name.strip(),
+                valid_from=valid_from,
+                priority=priority,
+                source=str(source),
+                tts_path=tts_path,
+                manual_path=manual_path if manual_path.is_file() else None,
+            )
+        )
+    active_priorities: dict[int, str] = {}
+    for entry in entries:
+        if not entry.active:
+            continue
+        previous = active_priorities.get(entry.priority)
+        if previous is not None:
+            raise ConfigError(
+                "Aktive Sonderansagen muessen eindeutige Prioritaeten haben: "
+                f"{previous} und {entry.name}"
+            )
+        active_priorities[entry.priority] = entry.name
+    return tuple(entries)
 
 
 def _schedule(raw: Mapping[str, Any], name: str) -> WeeklySchedule:
@@ -456,6 +644,9 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     direct_queue = _section(raw, "sip_direkte_queue")
     direct_red = _section(raw, "sip_rotes_telefon")
     prompts = _section(raw, "ansagen")
+    prompt_sources_raw = raw.get("ansagen_quellen", {})
+    if not isinstance(prompt_sources_raw, Mapping):
+        raise ConfigError("[ansagen_quellen] muss ein TOML-Abschnitt sein")
 
     whisper_models = {
         "modell_standard": str(_required(whisper, "modell_standard", "whisper")),
@@ -490,6 +681,20 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         timezone = ZoneInfo(str(practice.get("zeitzone", "Europe/Berlin")))
     except Exception as exc:
         raise ConfigError("Ungueltige [praxis].zeitzone") from exc
+    prompt_sources = {str(key): str(value) for key, value in prompt_sources_raw.items()}
+    invalid_sources = {
+        key: value for key, value in prompt_sources.items() if value not in {"tts", "manuell"}
+    }
+    if invalid_sources:
+        detail = ", ".join(f"{key}={value!r}" for key, value in sorted(invalid_sources.items()))
+        raise ConfigError(f"Ungueltige Ansagenquelle: {detail}")
+    allowed_source_keys = set(prompt_values) | {"opening_hours", "phone_hours", "override"}
+    unknown_source_keys = set(prompt_sources) - allowed_source_keys
+    if unknown_source_keys:
+        raise ConfigError(
+            "[ansagen_quellen] enthaelt unbekannte Ansagen: "
+            + ", ".join(sorted(unknown_source_keys))
+        )
 
     standalone_extensions = _standalone_extensions(standalone)
     special_members = special_queue.get("zusaetzliche_nebenstellen", [])
@@ -511,20 +716,41 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     public_key_value = str(telepraxis.get("public_key", "")).strip()
     if not demo_mode and not public_key_value:
         raise ConfigError("[telepraxis].public_key ist im Produktivmodus erforderlich")
+    override_position = str(override.get("position", "statt_begruessung"))
+    if override_position not in {
+        "statt_begruessung",
+        "vor_begruessung",
+        "nach_begruessung",
+    }:
+        raise ConfigError(
+            "[override].position muss statt_begruessung, vor_begruessung "
+            "oder nach_begruessung sein"
+        )
+    paths_config = PathsConfig(
+        spool=_path(base, _required(paths, "spool", "pfade")),
+        runtime=_path(base, _required(paths, "runtime", "pfade")),
+        prompts=_path(base, _required(paths, "ansagen", "pfade")),
+        prompt_masters=_path(base, _required(paths, "ansagen_master", "pfade")),
+    )
+    scheduled_overrides = _scheduled_overrides(
+        paths_config.prompt_masters, timezone
+    )
+    scheduled_sources = {
+        entry.prompt_name: entry.source for entry in scheduled_overrides
+    }
     config = AppConfig(
         source=source,
-        paths=PathsConfig(
-            spool=_path(base, _required(paths, "spool", "pfade")),
-            runtime=_path(base, _required(paths, "runtime", "pfade")),
-            prompts=_path(base, _required(paths, "ansagen", "pfade")),
-            prompt_masters=_path(base, _required(paths, "ansagen_master", "pfade")),
-        ),
+        paths=paths_config,
         practice=PracticeConfig(name=str(_required(practice, "name", "praxis")), timezone=timezone),
         override=OverrideConfig(
             active=bool(override.get("aktiv", False)),
             announcement=str(override.get("ansage", "")).strip(),
             block_phone_hours=bool(override.get("telefonzeiten_sperren", True)),
+            expires_at=_optional_local_datetime(override.get("ablauf", ""), timezone),
+            position=override_position,
+            source=prompt_sources.get("override", "tts"),
         ),
+        scheduled_overrides=scheduled_overrides,
         ivr=IVRConfig(
             attempts=attempts,
             digit_timeout_ms=int(ivr.get("tasten_timeout_ms", 6000)),
@@ -572,8 +798,18 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             public_key=_path(base, public_key_value) if public_key_value else None,
         ),
         tts=TTSConfig(
-            engine=str(tts.get("engine", "piper")),
+            engine=str(tts.get("engine", "piper")).strip().lower(),
             voice=str(_required(tts, "stimme", "tts")),
+            qwen_voice=str(tts.get("qwen_stimme", "ryan")).strip().lower(),
+            qwen_language=str(tts.get("qwen_sprache", "German")).strip(),
+            qwen_seed=int(tts.get("qwen_seed", 42)),
+            qwen_generator=_path(
+                base,
+                tts.get(
+                    "qwen_generator",
+                    "/usr/local/bin/kienzlefon-qwen3-tts-generate",
+                ),
+            ),
             voice_directory=_path(base, _required(tts, "stimmenverzeichnis", "tts")),
             upload_directory=_path(base, _required(tts, "uploadverzeichnis", "tts")),
             volume=float(tts.get("lautstaerke", 1.0)),
@@ -628,24 +864,41 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             ),
         ),
         prompts=PromptConfig(prompt_values),
+        prompt_sources={**prompt_sources, **scheduled_sources},
         opening_hours=_schedule(raw, "oeffnungszeiten"),
         phone_hours=_schedule(raw, "telefonzeiten"),
         pharmacy_hours=_schedule(raw, "apothekenzeiten"),
         specialist_hours=_schedule(raw, "fachstellenzeiten"),
     )
+    override_manual_available = any(
+        (config.tts.upload_directory / f"override.{suffix}").is_file()
+        for suffix in ("wav16", "wav")
+    )
+    override_manual_selected = (
+        config.prompt_sources.get("override") != "tts" and override_manual_available
+    )
     if (
-        config.override.active
+        config.override.is_valid(config.now())
         and not config.override.announcement
-        and not any(
-            (config.tts.upload_directory / f"override.{suffix}").is_file()
-            for suffix in ("wav16", "wav")
-        )
+        and not override_manual_selected
     ):
         raise ConfigError("Aktiver Override benoetigt Text oder eine manuelle Override-Ansage")
     if config.recording.format != "wav":
         raise ConfigError("[aufnahme].format ist fuer Version 1.7 verbindlich auf 'wav' festgelegt")
-    if config.tts.engine != "piper":
-        raise ConfigError("Version 1.7 implementiert als TTS-Engine ausschliesslich 'piper'")
+    if config.tts.engine not in SUPPORTED_TTS_ENGINES:
+        raise ConfigError("[tts].engine muss piper oder qwen sein")
+    if not config.tts.voice.strip():
+        raise ConfigError("[tts].stimme darf nicht leer sein")
+    if config.tts.qwen_voice not in QWEN_SPEAKERS:
+        raise ConfigError(
+            "[tts].qwen_stimme ist nicht freigegeben: " + config.tts.qwen_voice
+        )
+    if config.tts.qwen_language != "German":
+        raise ConfigError("[tts].qwen_sprache ist verbindlich auf 'German' festgelegt")
+    if config.tts.qwen_seed < 0:
+        raise ConfigError("[tts].qwen_seed muss eine nichtnegative ganze Zahl sein")
+    if not config.tts.qwen_generator.is_absolute():
+        raise ConfigError("[tts].qwen_generator muss ein absoluter Pfad sein")
     if not math.isfinite(config.tts.length_scale) or config.tts.length_scale <= 0:
         raise ConfigError("[tts].length_scale muss eine endliche Zahl groesser als 0 sein")
     if not math.isfinite(config.tts.sentence_silence) or config.tts.sentence_silence < 0:

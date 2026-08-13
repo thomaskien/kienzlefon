@@ -29,6 +29,12 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     source = source.replace("rotes_telefon_aktiv = true\n", "")
     source = source.replace("demo = false\n", "")
     source = source.replace("anrufernummern_anonymisieren = false\n", "")
+    source = source.replace('qwen_stimme = "ryan"\n', "")
+    source = source.replace('qwen_sprache = "German"\n', "")
+    source = source.replace("qwen_seed = 42\n", "")
+    source = source.replace(
+        'qwen_generator = "/usr/local/bin/kienzlefon-qwen3-tts-generate"\n', ""
+    )
     source = re.sub(r"\n\[sonderqueue\].*?(?=\n\[wahlregeln\])", "", source, flags=re.S)
     source = source.replace(
         'blocked_destination = "Dieses Anrufziel ist gesperrt."\n', ""
@@ -50,6 +56,9 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     assert result["sonderqueue"]["zusaetzliche_nebenstellen"] == []
     assert result["telepraxis"]["demo"] is False
     assert result["telepraxis"]["anrufernummern_anonymisieren"] is False
+    assert result["tts"]["qwen_stimme"] == "ryan"
+    assert result["tts"]["qwen_sprache"] == "German"
+    assert result["tts"]["qwen_seed"] == 42
 
 
 def test_migration_removes_pin_and_only_replaces_old_defaults(tmp_path: Path) -> None:
@@ -79,6 +88,10 @@ def test_migration_removes_pin_and_only_replaces_old_defaults(tmp_path: Path) ->
         'urgent_help = "Bei dringenden Beschwerden außerhalb unserer Sprechzeiten wenden Sie sich bitte an den ärztlichen Bereitschaftsdienst unter eins eins sechs, eins eins sieben."',
         'urgent_help = "Bei dringenden Beschwerden außerhalb unserer Sprechzeiten wenden Sie sich bitte an den ärztlichen Bereitschaftsdienst unter 116117."',
     )
+    source = source.replace(
+        'webadmin_record_actions = "Sie hörten grade Ihre neue Aufnahme. Drücken Sie 1 zum Übernehmen, 2 zum erneuten Aufnehmen oder 3 zum Verwerfen."',
+        'webadmin_record_actions = "Sie hören jetzt Ihre Aufnahme. Drücken Sie 1 zum Übernehmen, 2 zum erneuten Aufnehmen oder 3 zum Verwerfen."',
+    )
     source = source.replace("Nachname und Geburtstag und", "Nachname und Geburtsdatum und")
     source += '\nadmin_pin = "Bitte PIN eingeben."\n'
     target = tmp_path / "old.toml"
@@ -95,6 +108,9 @@ def test_migration_removes_pin_and_only_replaces_old_defaults(tmp_path: Path) ->
     assert "nach dem Signalton" in result["ansagen"]["admin_record"]
     assert "eins eins zwei" in result["ansagen"]["emergency"]
     assert "eins eins sechs, eins eins sieben" in result["ansagen"]["urgent_help"]
+    assert result["ansagen"]["webadmin_record_actions"].startswith(
+        "Sie hörten grade Ihre neue Aufnahme."
+    )
     assert "Geburtstag" in result["ansagen"]["no_selection_closed"]
     assert "Geburtstag" in result["ansagen"]["personal_data_fallback"]
 

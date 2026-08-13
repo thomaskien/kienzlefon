@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.8.3
+# Version: 2.0
 # Changelog:
+# - 2.0: Neue Aufnahmen waehrend der Qwen3-TTS-Wartungsphase sicher gesperrt.
 # - 1.8.3: Alle Felder trotz Schweigens weiter aufgenommen und einzeln verarbeitet.
 # - 1.8: Abbruch vor jeder verwertbaren Aufnahme ohne leeren Vorgang abgeschlossen.
 # - 1.7: Anzeige-Caller-ID normalisiert, waehrend die Telepraxis-ID original bleibt.
@@ -10,6 +11,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
 from pathlib import Path
 
@@ -87,17 +89,33 @@ class IVR:
             self._queue_partial_call()
 
     def _opening_sequence(self) -> str | None:
-        if self.config.override.active:
-            digit = self._stream("override", ALL_DIGITS)
+        current_override = self.config.current_override()
+        override_active = current_override is not None
+        forced_closed = override_active and current_override.block_phone_hours
+        greeting = (
+            "greeting_open"
+            if self.config.practice_is_open() and not forced_closed
+            else "greeting_closed"
+        )
+        if not override_active:
+            opening_prompts = (greeting,)
+        elif current_override.position == "statt_begruessung":
+            opening_prompts = (current_override.prompt_name,)
+        elif current_override.position == "vor_begruessung":
+            opening_prompts = (current_override.prompt_name, greeting)
         else:
-            key = "greeting_open" if self.config.practice_is_open() else "greeting_closed"
-            digit = self._stream(key, ALL_DIGITS)
-        if digit:
-            return digit
+            opening_prompts = (greeting, current_override.prompt_name)
+        for prompt in opening_prompts:
+            digit = self._stream(prompt, ALL_DIGITS)
+            if digit:
+                return digit
         digit = self._stream("emergency", ALL_DIGITS)
         if digit:
             return digit
-        if not self.config.override.active and self.config.urgent_help_is_active():
+        urgent_help_required = self.config.urgent_help_is_active() or (
+            override_active and current_override.block_phone_hours
+        )
+        if urgent_help_required:
             return self._stream("urgent_help", ALL_DIGITS)
         return None
 
@@ -121,8 +139,9 @@ class IVR:
             digit = self._stream("specialist_access", ALL_DIGITS)
             if digit:
                 return digit
+        current_override = self.config.current_override()
         if not open_now and not (
-            self.config.override.active and self.config.override.block_phone_hours
+            current_override is not None and current_override.block_phone_hours
         ):
             digit = self._stream("phone_hours", ALL_DIGITS)
             if digit:
@@ -173,11 +192,11 @@ class IVR:
         return True
 
     def _record_structured(self, call_type: CallType, category: str) -> None:
-        if not self._worker_healthy():
+        self.call = self._create_call_if_admitted(call_type, category)
+        if self.call is None:
             self._play("whisper_failure")
             self._goto_queue()
             return
-        self.call = self.spool.create_call(call_type, self.caller_id, category)
         self._play("recording_hint")
         for field, prompt, filename in (
             (FieldName.FIRST_NAME, "first_name", "vorname.wav"),
@@ -211,13 +230,14 @@ class IVR:
         self._finish_call("abgeschlossen")
 
     def _record_closed_fallback(self) -> None:
-        if not self._worker_healthy():
+        self.call = self._create_call_if_admitted(
+            CallType.CALLBACK_FALLBACK,
+            "rueckruf_ohne_tastenauswahl",
+        )
+        if self.call is None:
             self._play("whisper_failure")
             self._goto_queue()
             return
-        self.call = self.spool.create_call(
-            CallType.CALLBACK_FALLBACK, self.caller_id, "rueckruf_ohne_tastenauswahl"
-        )
         self._record_field(
             FieldName.REASON,
             "no_selection_closed",
@@ -306,11 +326,28 @@ class IVR:
                 LOGGER.exception("Fehler konnte nicht mehr in call.json geschrieben werden")
 
     def _worker_healthy(self) -> bool:
+        if any(
+            (self.config.paths.runtime / marker).exists()
+            for marker in ("asr-maintenance", "tts-maintenance")
+        ):
+            return False
         return worker_is_healthy(
             self.config.paths.runtime / "whisper-health.json",
             self.config.whisper.models,
             self.config.whisper.stale_heartbeat_seconds,
         )
+
+    def _create_call_if_admitted(
+        self, call_type: CallType, category: str
+    ) -> WorkingCall | None:
+        """Prueft Bereitschaft und legt den Auftrag unter derselben Sperre an."""
+        self.config.paths.runtime.mkdir(parents=True, exist_ok=True)
+        lock_path = self.config.paths.runtime / "asr-admission.lock"
+        with lock_path.open("a+b") as admission_lock:
+            fcntl.flock(admission_lock.fileno(), fcntl.LOCK_SH)
+            if not self._worker_healthy():
+                return None
+            return self.spool.create_call(call_type, self.caller_id, category)
 
     def _goto_queue(self) -> None:
         self.channel.goto(self.config.ivr.queue_context)

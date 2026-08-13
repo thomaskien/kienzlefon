@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: Qwen3-TTS-Modell, Sprecher, Sprache, Seed und Generatorpfad ergaenzt.
 # - 1.9.3: Konfigurationsvorlage unveraendert fuer das Leeranruf-Patchrelease uebernommen.
 # - 1.9.2: Konfigurationsvorlage unveraendert fuer das Nicht-Demo-Update-Patchrelease uebernommen.
 # - 1.9.1: Konfigurationsvorlage unveraendert fuer das wav16-Installer-Patchrelease uebernommen.
@@ -31,7 +32,9 @@ zeitzone = "Europe/Berlin"
 [override]
 aktiv = false
 ansage = ""
+ablauf = ""
 telefonzeiten_sperren = true
+position = "statt_begruessung"
 
 [ivr]
 menue_durchlaeufe = 2
@@ -82,6 +85,10 @@ public_key = "/etc/kienzlefon/telepraxis-public.pem"
 [tts]
 engine = "piper"
 stimme = "de_DE-thorsten-high"
+qwen_stimme = "ryan"
+qwen_sprache = "German"
+qwen_seed = 42
+qwen_generator = "/usr/local/bin/kienzlefon-qwen3-tts-generate"
 stimmenverzeichnis = "/var/lib/kienzlefon/piper-voices"
 uploadverzeichnis = "/var/lib/kienzlefon/ansagen-upload"
 lautstaerke = 1.0
@@ -247,3 +254,7 @@ admin_invalid = "Diese Eingabe ist nicht verfügbar. Bitte versuchen Sie es erne
 admin_special_status_disabled = "Die Feiertags- und Sonderansage ist derzeit deaktiviert."
 admin_special_status_keep = "Die Feiertags- und Sonderansage ist derzeit aktiv. Die regulären Telefonzeiten bleiben gültig."
 admin_special_status_block = "Die Feiertags- und Sonderansage ist derzeit aktiv. Die regulären Telefonzeiten sind gesperrt."
+webadmin_record = "Bitte sprechen Sie Ihre neue Ansage nach dem Signalton. Beenden Sie die Aufnahme mit der Raute-Taste."
+webadmin_record_actions = "Sie hörten grade Ihre neue Aufnahme. Drücken Sie 1 zum Übernehmen, 2 zum erneuten Aufnehmen oder 3 zum Verwerfen."
+webadmin_record_saved = "Die Aufnahme wurde gespeichert, aber noch nicht aktiviert."
+webadmin_record_discarded = "Die Aufnahme wurde verworfen."

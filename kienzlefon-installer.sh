@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: Qwen3-TTS-Bootstrap, Modell- und Sprecherwahl sowie differenzielle Ansagenupdates.
 # - 1.9.3: Worker ohne Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe installiert.
 # - 1.9.2: Nicht-Demo-Updates ueberspringen die Demo-Anonymisierungsabfrage fehlerfrei.
 # - 1.9.1: Falschnegative Asterisk-wav16-Pruefung korrigiert und erfolgreichen Worker-Neustart wiederhergestellt.
@@ -27,10 +28,13 @@
 
 set -Eeuo pipefail
 
-VERSION="1.9.3"
+VERSION="2.0"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
+QWEN_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefon-ai/refs/heads/main/install-kienzlefon-qwen3-tts-v1.5.sh"
+QWEN_INSTALLER_SHA256="2dd36de682e797f52486352a6ae395559dbeacdb6a47abfa9e82990c8c72dcc3"
+QWEN_GENERATOR="/usr/local/bin/kienzlefon-qwen3-tts-generate"
 KFX_ENV="/etc/kienzlefax-installer.env"
 CONFIG_DIR="/etc/kienzlefon"
 CONFIG_FILE="${CONFIG_DIR}/kienzlefon.toml"
@@ -40,6 +44,9 @@ SOURCE_TARGET="${INSTALL_ROOT}/src"
 VENV="${INSTALL_ROOT}/venv"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPORTING_ERROR="n"
+EXISTING_INSTALL="n"
+KZF_INSTALL_QWEN="n"
+KZF_FORCE_PROMPTS="n"
 
 log(){ printf '[%s] %s\n' "$(date -Is)" "$*"; }
 die(){ printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -83,6 +90,122 @@ ask_value(){
   local __var="$1" prompt="$2" default="${3-}" value=""
   read -r -p "${prompt}${default:+ [${default}]}: " value
   printf -v "$__var" '%s' "${value:-$default}"
+}
+
+qwen_voice_from_choice(){
+  case "$1" in
+    1) printf 'ryan' ;;
+    2) printf 'vivian' ;;
+    3) printf 'serena' ;;
+    4) printf 'aiden' ;;
+    5) printf 'eric' ;;
+    6) printf 'dylan' ;;
+    7) printf 'uncle_fu' ;;
+    8) printf 'ono_anna' ;;
+    9) printf 'sohee' ;;
+    *) return 1 ;;
+  esac
+}
+
+qwen_choice_from_voice(){
+  case "$1" in
+    ryan) printf '1' ;;
+    vivian) printf '2' ;;
+    serena) printf '3' ;;
+    aiden) printf '4' ;;
+    eric) printf '5' ;;
+    dylan) printf '6' ;;
+    uncle_fu) printf '7' ;;
+    ono_anna) printf '8' ;;
+    sohee) printf '9' ;;
+    *) printf '1' ;;
+  esac
+}
+
+qwen_generator_knows_worker(){
+  [[ -x "$QWEN_GENERATOR" ]] || return 1
+  grep -Fq 'kienzlefon-worker.service' "$QWEN_GENERATOR" 2>/dev/null
+}
+
+collect_tts_configuration(){
+  local current_engine="piper" current_piper="de_DE-thorsten-high" current_qwen="ryan"
+  local current_length="1.3" current_silence="0.8" install_prompt=""
+  local qwen_planned="n" engine_choice="" voice_choice="" default_engine="1"
+
+  if [[ -r "$CONFIG_FILE" ]]; then
+    current_engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","piper"))' "$CONFIG_FILE")"
+    current_piper="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("stimme","de_DE-thorsten-high"))' "$CONFIG_FILE")"
+    current_qwen="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("qwen_stimme","ryan"))' "$CONFIG_FILE")"
+    current_length="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("length_scale",1.3))' "$CONFIG_FILE")"
+    current_silence="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("sentence_silence",0.8))' "$CONFIG_FILE")"
+  fi
+
+  if [[ -x "$QWEN_GENERATOR" ]]; then
+    qwen_planned="y"
+    ask_yes_no install_prompt "Qwen3-TTS v1.5 erneut installieren oder aktualisieren?" "n"
+  else
+    ask_yes_no install_prompt "Lokales Qwen3-TTS v1.5 jetzt installieren?" "n"
+  fi
+  if [[ "$install_prompt" == "y" ]]; then
+    KZF_INSTALL_QWEN="y"
+    qwen_planned="y"
+  fi
+
+  [[ "$current_engine" == "qwen" ]] && default_engine="2"
+  printf '\nErzeugungsmodell fuer automatische Ansagen:\n'
+  printf '  1) Piper (schnell, CPU)\n'
+  if [[ "$qwen_planned" == "y" ]]; then
+    printf '  2) Qwen3-TTS 0.6B CustomVoice (hochwertig, Einmalgenerierung)\n'
+  else
+    printf '  2) Qwen3-TTS 0.6B CustomVoice (nicht installiert)\n'
+    default_engine="1"
+  fi
+  while true; do
+    ask_value engine_choice "Auswahl des Erzeugungsmodells (1 oder 2)" "$default_engine"
+    case "$engine_choice" in
+      1) KZF_TTS_ENGINE="piper"; break ;;
+      2)
+        [[ "$qwen_planned" == "y" ]] \
+          || { printf 'Qwen3-TTS muss zuerst installiert werden.\n'; continue; }
+        KZF_TTS_ENGINE="qwen"; break ;;
+      *) printf 'Bitte 1 oder 2 eingeben.\n' ;;
+    esac
+  done
+
+  KZF_TTS_VOICE="$current_piper"
+  KZF_QWEN_VOICE="$current_qwen"
+  KZF_TTS_LENGTH_SCALE="$current_length"
+  KZF_TTS_SENTENCE_SILENCE="$current_silence"
+  if [[ "$KZF_TTS_ENGINE" == "qwen" ]]; then
+    printf '\nQwen3-TTS-Sprecher (global fuer alle automatischen Ansagen):\n'
+    printf '  1) ryan       2) vivian     3) serena\n'
+    printf '  4) aiden      5) eric       6) dylan\n'
+    printf '  7) uncle_fu   8) ono_anna   9) sohee\n'
+    while true; do
+      ask_value voice_choice "Sprecher (1 bis 9)" "$(qwen_choice_from_voice "$current_qwen")"
+      KZF_QWEN_VOICE="$(qwen_voice_from_choice "$voice_choice")" && break
+      printf 'Bitte eine Zahl von 1 bis 9 eingeben.\n'
+    done
+  else
+    ask_value KZF_TTS_VOICE "Piper-Stimme" "$current_piper"
+    ask_value KZF_TTS_LENGTH_SCALE "Piper length_scale (groesser=langsamer)" "$current_length"
+    [[ "$KZF_TTS_LENGTH_SCALE" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] \
+      || die "Piper length_scale muss eine positive Dezimalzahl sein."
+    [[ ! "$KZF_TTS_LENGTH_SCALE" =~ ^0*([.]0*)?$ ]] \
+      || die "Piper length_scale muss groesser als 0 sein."
+    ask_value KZF_TTS_SENTENCE_SILENCE "Piper sentence_silence in Sekunden" "$current_silence"
+    [[ "$KZF_TTS_SENTENCE_SILENCE" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] \
+      || die "Piper sentence_silence muss eine nichtnegative Dezimalzahl sein."
+  fi
+
+  if [[ "$KZF_TTS_ENGINE" == "qwen" && "$KZF_INSTALL_QWEN" != "y" ]] \
+      && ! qwen_generator_knows_worker; then
+    printf 'Der vorhandene Qwen-Generator kennt den Kienzlefon-Worker noch nicht.\n'
+    printf 'Qwen3-TTS v1.5 wird nach Einrichtung der Diensteinheit erneut installiert.\n'
+    KZF_INSTALL_QWEN="y"
+  fi
+  export KZF_TTS_ENGINE KZF_TTS_VOICE KZF_QWEN_VOICE
+  export KZF_TTS_LENGTH_SCALE KZF_TTS_SENTENCE_SILENCE KZF_INSTALL_QWEN
 }
 
 whisper_model_from_choice(){
@@ -178,6 +301,46 @@ update_existing_whisper_models(){
     --standard-model "$KZF_MODEL_STANDARD" \
     --name-model "$KZF_MODEL_NAMES" \
     --medication-model "$KZF_MODEL_MEDICATIONS"
+}
+
+update_existing_tts(){
+  "${VENV}/bin/kienzlefon-migration" \
+    --config "$CONFIG_FILE" \
+    --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
+    --tts-engine "$KZF_TTS_ENGINE" \
+    --piper-voice "$KZF_TTS_VOICE" \
+    --qwen-voice "$KZF_QWEN_VOICE"
+}
+
+install_qwen_tts(){
+  local installer checksum
+  [[ "$KZF_INSTALL_QWEN" == "y" ]] || return 0
+  installer="$(mktemp /tmp/kienzlefon-qwen3-tts-v1.5.XXXXXX.sh)"
+  if ! download "$QWEN_INSTALLER_URL" "$installer"; then
+    rm -f -- "$installer"
+    die "Qwen3-TTS-Installer v1.5 konnte nicht geladen werden."
+  fi
+  if ! bash -n "$installer"; then
+    rm -f -- "$installer"
+    die "Qwen3-TTS-Installer v1.5 hat eine ungueltige Shell-Syntax."
+  fi
+  checksum="$(sha256sum "$installer" | awk '{print $1}')"
+  if [[ "$checksum" != "$QWEN_INSTALLER_SHA256" ]]; then
+    rm -f -- "$installer"
+    die "Qwen3-TTS-Installer v1.5 stimmt nicht mit der freigegebenen SHA-256-Pruefsumme ueberein."
+  fi
+  printf 'Qwen3-TTS-Installer v1.5 verifiziert (SHA-256: %s).\n' "$checksum"
+  chmod 0700 "$installer"
+  if ! "$installer" --offline-only; then
+    rm -f -- "$installer"
+    die "Qwen3-TTS-Installation v1.5 ist fehlgeschlagen."
+  fi
+  rm -f -- "$installer"
+  [[ -x "$QWEN_GENERATOR" ]] \
+    || die "Qwen3-TTS-Generator fehlt nach der Installation: ${QWEN_GENERATOR}"
+  qwen_generator_knows_worker \
+    || die "Qwen3-TTS-Generator hat den Kienzlefon-Worker nicht in seiner Positivliste."
+  "$QWEN_GENERATOR" --help >/dev/null
 }
 
 configure_demo_anonymization(){
@@ -738,6 +901,8 @@ collect_configuration(){
     migrate_version_1_8
     ask_yes_no reuse "Vorhandene Kienzlefon-Konfiguration unveraendert wiederverwenden?" "j"
     if [[ "$reuse" == "y" ]]; then
+      collect_tts_configuration
+      update_existing_tts
       collect_whisper_models
       update_existing_whisper_models
       ask_yes_no reconfigure_times "Zeitprofile jetzt neu konfigurieren?" "n"
@@ -770,15 +935,7 @@ collect_configuration(){
   else
     KZF_DEMO_ANONYMIZE="n"
   fi
-  ask_value KZF_TTS_VOICE "Piper-Stimme" "de_DE-thorsten-high"
-  ask_value KZF_TTS_LENGTH_SCALE "Piper length_scale (groesser=langsamer)" "1.3"
-  [[ "$KZF_TTS_LENGTH_SCALE" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] \
-    || die "Piper length_scale muss eine positive Dezimalzahl sein."
-  [[ ! "$KZF_TTS_LENGTH_SCALE" =~ ^0*([.]0*)?$ ]] \
-    || die "Piper length_scale muss groesser als 0 sein."
-  ask_value KZF_TTS_SENTENCE_SILENCE "Piper sentence_silence in Sekunden" "0.8"
-  [[ "$KZF_TTS_SENTENCE_SILENCE" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] \
-    || die "Piper sentence_silence muss eine nichtnegative Dezimalzahl sein."
+  collect_tts_configuration
   ask_value KZF_ANNOUNCEMENT_PAUSE_MS "Pause zwischen IVR-Ansagen in Millisekunden" "700"
   [[ "$KZF_ANNOUNCEMENT_PAUSE_MS" =~ ^[0-9]+$ ]] \
     || die "Die IVR-Ansagepause muss eine nichtnegative ganze Zahl sein."
@@ -851,8 +1008,9 @@ collect_configuration(){
   KZF_FIRST_EXTENSION="${KFX_PHONE_FIRST_EXTENSION:-201}"
   KZF_EXTENSION_COUNT="${KFX_PHONE_COUNT:-1}"
 
-  export KZF_PRACTICE_NAME KZF_CHANNEL KZF_OUTPUT_DIR KZF_TTS_VOICE KZF_TTS_LENGTH_SCALE
-  export KZF_TTS_SENTENCE_SILENCE KZF_ANNOUNCEMENT_PAUSE_MS KZF_CPU_THREADS
+  export KZF_PRACTICE_NAME KZF_CHANNEL KZF_OUTPUT_DIR KZF_TTS_ENGINE KZF_TTS_VOICE
+  export KZF_QWEN_VOICE KZF_TTS_LENGTH_SCALE KZF_TTS_SENTENCE_SILENCE
+  export KZF_ANNOUNCEMENT_PAUSE_MS KZF_CPU_THREADS
   export KZF_MODEL_STANDARD KZF_MODEL_NAMES KZF_MODEL_MEDICATIONS
   export KZF_RED_ENABLED KZF_RED_EXTENSION KZF_RED_RING_SECONDS KZF_RED_PRIORITY KZF_RED_PASSWORD
   export KZF_MAIN_ENDPOINT KZF_MAIN_NUMBER KZF_OUT_COUNTS
@@ -862,8 +1020,9 @@ collect_configuration(){
   install -d -m 0755 "$CONFIG_DIR"
   "${VENV}/bin/python" - <<'PY'
 # kienzlefon installer config writer
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: TTS-Engine und globalen Qwen-Sprecher sicher in TOML geschrieben.
 # - 1.9.3: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.3 uebernommen.
 # - 1.9.2: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Konfigurationsschreiber unveraendert fuer Kienzlefon 1.9.1 uebernommen.
@@ -945,7 +1104,9 @@ set_value(
     demo_mode and os.environ["KZF_DEMO_ANONYMIZE"] == "y",
 )
 set_value("telepraxis", "public_key", "" if demo_mode else os.environ["PUBLIC_KEY_FILE"])
+set_value("tts", "engine", os.environ["KZF_TTS_ENGINE"])
 set_value("tts", "stimme", os.environ["KZF_TTS_VOICE"])
+set_value("tts", "qwen_stimme", os.environ["KZF_QWEN_VOICE"])
 set_value("tts", "length_scale", float(os.environ["KZF_TTS_LENGTH_SCALE"]))
 set_value("tts", "sentence_silence", float(os.environ["KZF_TTS_SENTENCE_SILENCE"]))
 set_value("asterisk", "rotes_telefon_passwort", os.environ["KZF_RED_PASSWORD"])
@@ -1182,8 +1343,9 @@ install_systemd_unit(){
   output_group="${group_record%%:*}"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: Diensteinheit fuer den Qwen3-TTS-Wartungsmodus aktualisiert.
 # - 1.9.3: Diensteinheit fuer den Worker mit Leeranrufunterdrueckung aktualisiert.
 # - 1.9.2: Diensteinheit unveraendert fuer Kienzlefon 1.9.2 uebernommen.
 # - 1.9.1: Diensteinheit fuer den nach korrigierter Formatpruefung gestarteten Worker aktualisiert.
@@ -1238,9 +1400,10 @@ EOF
 }
 
 install_models_and_prompts(){
-  local voice voices
+  local voice voices engine prompt_arguments
   voice="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"]["stimme"])' "$CONFIG_FILE")"
   voices="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"]["stimmenverzeichnis"])' "$CONFIG_FILE")"
+  engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","piper"))' "$CONFIG_FILE")"
 #  runuser -u asterisk -- "${VENV}/bin/python" -m piper.download_voices \
 #    --data-dir "$voices" "$voice"
 #  runuser -u asterisk -- "${VENV}/bin/kienzlefon-modell-laden" --config "$CONFIG_FILE"
@@ -1248,7 +1411,23 @@ install_models_and_prompts(){
   runuser -u root -- "${VENV}/bin/python" -m piper.download_voices \
     --data-dir "$voices" "$voice"
   runuser -u root -- "${VENV}/bin/kienzlefon-modell-laden" --config "$CONFIG_FILE"
-  runuser -u root -- "${VENV}/bin/kienzlefon-ansagen" --config "$CONFIG_FILE" --all
+  if [[ "$engine" == "qwen" ]]; then
+    [[ -x "$QWEN_GENERATOR" ]] \
+      || die "Qwen ist ausgewaehlt, aber der Generator fehlt: ${QWEN_GENERATOR}"
+    qwen_generator_knows_worker \
+      || die "Der Qwen-Generator darf den Kienzlefon-Worker nicht sicher verwalten."
+  fi
+  prompt_arguments=(--config "$CONFIG_FILE")
+  [[ "$KZF_FORCE_PROMPTS" != "y" ]] || prompt_arguments+=(--all)
+  runuser -u root -- "${VENV}/bin/kienzlefon-ansagen" "${prompt_arguments[@]}"
+}
+
+collect_regeneration_choice(){
+  [[ "$EXISTING_INSTALL" == "y" ]] || return 0
+  printf '\nOhne Vollerzeugung werden nur fehlende oder tatsaechlich geaenderte Ansagen aktualisiert.\n'
+  printf 'Ein Wechsel von Erzeugungsmodell oder Stimme wird automatisch als Aenderung erkannt.\n'
+  ask_yes_no KZF_FORCE_PROMPTS "Jetzt alle automatisch erzeugten Ansagen neu erzeugen?" "n"
+  export KZF_FORCE_PROMPTS
 }
 
 configure_asterisk(){
@@ -1293,6 +1472,7 @@ main(){
     return 0
   fi
   require_root
+  [[ -r "$CONFIG_FILE" ]] && EXISTING_INSTALL="y"
   sep "Systempakete installieren"
   install_packages
   sep "Kienzlefax-Grundlage pruefen"
@@ -1302,6 +1482,7 @@ main(){
   copy_and_install_project
   sep "Konfiguration erfassen"
   collect_configuration
+  collect_regeneration_choice
   "${VENV}/bin/kienzlefon-config" --config "$CONFIG_FILE"
   demo_mode="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
@@ -1312,15 +1493,17 @@ main(){
   fi
   sep "Verzeichnisse und Rechte"
   prepare_directories
+  sep "Whisper-Worker installieren"
+  install_systemd_unit
+  sep "Optionale Qwen3-TTS-Installation"
+  install_qwen_tts
   sep "Modelle und Ansagen"
   install_models_and_prompts
   sep "Asterisk integrieren"
   configure_asterisk
-  sep "Whisper-Worker installieren"
-  install_systemd_unit
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 1.9.3 ist installiert"
+  sep "Kienzlefon 2.0 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

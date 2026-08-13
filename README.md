@@ -1,6 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.3
+Version: 2.0
+
+- 2.0: Lokales Qwen3-TTS, globale Sprecherwahl und differenzielle Ansagenerzeugung ergaenzt.
 Changelog:
 - 1.9.3: Unterdrueckung vollstaendig inhaltsloser fehlerfreier Telepraxis-Eintraege dokumentiert.
 - 1.9.2: Fehlerfreie Updates bestehender Nicht-Demo-Konfigurationen dokumentiert.
@@ -35,7 +37,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **1.9.3**
+Version: **2.0**
 
 ## Eigenschaften
 
@@ -55,11 +57,11 @@ Version: **1.9.3**
 - OpenSSL-kompatible `AES-256-CBC`/RSA-Ausgabe als `*.json.enc`
 - ausdruecklich zu bestaetigender Demomodus mit unverschluesselter `*.json`-Ausgabe
 - optionale Anonymisierung von `id` und `telefon` in Demo-JSONs
-- lokale Piper-TTS-Ansagen in WAV, SLN16, G.722, A-law und mu-law
+- lokale Piper- oder Qwen3-TTS-Ansagen in WAV, SLN16, G.722, A-law und mu-law
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine HTTP-Uebertragung und kein LLM in Version 1.9.3
+- keine TTS-HTTP-Schnittstelle und kein dauerhaft geladener TTS-Dienst
 
 ## Installation
 
@@ -95,8 +97,9 @@ Der Installer erklaert die priorisierte Sonderqueue und fragt, welche bereits
 konfigurierten Zusatznebenstellen dort neben den normalen Queue-Telefonen
 gleichzeitig klingeln sollen.
 
-Die Installation laedt jedes konfigurierte Whisper-Modell genau einmal und die
-konfigurierte Piper-Stimme. Bei weniger als 16 GB warnt der Installer vor der
+Die Installation laedt jedes konfigurierte Whisper-Modell genau einmal und bei
+Piper die konfigurierte Stimme. Qwen3-TTS wird nur nach ausdruecklicher Auswahl
+mit dem geprueften Offline-Installer v1.5 eingerichtet. Bei weniger als 16 GB warnt der Installer vor der
 gleichzeitigen Verwendung beider Whisper-Modelle, erlaubt sie aber nach
 ausdruecklicher Bestaetigung.
 Je nach Server und Internetanbindung kann dieser Schritt laenger dauern.
@@ -167,6 +170,25 @@ Alle Ansagen bewusst neu erzeugen:
 sudo kienzlefon-ansagen --all
 ```
 
+Kienzlefon 2.0 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
+installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
+mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
+
+```toml
+engine = "qwen"
+qwen_stimme = "ryan"
+qwen_sprache = "German"
+qwen_seed = 42
+qwen_generator = "/usr/local/bin/kienzlefon-qwen3-tts-generate"
+```
+
+Zulaessige Qwen-Sprecher sind `ryan`, `vivian`, `serena`, `aiden`, `eric`,
+`dylan`, `uncle_fu`, `ono_anna` und `sohee`. Die Auswahl gilt global und ist
+im Installer sowie im Webinterface aenderbar. Der Ansagengenerator vergleicht
+Text, Modell, Sprecher, Seed, Generatorstand und Normalisierung. Ohne Unterschied
+wird Qwen nicht gestartet; `--all` bleibt die ausdrueckliche Wartungsfunktion.
+Manuelle WAV-Aufnahmen bleiben von Modell- und Sprecherwechseln unberuehrt.
+
 Die Piper-Sprechgeschwindigkeit wird unter `[tts]` mit `length_scale` gesteuert.
 Der Standardwert `1.3` wird bei der Installation abgefragt; groessere Werte
 sprechen langsamer. `sentence_silence = 0.8` legt die zusaetzliche Satzpause in
@@ -181,7 +203,7 @@ TTS-Aenderung erzeugt `kienzlefon-ansagen` alle betroffenen Ansagen neu.
 
 Die ausschliesslich intern erreichbare Nebenstelle `777` verwaltet Ansagen
 ohne PIN. Dort koennen Bausteine nach stabiler Nummer aufgenommen, angehoert,
-aktiviert oder auf Piper zurueckgeschaltet werden. Ausserdem laesst sich der
+aktiviert oder auf die automatische TTS-Fassung zurueckgeschaltet werden. Ausserdem laesst sich der
 Feiertags- und Sonderansagemodus mit oder ohne Sperrung der Telefonzeiten
 schalten. Ohne Eingabe werden die jeweiligen Anweisungen nach fuenf Sekunden
 unbegrenzt wiederholt. Die vollstaendige
@@ -208,7 +230,7 @@ signaltonfrei und verwenden unveraendert ihren bisherigen Aufnahmeweg.
 
 Eine menschlich eingesprochene WAV-Datei unter
 `/var/lib/kienzlefon/ansagen-upload/<ansagenname>.wav` ersetzt fuer diesen
-Ansagenamen Piper. `kienzlefon-ansagen` prueft auch diese Dateien und erzeugt
+Ansagenamen die automatische TTS-Fassung. `kienzlefon-ansagen` prueft auch diese Dateien und erzeugt
 daraus dieselben Telefonieformate. Beim Erzeugen wird deutlich darauf
 hingewiesen, dass eine solche Datei Text und Praxisname ueberschreibt.
 
@@ -224,6 +246,29 @@ Worker und Warteschlangen pruefen:
 sudo kienzlefon-status
 systemctl status kienzlefon-worker
 ```
+
+## Separates Administrations-Webinterface
+
+Das Webinterface wird weiterhin getrennt vom Hauptinstaller installiert:
+
+```bash
+sudo ./kienzlefon-webinterface-installer.sh
+```
+
+Es bearbeitet nur Zeiten und Ansagen. Ansagen koennen direkt im Browser
+abgespielt und ueber eine freigegebene Nebenstelle neu aufgenommen werden.
+Benannte Sonderansagen behalten ihren TTS-Text, die erzeugte TTS-WAV, eine
+optional eingesprochene WAV und die ausgewaehlte Audioquelle gemeinsam. Mehrere
+Eintraege koennen gleichzeitig geplant werden. Beruecksichtigt werden der
+Aktivstatus, ein optionaler Beginn, ein optionaler Ablauf und eine eindeutige
+Prioritaet zwischen 0 und 1000. Bei jedem neuen Anruf wird nur die aktuell
+gueltige Ansage mit der hoechsten Prioritaetszahl verwendet. Dadurch uebernimmt
+nach einem Ablauf automatisch die naechste gueltige Stufe, ohne erneute
+Ansagenerzeugung. Fuer jeden Eintrag werden Position und Telefonzeitensperre
+getrennt gespeichert. Die Position ist anstelle, vor oder nach der normalen
+Begruessungsansage. Wenn gleichzeitig die normalen Telefonzeiten gesperrt
+werden, wird bei den Positionen davor und danach die Geschlossen-Begruessung
+verwendet; der Bereitschaftsdienst-Hinweis folgt immer.
 
 ## Dateifluss
 

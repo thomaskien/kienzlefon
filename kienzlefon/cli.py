@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: TTS-Modell und Qwen-Sprecher in die konservative Migration aufgenommen.
 # - 1.9.3: Migrationsausgabe auf Patchrelease 1.9.3 aktualisiert.
 # - 1.9.2: Migrationsausgabe auf Patchrelease 1.9.2 aktualisiert.
 # - 1.9.1: Migrationsausgabe auf Patchrelease 1.9.1 aktualisiert.
@@ -105,7 +106,7 @@ def prompts_main() -> None:
     config: AppConfig | None = None
     try:
         config = _load(arguments.config)
-        print("Dies kann auch über 10 Minuten dauern.", flush=True)
+        print("Ansagen werden auf Aenderungen geprueft.", flush=True)
         generated, skipped = PromptGenerator(config).generate(force=arguments.all)
         print(f"Ansagen erzeugt: {generated}; unveraendert: {skipped}")
     except Exception as exc:
@@ -322,7 +323,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 1.9.3 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.0 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -330,6 +331,9 @@ def migrate_main() -> None:
     parser.add_argument("--name-model")
     parser.add_argument("--medication-model")
     parser.add_argument("--demo-anonymize", choices=("true", "false"))
+    parser.add_argument("--tts-engine", choices=("piper", "qwen"))
+    parser.add_argument("--piper-voice")
+    parser.add_argument("--qwen-voice")
     arguments = parser.parse_args()
     target = Path(arguments.config)
     migrate_config(target, Path(arguments.template))
@@ -339,6 +343,9 @@ def migrate_main() -> None:
         ("whisper", "modell_standard", arguments.standard_model),
         ("whisper", "modell_namen", arguments.name_model),
         ("whisper", "modell_medikamente", arguments.medication_model),
+        ("tts", "engine", arguments.tts_engine),
+        ("tts", "stimme", arguments.piper_voice),
+        ("tts", "qwen_stimme", arguments.qwen_voice),
     ):
         if value is not None:
             set_string(target, section, key, value)
@@ -349,4 +356,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 1.9.3 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.0 ergaenzt: {target}")

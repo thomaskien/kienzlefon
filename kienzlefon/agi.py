@@ -122,8 +122,13 @@ class AgiChannel:
         silence_seconds: int,
         max_seconds: int,
         beep: bool = False,
+        terminate_any_digit: bool = True,
     ) -> RecordingResult:
-        options = "ky" if beep else "kqy"
+        options = "k"
+        if not beep:
+            options += "q"
+        if terminate_any_digit:
+            options += "y"
         arguments = f"{path},{silence_seconds},{max_seconds},{options}"
         self.exec("Record", arguments)
         status = self.get_variable("RECORD_STATUS") or "UNKNOWN"

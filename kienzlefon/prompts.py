@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.5
+# Version: 2.0
 # Changelog:
+# - 2.0: Differenzielle Qwen3-TTS-Erzeugung mit globaler Sprecherwahl ergaenzt.
 # - 1.5: 16-kHz-Master und gemeinsame zweistufige Lautheitsnormalisierung eingefuehrt.
 # - 1.4: PIN-Bausteine durch klare deutsche Administrationsansagen ersetzt.
 # - 1.3: Stabile Ansagenummern und gemeinsame Wochenend-Telefonzeit ergaenzt.
@@ -10,6 +11,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -21,12 +23,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import wave
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .config import AppConfig, TimeWindow, WEEKDAYS, WeeklySchedule
+from .health import worker_is_healthy
 from .spool import write_json_atomic
 
 LOGGER = logging.getLogger(__name__)
@@ -47,6 +52,8 @@ PROMPT_CATALOG = (
     "admin_special_menu", "admin_special_keep", "admin_special_block",
     "admin_special_disabled", "admin_invalid", "admin_special_status_disabled",
     "admin_special_status_keep", "admin_special_status_block",
+    "webadmin_record", "webadmin_record_actions", "webadmin_record_saved",
+    "webadmin_record_discarded",
 )
 
 
@@ -128,16 +135,24 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
     }
     override = config.override.announcement or values["greeting_closed"]
     values["override"] = override.replace("{praxisname}", config.practice.name)
+    for scheduled in config.scheduled_overrides:
+        values[scheduled.prompt_name] = scheduled.announcement.replace(
+            "{praxisname}", config.practice.name
+        )
     values["opening_hours"] = opening_hours_text(
         config.opening_hours,
         values.pop("opening_hours_prefix"),
         values.pop("opening_hours_closed"),
     )
-    values["phone_hours"] = phone_hours_text(
+    additional_phone_hours = values["phone_hours"].strip()
+    rendered_phone_hours = phone_hours_text(
         config.phone_hours,
         values.pop("phone_hours_prefix"),
         values.pop("phone_hours_closed"),
     )
+    if additional_phone_hours:
+        rendered_phone_hours = f"{rendered_phone_hours} {additional_phone_hours}"
+    values["phone_hours"] = rendered_phone_hours
     return values
 
 
@@ -145,61 +160,110 @@ class PromptGenerator:
     def __init__(self, config: AppConfig):
         self.config = config
         self.manifest_path = config.paths.prompt_masters / "manifest.json"
+        self._scheduled_tts_overrides: dict[str, Path] = {}
+        self._cached_qwen_identity: str | None = None
+        self._maintenance_depth = 0
 
     def generate(self, force: bool = False) -> tuple[int, int]:
         self.config.paths.prompt_masters.mkdir(parents=True, exist_ok=True)
+        lock_path = self.config.paths.prompt_masters / ".generation.lock"
+        with lock_path.open("a+b") as generation_lock:
+            os.chmod(lock_path, 0o640)
+            try:
+                fcntl.flock(
+                    generation_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB
+                )
+            except BlockingIOError as exc:
+                raise RuntimeError("Eine andere Ansagenerzeugung laeuft bereits") from exc
+            return self._generate_locked(force)
+
+    def _generate_locked(self, force: bool) -> tuple[int, int]:
+        self._scheduled_tts_overrides.clear()
         self.config.paths.prompts.mkdir(parents=True, exist_ok=True)
         manifest = self._load_manifest()
         updated = dict(manifest.get("prompts", {}))
         rendered = rendered_prompts(self.config)
+        tts_identity = self._tts_identity()
+        scheduled_tts_to_refresh = {
+            entry.prompt_name
+            for entry in self.config.scheduled_overrides
+            if force
+            or manifest.get("tts_identity") != tts_identity
+            or updated.get(entry.prompt_name, {}).get("text")
+            != rendered.get(entry.prompt_name)
+            or entry.tts_path is None
+            or not entry.tts_path.is_file()
+        }
         removed = sorted(set(updated) - set(rendered))
         for name in removed:
             updated.pop(name, None)
         changed: list[str] = []
         skipped = 0
-        with tempfile.TemporaryDirectory(
-            prefix="kienzlefon-prompts-", dir=self.config.paths.prompt_masters
-        ) as staging_name:
-            staging = Path(staging_name)
+        qwen_work = bool(scheduled_tts_to_refresh)
+        if self.config.tts.engine == "qwen" and not qwen_work:
             for name, text in sorted(rendered.items()):
-                human_source = self._manual_source(name)
-                if human_source is not None:
-                    LOGGER.warning(
-                        "Manuelle WAV-Datei hat Vorrang vor Text und Praxisname: %s",
-                        human_source,
-                    )
+                if self._manual_source(name) is not None:
+                    continue
                 digest = self._digest(name, text)
                 if (
-                    not force
-                    and updated.get(name, {}).get("sha256") == digest
-                    and self._outputs_exist(name)
+                    force
+                    or updated.get(name, {}).get("sha256") != digest
+                    or not self._outputs_exist(name)
                 ):
-                    skipped += 1
-                    continue
-                self._generate_one(name, text, staging)
-                updated[name] = {"sha256": digest, "text": text}
-                changed.append(name)
-            for name in changed:
-                self._replace(
-                    staging / "masters" / f"{name}.wav",
-                    self.config.paths.prompt_masters / f"{name}.wav",
-                )
-                for suffix in ("sln16", "g722", "alaw", "ulaw"):
+                    qwen_work = True
+                    break
+        with self._qwen_maintenance(qwen_work):
+            with tempfile.TemporaryDirectory(
+                prefix="kienzlefon-prompts-", dir=self.config.paths.prompt_masters
+            ) as staging_name:
+                staging = Path(staging_name)
+                if scheduled_tts_to_refresh:
+                    self._stage_scheduled_tts(rendered, staging, scheduled_tts_to_refresh)
+                for name, text in sorted(rendered.items()):
+                    human_source = self._manual_source(name)
+                    if human_source is not None:
+                        LOGGER.warning(
+                            "Gespeicherte WAV-Datei hat Vorrang vor neuer TTS-Erzeugung: %s",
+                            human_source,
+                        )
+                    digest = self._digest(name, text)
+                    if (
+                        not force
+                        and updated.get(name, {}).get("sha256") == digest
+                        and self._outputs_exist(name)
+                    ):
+                        skipped += 1
+                        continue
+                    self._generate_one(name, text, staging)
+                    updated[name] = {"sha256": digest, "text": text}
+                    changed.append(name)
+                for name in changed:
                     self._replace(
-                        staging / "prompts" / f"{name}.{suffix}",
-                        self.config.paths.prompts / f"{name}.{suffix}",
+                        staging / "masters" / f"{name}.wav",
+                        self.config.paths.prompt_masters / f"{name}.wav",
                     )
-                LOGGER.info("Ansage erzeugt: %s", name)
-            for name in removed:
-                (self.config.paths.prompt_masters / f"{name}.wav").unlink(missing_ok=True)
-                for suffix in ("sln16", "g722", "alaw", "ulaw"):
-                    (self.config.paths.prompts / f"{name}.{suffix}").unlink(missing_ok=True)
-                LOGGER.info("Nicht mehr verwendete Ansage entfernt: %s", name)
+                    for suffix in ("sln16", "g722", "alaw", "ulaw"):
+                        self._replace(
+                            staging / "prompts" / f"{name}.{suffix}",
+                            self.config.paths.prompts / f"{name}.{suffix}",
+                        )
+                    LOGGER.info("Ansage erzeugt: %s", name)
+                for entry in self.config.scheduled_overrides:
+                    staged_tts = self._scheduled_tts_overrides.get(entry.prompt_name)
+                    if staged_tts is not None and entry.tts_path is not None:
+                        self._replace(staged_tts, entry.tts_path)
+                        LOGGER.info("TTS-Fassung der Sonderansage aktualisiert: %s", entry.name)
+                for name in removed:
+                    (self.config.paths.prompt_masters / f"{name}.wav").unlink(missing_ok=True)
+                    for suffix in ("sln16", "g722", "alaw", "ulaw"):
+                        (self.config.paths.prompts / f"{name}.{suffix}").unlink(missing_ok=True)
+                    LOGGER.info("Nicht mehr verwendete Ansage entfernt: %s", name)
         write_json_atomic(
             self.manifest_path,
             {
-                "version": "1.5",
+                "version": "2.0",
                 "changelog": [
+                    "2.0: Qwen3-TTS und globale Sprecherwahl differenziell beruecksichtigt.",
                     "1.5: 16-kHz-Master und gemeinsame Lautheitsnormalisierung eingefuehrt.",
                     "1.4: PIN-freie deutsche Administrationsansagen eingefuehrt.",
                     "1.3: Ansagenkatalog und Telefonzeit-Wochenende erweitert.",
@@ -212,6 +276,10 @@ class PromptGenerator:
                 ),
                 "engine": self.config.tts.engine,
                 "voice": self.config.tts.voice,
+                "qwen_voice": self.config.tts.qwen_voice,
+                "qwen_language": self.config.tts.qwen_language,
+                "qwen_seed": self.config.tts.qwen_seed,
+                "tts_identity": tts_identity,
                 "length_scale": self.config.tts.length_scale,
                 "sentence_silence": self.config.tts.sentence_silence,
                 "target_loudness_lufs": self.config.tts.target_loudness_lufs,
@@ -226,15 +294,15 @@ class PromptGenerator:
             prefix=f"kienzlefon-prompt-{name}-", dir=staging
         ) as temporary_name:
             temporary = Path(temporary_name)
-            piper_wav = temporary / "piper.wav"
+            source_wav = temporary / "source.wav"
             master_wav = temporary / f"{name}.wav"
             parts = split_pause_markers(text)
             human_source = self._manual_source(name)
             if human_source is not None:
-                shutil.copyfile(human_source, piper_wav)
+                shutil.copyfile(human_source, source_wav)
             else:
-                self._synthesize(parts, piper_wav, temporary, name)
-            self.normalize_audio(piper_wav, master_wav, name)
+                self._synthesize(parts, source_wav, temporary, name)
+            self.normalize_audio(source_wav, master_wav, name)
             conversions = {
                 f"{name}.sln16": ["-ar", "16000", "-ac", "1", "-f", "s16le", "-c:a", "pcm_s16le"],
                 f"{name}.g722": ["-ar", "16000", "-ac", "1", "-c:a", "g722", "-f", "g722"],
@@ -283,10 +351,207 @@ class PromptGenerator:
             raise RuntimeError(f"{message}: {detail}") from exc
 
     def normalize_audio(self, source: Path, output: Path, name: str) -> None:
-        target = self.config.tts.target_loudness_lufs
-        peak = self.config.tts.max_true_peak_db
+        self.normalize_audio_file(
+            source,
+            output,
+            name,
+            target_lufs=self.config.tts.target_loudness_lufs,
+            peak_db=self.config.tts.max_true_peak_db,
+        )
+
+    def synthesize_text_file(self, text: str, output: Path, name: str) -> None:
+        """Create one normalized browser-compatible WAV without changing active prompts."""
+        with self._qwen_maintenance(self.config.tts.engine == "qwen"):
+            self.config.paths.prompt_masters.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=f"kienzlefon-preview-{name}-",
+                dir=self.config.paths.prompt_masters,
+            ) as temporary_name:
+                temporary = Path(temporary_name)
+                source_wav = temporary / "source.wav"
+                self._synthesize(split_pause_markers(text), source_wav, temporary, name)
+                self.normalize_audio(source_wav, output, name)
+
+    @contextmanager
+    def _qwen_maintenance(self, needed: bool):
+        if not needed or self.config.tts.engine != "qwen" or self._maintenance_depth:
+            yield
+            return
+        if shutil.which("systemctl") is None:
+            yield
+            return
+        active = subprocess.run(
+            ["systemctl", "is-active", "--quiet", "kienzlefon-worker.service"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+        if not active:
+            yield
+            return
+        if os.geteuid() != 0:
+            raise RuntimeError("Qwen3-TTS mit aktivem Whisper-Worker erfordert root")
+
+        runtime = self.config.paths.runtime
+        runtime.mkdir(parents=True, exist_ok=True)
+        admission_lock_path = runtime / "asr-admission.lock"
+        # Dieser eigene Marker bleibt ueber die gesamte Sammelerzeugung liegen.
+        # Der unveraenderte Qwen-v1.5-Generator verwaltet parallel dazu seinen
+        # kurzlebigen Marker ``asr-maintenance`` fuer jeden Einzelaufruf.
+        marker = runtime / "tts-maintenance"
+        stopped = False
+        self._maintenance_depth += 1
+        try:
+            with admission_lock_path.open("a+b") as admission_lock:
+                fcntl.flock(admission_lock.fileno(), fcntl.LOCK_EX)
+                self._create_maintenance_marker(marker)
+                try:
+                    busy = {
+                        state: len(tuple((self.config.paths.spool / state).glob("*/")))
+                        for state in ("recording", "processing")
+                    }
+                    if busy["recording"] or busy["processing"]:
+                        raise RuntimeError(
+                            "Qwen3-TTS wurde nicht gestartet: "
+                            f"{busy['recording']} Aufnahme(n), "
+                            f"{busy['processing']} ASR-Auftrag/Auftraege aktiv"
+                        )
+                    result = self._run_systemctl("stop", timeout=90)
+                    if result.returncode != 0:
+                        raise RuntimeError(
+                            "Whisper-Worker konnte nicht beendet werden: "
+                            + self._systemctl_error(result)
+                        )
+                    stopped = True
+                except Exception:
+                    marker.unlink(missing_ok=True)
+                    raise
+            yield
+        finally:
+            try:
+                if stopped:
+                    with admission_lock_path.open("a+b") as admission_lock:
+                        fcntl.flock(admission_lock.fileno(), fcntl.LOCK_EX)
+                        result = self._run_systemctl("start", timeout=90)
+                        if result.returncode != 0:
+                            raise RuntimeError(
+                                "Whisper-Worker konnte nach Qwen3-TTS nicht gestartet werden: "
+                                + self._systemctl_error(result)
+                            )
+                        deadline = time.monotonic() + 300
+                        while time.monotonic() < deadline:
+                            if worker_is_healthy(
+                                runtime / "whisper-health.json",
+                                self.config.whisper.models,
+                                self.config.whisper.stale_heartbeat_seconds,
+                            ) and self._worker_heartbeat_matches_service(
+                                runtime / "whisper-health.json"
+                            ):
+                                marker.unlink(missing_ok=True)
+                                break
+                            time.sleep(1)
+                        else:
+                            raise RuntimeError(
+                                "Whisper-Worker wurde nach Qwen3-TTS nicht wieder bereit; "
+                                f"Wartungsmarker bleibt bestehen: {marker}"
+                            )
+            finally:
+                self._maintenance_depth -= 1
+
+    @staticmethod
+    def _create_maintenance_marker(marker: Path) -> None:
+        try:
+            with marker.open("x", encoding="utf-8") as handle:
+                handle.write(
+                    f"kienzlefon-prompt-generation pid={os.getpid()} "
+                    f"started={datetime.now().astimezone().isoformat(timespec='seconds')}\n"
+                )
+            os.chmod(marker, 0o644)
+        except FileExistsError as exc:
+            raise RuntimeError(
+                f"Ein anderer ASR-Wartungsvorgang laeuft bereits: {marker}"
+            ) from exc
+
+    @staticmethod
+    def _run_systemctl(action: str, *, timeout: int) -> subprocess.CompletedProcess[bytes]:
+        try:
+            return subprocess.run(
+                ["systemctl", action, "kienzlefon-worker.service"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"systemctl {action} fehlgeschlagen: {exc}") from exc
+
+    @staticmethod
+    def _systemctl_error(result: subprocess.CompletedProcess[bytes]) -> str:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        return detail[-1000:] or f"Rueckgabecode {result.returncode}"
+
+    @staticmethod
+    def _worker_heartbeat_matches_service(heartbeat: Path) -> bool:
+        """Akzeptiert nur den Heartbeat des aktuell von systemd gefuehrten Prozesses."""
+        try:
+            result = subprocess.run(
+                [
+                    "systemctl",
+                    "show",
+                    "kienzlefon-worker.service",
+                    "--property=MainPID",
+                    "--value",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return False
+            main_pid = int(result.stdout.decode("ascii", errors="strict").strip())
+            with heartbeat.open("r", encoding="utf-8") as handle:
+                heartbeat_pid = int(json.load(handle).get("pid", 0))
+            return main_pid > 0 and heartbeat_pid == main_pid
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            json.JSONDecodeError,
+            subprocess.TimeoutExpired,
+        ):
+            return False
+
+    def _stage_scheduled_tts(
+        self, rendered: dict[str, str], staging: Path, names: set[str]
+    ) -> None:
+        for entry in self.config.scheduled_overrides:
+            if entry.prompt_name not in names:
+                continue
+            text = rendered.get(entry.prompt_name)
+            if text is None:
+                continue
+            target = staging / "scheduled-tts" / f"{entry.identifier}.wav"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self.synthesize_text_file(text, target, f"sonderansage-{entry.identifier[:8]}")
+            self._scheduled_tts_overrides[entry.prompt_name] = target
+
+    @staticmethod
+    def normalize_audio_file(
+        source: Path,
+        output: Path,
+        name: str,
+        *,
+        target_lufs: float,
+        peak_db: float,
+    ) -> None:
+        target = target_lufs
+        peak = peak_db
         base_filter = f"loudnorm=I={target}:LRA=7:TP={peak}"
-        analysis = self._run_capture(
+        analysis = PromptGenerator._run_capture(
             [
                 "ffmpeg",
                 "-nostdin",
@@ -303,7 +568,7 @@ class PromptGenerator:
             ],
             f"Lautheitsmessung fehlgeschlagen fuer {name}",
         )
-        measured = self._parse_loudnorm(analysis.stderr, name)
+        measured = PromptGenerator._parse_loudnorm(analysis.stderr, name)
         normalized_filter = (
             f"{base_filter}:measured_I={measured['input_i']}:"
             f"measured_LRA={measured['input_lra']}:measured_TP={measured['input_tp']}:"
@@ -315,7 +580,7 @@ class PromptGenerator:
             f".{output.stem}.normalized.{os.getpid()}.{secrets.token_hex(4)}{output.suffix}"
         )
         try:
-            self._run_capture(
+            PromptGenerator._run_capture(
                 [
                     "ffmpeg",
                     "-nostdin",
@@ -339,7 +604,7 @@ class PromptGenerator:
                 ],
                 f"Lautheitsnormalisierung fehlgeschlagen fuer {name}",
             )
-            self._validate_wav16(temporary, name)
+            PromptGenerator._validate_wav16(temporary, name)
             os.chmod(temporary, 0o640)
             os.replace(temporary, output)
         finally:
@@ -397,8 +662,10 @@ class PromptGenerator:
         human_digest = ""
         if human_source is not None:
             human_digest = hashlib.sha256(human_source.read_bytes()).hexdigest()
-        value = "\0".join(
-            (
+        if self.config.tts.engine == "piper":
+            # Das Piper-Schema bleibt absichtlich kompatibel zum 1.9-Manifest.
+            # Eine unveraenderte Drueberinstallation erzeugt daher nichts neu.
+            parts = (
                 text,
                 self.config.tts.engine,
                 self.config.tts.voice,
@@ -409,14 +676,101 @@ class PromptGenerator:
                 str(self.config.tts.max_true_peak_db),
                 human_digest,
             )
-        )
+        else:
+            parts = (
+                text,
+                self.config.tts.engine,
+                self.config.tts.qwen_voice,
+                self.config.tts.qwen_language,
+                str(self.config.tts.qwen_seed),
+                self._qwen_generator_identity(),
+                str(self.config.tts.target_loudness_lufs),
+                str(self.config.tts.max_true_peak_db),
+                human_digest,
+            )
+        value = "\0".join(parts)
         return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
+    def _tts_identity(self) -> str:
+        if self.config.tts.engine == "piper":
+            parts = (
+                "piper",
+                self.config.tts.voice,
+                str(self.config.tts.volume),
+                str(self.config.tts.length_scale),
+                str(self.config.tts.sentence_silence),
+            )
+        else:
+            parts = (
+                "qwen",
+                self.config.tts.qwen_voice,
+                self.config.tts.qwen_language,
+                str(self.config.tts.qwen_seed),
+                self._qwen_generator_identity(),
+            )
+        return hashlib.sha256(
+            "\0".join(
+                (
+                    "kienzlefon-prompts-2.0",
+                    *parts,
+                    str(self.config.tts.target_loudness_lufs),
+                    str(self.config.tts.max_true_peak_db),
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def _qwen_generator_identity(self) -> str:
+        if self._cached_qwen_identity is not None:
+            return self._cached_qwen_identity
+        generator = self.config.tts.qwen_generator
+        if not generator.is_file():
+            self._cached_qwen_identity = f"missing:{generator}"
+            return self._cached_qwen_identity
+        try:
+            digest = hashlib.sha256(generator.read_bytes())
+            install_info = Path("/var/lib/kienzlefon/qwen3-tts/offline-install-info.txt")
+            if install_info.is_file():
+                digest.update(b"\0")
+                # Der v1.5-Installer schreibt bei jeder identischen Installation
+                # lediglich diesen Zeitstempel neu. Nur technische Aenderungen
+                # (z. B. Git-Commit oder Backend) sollen Audio neu erzeugen.
+                digest.update(
+                    b"\n".join(
+                        line
+                        for line in install_info.read_bytes().splitlines()
+                        if not line.startswith(b"installed_at=")
+                    )
+                )
+            self._cached_qwen_identity = digest.hexdigest()
+            return self._cached_qwen_identity
+        except OSError as exc:
+            raise RuntimeError(f"Qwen3-TTS-Generator ist nicht lesbar: {generator}: {exc}") from exc
+
     def _manual_source(self, name: str) -> Path | None:
+        scheduled = next(
+            (
+                entry
+                for entry in self.config.scheduled_overrides
+                if entry.prompt_name == name
+            ),
+            None,
+        )
+        if scheduled is not None:
+            source = scheduled.manual_path if scheduled.source == "manuell" else (
+                self._scheduled_tts_overrides.get(name) or scheduled.tts_path
+            )
+            if source is None or not source.is_file() or source.is_symlink():
+                raise RuntimeError(f"Gespeicherte Audioquelle fehlt: {name}")
+            return source
+        configured = self.config.prompt_sources.get(name)
+        if configured == "tts":
+            return None
         for suffix in ("wav16", "wav"):
             candidate = self.config.tts.upload_directory / f"{name}.{suffix}"
             if candidate.is_file():
                 return candidate
+        if configured == "manuell":
+            raise RuntimeError(f"Manuelle Ansage fehlt: {name}")
         return None
 
     def _load_manifest(self) -> dict[str, Any]:
@@ -438,8 +792,8 @@ class PromptGenerator:
     ) -> None:
         if len(parts) == 1 and isinstance(parts[0], str):
             self._run(
-                self._piper_command(parts[0], output),
-                f"Piper fehlgeschlagen fuer {name}",
+                self._tts_command(parts[0], output),
+                f"{self.config.tts.engine}-Erzeugung fehlgeschlagen fuer {name}",
             )
             return
 
@@ -449,11 +803,38 @@ class PromptGenerator:
                 continue
             path = temporary / f"segment-{index:03d}.wav"
             self._run(
-                self._piper_command(part, path),
-                f"Piper fehlgeschlagen fuer {name}, Segment {index + 1}",
+                self._tts_command(part, path),
+                f"{self.config.tts.engine}-Erzeugung fehlgeschlagen fuer {name}, "
+                f"Segment {index + 1}",
             )
             audio_parts[index] = path
         self._join_with_pauses(parts, audio_parts, output, name)
+
+    def _tts_command(self, text: str, output: Path) -> list[str]:
+        if self.config.tts.engine == "qwen":
+            return self._qwen_command(text, output)
+        return self._piper_command(text, output)
+
+    def _qwen_command(self, text: str, output: Path) -> list[str]:
+        generator = self.config.tts.qwen_generator
+        if not generator.is_file() or not os.access(generator, os.X_OK):
+            raise RuntimeError(
+                "Qwen3-TTS ist nicht installiert oder nicht ausfuehrbar: "
+                f"{generator}"
+            )
+        return [
+            str(generator),
+            "--text",
+            text,
+            "--speaker",
+            self.config.tts.qwen_voice,
+            "--language",
+            self.config.tts.qwen_language,
+            "--seed",
+            str(self.config.tts.qwen_seed),
+            "--output",
+            str(output),
+        ]
 
     def _piper_command(self, text: str, output: Path) -> list[str]:
         return [

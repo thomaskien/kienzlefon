@@ -10,7 +10,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from kienzlefon.agi import AgiHangup
 from kienzlefon.ivr import IVR
@@ -56,6 +59,14 @@ def test_opening_hours_choice_does_not_consume_menu_attempt(app_config) -> None:
     assert ivr.fallback is True
 
 
+@pytest.mark.parametrize("marker", ["asr-maintenance", "tts-maintenance"])
+def test_qwen_maintenance_marker_makes_worker_unavailable(app_config, marker: str) -> None:
+    app_config.paths.runtime.mkdir(parents=True, exist_ok=True)
+    (app_config.paths.runtime / marker).write_text("test", encoding="utf-8")
+
+    assert IVR(app_config, DummyChannel())._worker_healthy() is False
+
+
 class RecordingChannel:
     environment = {"agi_callerid": "unknown"}
 
@@ -81,6 +92,104 @@ def test_field_recording_starts_immediately_after_prompt(app_config) -> None:
     ivr.call = ivr.spool.create_call(CallType.CALLBACK_DETAILS, None, "test")
     assert ivr._record_field(FieldName.FIRST_NAME, "first_name", "vorname.wav", long=False)
     assert channel.events == ["ansage", "aufnahme"]
+
+
+class OpeningSequenceIVR(IVR):
+    def __init__(self, config):
+        super().__init__(config, DummyChannel())
+        self.played: list[str] = []
+
+    def _stream(self, key: str, _digits: str = "") -> None:
+        self.played.append(key)
+
+
+def test_urgent_help_always_follows_active_override_that_blocks_phone_hours(
+    app_config, monkeypatch
+) -> None:
+    config = replace(
+        app_config,
+        override=replace(app_config.override, active=True),
+    )
+    monkeypatch.setattr(type(app_config), "urgent_help_is_active", lambda _self: False)
+    ivr = OpeningSequenceIVR(config)
+
+    assert ivr._opening_sequence() is None
+    assert ivr.played == ["override", "emergency", "urgent_help"]
+
+
+def test_override_without_phone_block_keeps_normal_urgent_help_timing(
+    app_config, monkeypatch
+) -> None:
+    config = replace(
+        app_config,
+        override=replace(app_config.override, active=True, block_phone_hours=False),
+    )
+    monkeypatch.setattr(type(config), "urgent_help_is_active", lambda _self: False)
+    ivr = OpeningSequenceIVR(config)
+
+    assert ivr._opening_sequence() is None
+    assert ivr.played == ["override", "emergency"]
+
+
+def test_override_after_greeting_uses_closed_greeting_when_phone_hours_are_blocked(
+    app_config, monkeypatch
+) -> None:
+    config = replace(
+        app_config,
+        override=replace(
+            app_config.override,
+            active=True,
+            block_phone_hours=True,
+            position="nach_begruessung",
+        ),
+    )
+    monkeypatch.setattr(type(config), "practice_is_open", lambda _self: True)
+    monkeypatch.setattr(type(config), "urgent_help_is_active", lambda _self: False)
+    ivr = OpeningSequenceIVR(config)
+
+    assert ivr._opening_sequence() is None
+    assert ivr.played == [
+        "greeting_closed",
+        "override",
+        "emergency",
+        "urgent_help",
+    ]
+
+
+def test_override_before_greeting_uses_requested_order(app_config, monkeypatch) -> None:
+    config = replace(
+        app_config,
+        override=replace(
+            app_config.override,
+            active=True,
+            block_phone_hours=False,
+            position="vor_begruessung",
+        ),
+    )
+    monkeypatch.setattr(type(config), "practice_is_open", lambda _self: True)
+    monkeypatch.setattr(type(config), "urgent_help_is_active", lambda _self: False)
+    ivr = OpeningSequenceIVR(config)
+
+    assert ivr._opening_sequence() is None
+    assert ivr.played == ["override", "greeting_open", "emergency"]
+
+
+def test_scheduled_override_uses_its_own_generated_prompt(app_config, monkeypatch) -> None:
+    scheduled = replace(
+        app_config.override,
+        identifier="4" * 32,
+        name="Geplante Ansage",
+        active=True,
+        priority=500,
+        announcement="Geplanter Hinweis.",
+        block_phone_hours=False,
+    )
+    config = replace(app_config, scheduled_overrides=(scheduled,))
+    monkeypatch.setattr(type(config), "urgent_help_is_active", lambda _self: False)
+    ivr = OpeningSequenceIVR(config)
+
+    assert ivr._opening_sequence() is None
+    assert ivr.played == [f"override_{'4' * 32}", "emergency"]
 
 
 class SilentPersonalDataChannel:

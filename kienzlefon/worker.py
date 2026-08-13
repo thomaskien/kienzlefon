@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9.3
+# Version: 2.0
 # Changelog:
+# - 2.0: Neue ASR-Auftraege waehrend der Qwen3-TTS-Wartungsphase angehalten.
 # - 1.9.3: Vollstaendig inhaltslose fehlerfreie Vorgaenge ohne Telepraxis-Datei abgeschlossen.
 # - 1.9: Konfigurierte Demo-Anonymisierung an die Dateiausgabe uebergeben.
 # - 1.8.3: Leere Einzeltranskripte uebersprungen, ohne spaetere Felder zu blockieren.
@@ -124,7 +125,7 @@ class Worker:
                 ", ".join(self.config.whisper.models),
             )
             while not self.stop_event.is_set():
-                claimed = self.spool.claim_next()
+                claimed = self._claim_next_if_admitted()
                 if claimed is None:
                     self.flush_error_reports()
                     self.stop_event.wait(self.config.whisper.poll_seconds)
@@ -142,6 +143,28 @@ class Worker:
         finally:
             self.heartbeat.stop()
             self._release_lock()
+
+    def _maintenance_active(self) -> bool:
+        return any(
+            (self.config.paths.runtime / marker).exists()
+            for marker in ("asr-maintenance", "tts-maintenance")
+        )
+
+    def _claim_next_if_admitted(self) -> WorkingCall | None:
+        """Verhindert einen neuen ASR-Start waehrend Wartung eingeleitet wird."""
+        lock_path = self.config.paths.runtime / "asr-admission.lock"
+        with lock_path.open("a+b") as admission_lock:
+            fcntl.flock(admission_lock.fileno(), fcntl.LOCK_SH)
+            if self._maintenance_active():
+                return None
+            claimed = self.spool.claim_next()
+            if claimed is not None and self._maintenance_active():
+                self.spool.transition(
+                    WorkingCall(claimed.path, self.config.practice.timezone),
+                    CallState.QUEUE,
+                )
+                return None
+            return claimed
 
     def process(self, call: WorkingCall) -> None:
         try:

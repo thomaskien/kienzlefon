@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 1.9
+# Version: 2.0
 # Changelog:
+# - 2.0: Fehlende Qwen3-TTS-Optionen konservativ aus der Vorlage ergaenzt.
 # - 1.9: Fehlende Demo-Anonymisierung ergaenzt und boolesche Werte sicher aktualisiert.
 # - 1.8.2: Freigegebene Notruf- und Fallback-Standardtexte konservativ aktualisiert.
 # - 1.8: Fehlenden Telepraxis-Demomodus konservativ aus der Vorlage ergaenzt.
@@ -77,6 +78,10 @@ OLD_PROMPT_DEFAULTS = {
     "admin_activated": "Die aufgenommene Ansage ist jetzt aktiv.",
     "admin_generated": "Die computergenerierte Ansage ist jetzt aktiv.",
     "admin_invalid": "Diese Eingabe ist nicht verf\u00fcgbar.",
+    "webadmin_record_actions": (
+        "Sie h\u00f6ren jetzt Ihre Aufnahme. Dr\u00fccken Sie 1 zum \u00dcbernehmen, 2 zum "
+        "erneuten Aufnehmen oder 3 zum Verwerfen."
+    ),
 }
 
 

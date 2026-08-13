@@ -61,6 +61,8 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
             "KZF_DEMO_MODE": "n",
             "KZF_DEMO_ANONYMIZE": "n",
             "KZF_TTS_VOICE": "de_DE-thorsten-high",
+            "KZF_TTS_ENGINE": "qwen",
+            "KZF_QWEN_VOICE": "serena",
             "KZF_TTS_LENGTH_SCALE": "1.4",
             "KZF_TTS_SENTENCE_SILENCE": "0.9",
             "KZF_ANNOUNCEMENT_PAUSE_MS": "750",
@@ -111,6 +113,8 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
     ]
     assert result["asterisk"]["rotes_telefon_passwort"] == "a#b;c"
     assert result["tts"]["length_scale"] == 1.4
+    assert result["tts"]["engine"] == "qwen"
+    assert result["tts"]["qwen_stimme"] == "serena"
     assert result["tts"]["sentence_silence"] == 0.9
     assert result["tts"]["ziel_lautheit_lufs"] == -19.0
     assert result["tts"]["max_true_peak_db"] == -2.0
@@ -150,8 +154,22 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 1.9.3" in result.stdout
+    assert "Version: 2.0" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
+
+
+def test_installer_pins_the_tested_qwen_v15_bootstrap() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+
+    assert (
+        'QWEN_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/'
+        'kienzlefon-ai/refs/heads/main/install-kienzlefon-qwen3-tts-v1.5.sh"'
+    ) in installer
+    assert (
+        'QWEN_INSTALLER_SHA256="2dd36de682e797f52486352a6ae395559dbeacdb6a47abfa9e82990c8c72dcc3"'
+    ) in installer
+    assert '"$installer" --offline-only' in installer
+    assert 'prompt_arguments+=(--all)' in installer
 
 
 def test_installer_contains_explicit_demo_warning_and_confirmation() -> None:

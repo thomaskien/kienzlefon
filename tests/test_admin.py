@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import pytest
 
 from kienzlefon.admin import AnnouncementAdmin
+from kienzlefon.config import load_config
 from kienzlefon.models import RecordingResult
 from kienzlefon.prompts import PromptGenerator
 
@@ -124,6 +125,7 @@ def test_manual_activation_archives_legacy_wav(app_config, monkeypatch) -> None:
 
     assert (upload / "greeting_open.wav16").read_bytes() == b"wideband"
     assert not legacy.exists()
+    assert load_config(app_config.source).prompt_sources["greeting_open"] == "manuell"
     archived = list((upload / "inaktiv").glob("greeting_open_*.wav"))
     assert len(archived) == 1
     assert archived[0].read_bytes() == b"legacy"
@@ -151,3 +153,19 @@ def test_failed_activation_restores_wav_and_wav16(app_config, monkeypatch) -> No
 
     assert active_wav.read_bytes() == b"legacy"
     assert active_wav16.read_bytes() == b"wide-old"
+    assert "greeting_open" not in load_config(app_config.source).prompt_sources
+
+
+def test_generated_activation_preserves_manual_recording(app_config, monkeypatch) -> None:
+    channel = AdminChannel(options=[])
+    admin = _admin(app_config, channel)
+    upload = app_config.tts.upload_directory
+    upload.mkdir(parents=True, exist_ok=True)
+    manual = upload / "greeting_open.wav16"
+    manual.write_bytes(b"manual-stays")
+    monkeypatch.setattr(PromptGenerator, "generate", lambda _self: (1, 53))
+
+    admin._activate_generated("greeting_open")
+
+    assert manual.read_bytes() == b"manual-stays"
+    assert load_config(app_config.source).prompt_sources["greeting_open"] == "tts"

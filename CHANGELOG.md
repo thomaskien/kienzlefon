@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.3
+Version: 2.0
 Changelog:
+- 2.0: Qwen3-TTS, globale Sprecherwahl, Webinterface 1.0 und differenzielle Ansagenerzeugung ergaenzt.
 - 1.9.3: Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe unterdrueckt.
 - 1.9.2: Abbruch bestehender Nicht-Demo-Installationen bei der Updateabfrage korrigiert.
 - 1.9.1: Falschnegative Asterisk-wav16-Pruefung des Installers korrigiert.
@@ -24,6 +25,18 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.0
+
+- automatische Ansagen koennen global wahlweise mit Piper oder dem lokalen, nicht residenten Qwen3-TTS erzeugt werden
+- der Hauptinstaller kann den fest freigegebenen Qwen3-TTS-Offline-Installer v1.5 laden und anhand seiner SHA-256-Pruefsumme verifizieren
+- Erzeugungsmodell und Qwen-Sprecher werden bei der Installation abgefragt und zentral in `[tts]` gespeichert
+- das separate Webinterface 1.0 kann Erzeugungsmodell und globalen Sprecher ebenfalls aendern
+- unveraenderte Texte, Zeitprofile, Stimmen, Modelle und Audioquellen werden anhand eines Manifests erkannt und nicht erneut erzeugt
+- bei einer Ueberinstallation ist eine ausdrueckliche Vollerzeugung aller automatischen Ansagen weiterhin moeglich
+- fuer eine Qwen-Sammelerzeugung wird ein zuvor aktiver Whisper-Worker nur einmal gestoppt und nach Abschluss oder Fehler einmal wieder gestartet
+- Wartungsmarker und gemeinsame Dateisperren verhindern neue Aufnahme- und ASR-Auftraege waehrend des Umschaltens
+- manuelle Aufnahmen werden bei Modell- oder Sprecherwechsel weder geloescht noch ueberschrieben
 
 ## 1.9.3
 

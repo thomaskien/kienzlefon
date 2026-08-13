@@ -117,14 +117,20 @@ class AnnouncementAdmin:
         active_wav16, active_wav = self._active_paths(name)
         active_wav16.parent.mkdir(parents=True, exist_ok=True)
         previous = self._snapshot((active_wav16, active_wav))
+        previous_config = self.config.source.read_text(encoding="utf-8")
         try:
             for active in (active_wav16, active_wav):
                 self._archive(active, name)
             self._atomic_copy(candidate, active_wav16)
             active_wav.unlink(missing_ok=True)
+            _atomic_text(
+                self.config.source,
+                _set_toml_string(previous_config, "ansagen_quellen", name, "manuell"),
+            )
             PromptGenerator(load_config(self.config.source)).generate()
         except Exception:
             self._restore((active_wav16, active_wav), previous)
+            _atomic_text(self.config.source, previous_config)
             raise
         finally:
             self._discard_snapshot(previous)
@@ -132,18 +138,16 @@ class AnnouncementAdmin:
         self._play("admin_activated")
 
     def _activate_generated(self, name: str) -> None:
-        active_paths = self._active_paths(name)
-        previous = self._snapshot(active_paths)
+        previous_config = self.config.source.read_text(encoding="utf-8")
         try:
-            for active in active_paths:
-                self._archive(active, name)
-                active.unlink(missing_ok=True)
+            _atomic_text(
+                self.config.source,
+                _set_toml_string(previous_config, "ansagen_quellen", name, "tts"),
+            )
             PromptGenerator(load_config(self.config.source)).generate()
         except Exception:
-            self._restore(active_paths, previous)
+            _atomic_text(self.config.source, previous_config)
             raise
-        finally:
-            self._discard_snapshot(previous)
         self._audit("piper_aktiviert", ansage=name)
         self._play("admin_generated")
 
@@ -162,10 +166,11 @@ class AnnouncementAdmin:
                 self._set_override(False, True)
                 self._play("admin_special_disabled")
             elif digit == "4":
-                current = load_config(self.config.source).override
+                current_config = load_config(self.config.source)
+                current = current_config.override
                 status = (
                     "admin_special_status_disabled"
-                    if not current.active
+                    if not current.is_valid(current_config.now())
                     else (
                         "admin_special_status_block"
                         if current.block_phone_hours
@@ -183,7 +188,10 @@ class AnnouncementAdmin:
     def _set_override(self, active: bool, block_phone_hours: bool) -> None:
         if active:
             current = load_config(self.config.source)
-            manual = any(path.is_file() for path in self._active_paths("override"))
+            manual = (
+                current.prompt_sources.get("override") != "tts"
+                and any(path.is_file() for path in self._active_paths("override"))
+            )
             if not current.override.announcement and not manual:
                 raise RuntimeError(
                     "Feiertags- und Sonderansage kann ohne Text oder Aufnahme nicht aktiviert werden"
@@ -284,6 +292,23 @@ def _replace_toml_bool(text: str, section: str, key: str, value: bool) -> str:
     if count != 1:
         raise RuntimeError(f"TOML-Feld fehlt: [{section}].{key}")
     return updated
+
+
+def _set_toml_string(text: str, section: str, key: str, value: str) -> str:
+    literal = json.dumps(value, ensure_ascii=False)
+    header = re.search(rf"^\[{re.escape(section)}\]\s*$", text, re.M)
+    if header is None:
+        return text.rstrip() + f"\n\n[{section}]\n{key} = {literal}\n"
+    next_header = re.search(r"^\[[^]]+\]\s*$", text[header.end() :], re.M)
+    section_end = header.end() + (
+        next_header.start() if next_header else len(text) - header.end()
+    )
+    body = text[header.end() : section_end]
+    pattern = re.compile(rf"^(?P<prefix>{re.escape(key)}\s*=\s*).*$", re.M)
+    updated, count = pattern.subn(rf"\g<prefix>{literal}", body, count=1)
+    if count == 0:
+        updated = body.rstrip() + f"\n{key} = {literal}\n"
+    return text[: header.end()] + updated + text[section_end:]
 
 
 def _atomic_text(path: Path, text: str) -> None:

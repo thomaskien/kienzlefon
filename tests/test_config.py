@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, time
 from pathlib import Path
@@ -61,6 +62,7 @@ def test_urgent_help_wraps_daily_opening_span_but_excludes_midday_gap(app_config
 
 def test_override_blocks_phone_hours(app_config) -> None:
     assert app_config.override.active is False
+    assert app_config.override.position == "statt_begruessung"
     assert app_config.ivr.attempts == 2
     assert app_config.whisper.standard_model == "large-v3-turbo"
     assert app_config.whisper.name_model == "large-v3"
@@ -75,6 +77,10 @@ def test_override_blocks_phone_hours(app_config) -> None:
     assert app_config.tts.target_loudness_lufs == -19.0
     assert app_config.tts.max_true_peak_db == -2.0
     assert app_config.tts.sentence_silence == 0.8
+    assert app_config.tts.engine == "piper"
+    assert app_config.tts.qwen_voice == "ryan"
+    assert app_config.tts.qwen_language == "German"
+    assert app_config.tts.qwen_seed == 42
     assert app_config.ivr.announcement_pause_ms == 700
     assert app_config.ivr.red_ring_seconds == 20
     assert app_config.ivr.red_fallback_priority == 100
@@ -85,6 +91,75 @@ def test_override_blocks_phone_hours(app_config) -> None:
     assert app_config.telepraxis.demo is False
     assert app_config.telepraxis.anonymize_phone_numbers is False
     assert app_config.telepraxis.public_key is not None
+
+
+def test_scheduled_overrides_select_highest_current_priority(app_config) -> None:
+    root = app_config.paths.prompt_masters / "sonderansagen"
+    entries = (
+        (
+            "1" * 32,
+            {
+                "name": "Erste Stufe",
+                "announcement": "Erste Ansage.",
+                "active": True,
+                "priority": 300,
+                "valid_from": "2026-12-24T00:00",
+                "expires_at": "2026-12-25T00:00",
+                "block_phone_hours": True,
+                "position": "nach_begruessung",
+                "source": "tts",
+            },
+        ),
+        (
+            "2" * 32,
+            {
+                "name": "Zweite Stufe",
+                "announcement": "Zweite Ansage.",
+                "active": True,
+                "priority": 200,
+                "valid_from": "",
+                "expires_at": "2026-12-27T00:00",
+                "block_phone_hours": False,
+                "position": "vor_begruessung",
+                "source": "tts",
+            },
+        ),
+        (
+            "3" * 32,
+            {
+                "name": "Dritte Stufe",
+                "announcement": "Dritte Ansage.",
+                "active": True,
+                "priority": 100,
+                "valid_from": "2026-12-27T00:00",
+                "expires_at": "",
+                "block_phone_hours": False,
+                "position": "statt_begruessung",
+                "source": "tts",
+            },
+        ),
+    )
+    for identifier, metadata in entries:
+        directory = root / identifier
+        directory.mkdir(parents=True)
+        (directory / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+        (directory / "tts.wav").write_bytes(b"tts")
+
+    config = load_config(app_config.source)
+    timezone = ZoneInfo("Europe/Berlin")
+
+    assert config.current_override(
+        datetime(2026, 12, 24, 12, 0, tzinfo=timezone)
+    ).name == "Erste Stufe"
+    assert config.current_override(
+        datetime(2026, 12, 26, 12, 0, tzinfo=timezone)
+    ).name == "Zweite Stufe"
+    assert config.current_override(
+        datetime(2026, 12, 26, 12, 0, tzinfo=timezone)
+    ).position == "vor_begruessung"
+    assert config.current_override(
+        datetime(2026, 12, 28, 12, 0, tzinfo=timezone)
+    ).name == "Dritte Stufe"
 
 
 def test_demo_mode_does_not_require_public_key(tmp_path: Path) -> None:
@@ -143,6 +218,25 @@ def test_productive_mode_requires_public_key(tmp_path: Path) -> None:
     config_path.write_text(source, encoding="utf-8")
 
     with pytest.raises(ConfigError, match="Produktivmodus erforderlich"):
+        load_config(config_path)
+
+
+def test_qwen_tts_accepts_only_allowlisted_speakers(tmp_path: Path) -> None:
+    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    source = source.replace('engine = "piper"', 'engine = "qwen"')
+    source = source.replace('qwen_stimme = "ryan"', 'qwen_stimme = "serena"')
+    config_path = tmp_path / "qwen.toml"
+    config_path.write_text(source, encoding="utf-8")
+
+    config = load_config(config_path)
+    assert config.tts.engine == "qwen"
+    assert config.tts.qwen_voice == "serena"
+
+    config_path.write_text(
+        source.replace('qwen_stimme = "serena"', 'qwen_stimme = "../../fremd"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match="nicht freigegeben"):
         load_config(config_path)
 
 
