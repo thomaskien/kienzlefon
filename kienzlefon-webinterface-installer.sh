@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Separater Installer fuer das Kienzlefon-Webinterface.
-# Version: 1.1
+# Version: 1.1.1
 # Changelog:
+# - 1.1.1: Bestaetigte Aufrufe aus dem Kienzlefon-Hauptinstaller werden unterstuetzt.
 # - 1.1: Gezielte neue Qwen-Varianten je Ansage und Sonderansage ergaenzt.
 # - 1.0: Globale TTS-Modell- und Sprecherwahl sowie sichere Qwen3-TTS-Ausfuehrung.
 # - 0.4.1: Eigene Position und Telefonzeitensperre je Planung; klarer Aktivstatus.
@@ -25,7 +26,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="1.1"
+VERSION="1.1.1"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"
@@ -522,6 +523,19 @@ EOF
 }
 
 main() {
+  local confirmed="n"
+  while (( $# > 0 )); do
+    case "$1" in
+      --from-main-installer) confirmed="y" ;;
+      -h|--help)
+        printf 'Aufruf: %s [--from-main-installer]\n' "${0##*/}"
+        return 0
+        ;;
+      *) die "Unbekannte Option: $1" ;;
+    esac
+    shift
+  done
+
   printf 'Kienzlefon-Webinterface-Installer %s\n' "$VERSION"
   [[ ${EUID} -eq 0 ]] || die "Dieser Installer muss als root ausgefuehrt werden."
   [[ -f "$CONFIG_FILE" ]] || die "Kienzlefon-Konfiguration fehlt: ${CONFIG_FILE}"
@@ -533,7 +547,9 @@ main() {
   need_command find
   need_command getent
   [[ -x "${VENV}/bin/python" ]] || die "Kienzlefon-Virtualenv fehlt."
-  ask_yes_no confirmed "Separate Webinterface-Installation jetzt starten?" n
+  if [[ "$confirmed" != "y" ]]; then
+    ask_yes_no confirmed "Separate Webinterface-Installation jetzt starten?" n
+  fi
   [[ "$confirmed" == "y" ]] || { printf 'Installation nicht gestartet.\n'; exit 0; }
 
   choose_server

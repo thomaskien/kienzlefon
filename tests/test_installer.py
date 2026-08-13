@@ -1,6 +1,7 @@
 # kienzlefon tests
-# Version: 1.9.3
+# Version: 2.1.1
 # Changelog:
+# - 2.1.1: Optionale Webinterface-Installation und ihre Erfolgswege getestet.
 # - 1.9.3: Installerfreigabe fuer die Leeranrufunterdrueckung aktualisiert.
 # - 1.9.2: Demo- und Nicht-Demo-Zweig der Update-Anonymisierungsabfrage ausgefuehrt.
 # - 1.9.1: Asterisk-wav16-Pruefung ohne falschnegatives pipefail getestet.
@@ -154,8 +155,92 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.1" in result.stdout
+    assert "Version: 2.1.1" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
+
+
+def _run_webinterface_offer(
+    tmp_path: Path,
+    choice: str,
+    installer_status: int = 0,
+) -> subprocess.CompletedProcess[str]:
+    installer_source = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = installer_source.index("install_or_update_webinterface(){")
+    end = installer_source.index("\n}\n", start) + 3
+    function = installer_source[start:end]
+
+    source_target = tmp_path / "source"
+    (source_target / "webinterface").mkdir(parents=True)
+    (source_target / "webinterface" / "admin.php").write_text(
+        "<?php declare(strict_types=1);",
+        encoding="utf-8",
+    )
+    web_installer = source_target / "kienzlefon-webinterface-installer.sh"
+    web_installer.write_text(
+        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" > "$CALL_LOG"\n'
+        'exit "$WEB_INSTALLER_STATUS"\n',
+        encoding="utf-8",
+    )
+    web_installer.chmod(0o755)
+
+    runner = tmp_path / "run-offer.sh"
+    runner.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -Eeuo pipefail\n"
+        + function
+        + "\n"
+        + 'ask_yes_no(){ printf -v "$1" \'%s\' "$WEB_CHOICE"; }\n'
+        + "die(){ printf 'ERROR: %s\\n' \"$*\" >&2; exit 1; }\n"
+        + "install_or_update_webinterface\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "SOURCE_TARGET": str(source_target),
+            "CALL_LOG": str(tmp_path / "call.log"),
+            "WEB_CHOICE": choice,
+            "WEB_INSTALLER_STATUS": str(installer_status),
+        }
+    )
+    return subprocess.run(
+        ["bash", str(runner)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+
+def test_installer_can_skip_webinterface_update(tmp_path: Path) -> None:
+    result = _run_webinterface_offer(tmp_path, "n")
+
+    assert result.returncode == 0, result.stderr
+    assert "Installation/Aktualisierung uebersprungen" in result.stdout
+    assert not (tmp_path / "call.log").exists()
+
+
+def test_installer_runs_webinterface_update_after_confirmation(tmp_path: Path) -> None:
+    result = _run_webinterface_offer(tmp_path, "y")
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "call.log").read_text(encoding="utf-8").strip() == "--from-main-installer"
+
+
+def test_main_installer_always_reaches_webinterface_offer() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    main = installer[installer.index("main(){") : installer.rindex('\nmain "$@"')]
+
+    assert 'sep "Optionales Administrations-Webinterface"' in main
+    assert "install_or_update_webinterface" in main
+    assert main.index("install_or_update_webinterface") < main.rindex("trap - ERR")
+
+
+def test_installer_reports_failed_webinterface_update(tmp_path: Path) -> None:
+    result = _run_webinterface_offer(tmp_path, "y", installer_status=17)
+
+    assert result.returncode != 0
+    assert "Webinterface-Installation oder -Aktualisierung ist fehlgeschlagen" in result.stderr
 
 
 def test_installer_pins_the_tested_qwen_v15_bootstrap() -> None:

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.1
+Version: 2.1.1
 Changelog:
+- 2.1.1: Hauptinstaller bietet Webinterface-Installation oder -Aktualisierung immer an.
 - 2.1: Gezielte Qwen-Varianten, Webinterface 1.1 und WireGuard-KI-Client ergaenzt.
 - 2.0: Qwen3-TTS, globale Sprecherwahl, Webinterface 1.0 und differenzielle Ansagenerzeugung ergaenzt.
 - 1.9.3: Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe unterdrueckt.
@@ -26,6 +27,16 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.1.1
+
+- der Kienzlefon-Hauptinstaller fragt bei jedem Lauf, ob das separate Webinterface installiert oder aktualisiert werden soll
+- bei einer erkannten Webinterface-Installation lautet die Vorgabe `Ja`, bei einer Erstinstallation `Nein`
+- nach Zustimmung wird genau der Webinterface-Installer aus demselben installierten Quellstand gestartet
+- die bereits im Hauptinstaller gegebene Zustimmung wird uebernommen; es gibt keine doppelte Startabfrage
+- Ablehnen ueberspringt ausschliesslich das Webinterface und beendet die Kienzlefon-Installation erfolgreich
+- ein fehlender oder fehlerhafter Webinterface-Installer fuehrt zu einer eindeutigen Fehlermeldung
+- Kienzlefon traegt die Patchversion 2.1.1, der separate Webinterface-Installer die Patchversion 1.1.1
 
 ## 2.1
 

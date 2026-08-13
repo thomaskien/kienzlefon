@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.1
+# Version: 2.1.1
 # Changelog:
+# - 2.1.1: Installation oder Aktualisierung des Webinterfaces wird immer angeboten.
 # - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client veroeffentlicht.
 # - 2.0: Qwen3-TTS-Bootstrap, Modell- und Sprecherwahl sowie differenzielle Ansagenupdates.
 # - 1.9.3: Worker ohne Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe installiert.
@@ -29,7 +30,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.1"
+VERSION="2.1.1"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -1463,6 +1464,32 @@ start_and_verify(){
   die "Whisper-Worker ist nach 300 Sekunden nicht bereit."
 }
 
+install_or_update_webinterface(){
+  local choice="" default="n"
+  local installer="${SOURCE_TARGET}/kienzlefon-webinterface-installer.sh"
+  if [[ -f /etc/kienzlefon/webinterface.json \
+     || -f /usr/share/kienzlefon-webinterface/admin.php \
+     || -f /etc/systemd/system/kienzlefon-webinterface-worker.service ]]; then
+    default="j"
+  fi
+
+  printf '\nDas Webinterface bleibt ein eigener Baustein und wird nur nach Zustimmung aktualisiert.\n'
+  ask_yes_no choice "Webinterface jetzt installieren oder aktualisieren?" "$default"
+  if [[ "$choice" != "y" ]]; then
+    printf 'Webinterface: Installation/Aktualisierung uebersprungen.\n'
+    return 0
+  fi
+
+  [[ -f "$installer" ]] \
+    || die "Webinterface-Installer fehlt im installierten Quellstand: ${installer}"
+  [[ -f "${SOURCE_TARGET}/webinterface/admin.php" ]] \
+    || die "PHP-Datei des Webinterfaces fehlt im installierten Quellstand."
+  bash -n "$installer" \
+    || die "Webinterface-Installer enthaelt einen Syntaxfehler."
+  "$installer" --from-main-installer \
+    || die "Webinterface-Installation oder -Aktualisierung ist fehlgeschlagen."
+}
+
 main(){
   local install_now="" demo_mode=""
   printf 'Kienzlefon Installer\nVersion: %s\n\n' "$VERSION"
@@ -1503,8 +1530,10 @@ main(){
   sep "Asterisk integrieren"
   configure_asterisk
   start_and_verify
+  sep "Optionales Administrations-Webinterface"
+  install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.1 ist installiert"
+  sep "Kienzlefon 2.1.1 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

@@ -681,7 +681,8 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="1.1"' in installer
+    assert 'VERSION="1.1.1"' in installer
+    assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
     assert "ProtectSystem=strict" in installer

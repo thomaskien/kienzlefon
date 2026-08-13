@@ -1,6 +1,7 @@
-# Kienzlefon-Webinterface 1.1
+# Kienzlefon-Webinterface 1.1.1
 
-Diese Fassung wird bewusst getrennt vom Hauptinstaller installiert. Sie besteht aus einer
+Diese Fassung bleibt ein eigener, schlanker Installationsbaustein. Der Kienzlefon-Hauptinstaller
+bietet seine Installation oder Aktualisierung bei jedem Lauf ausdrücklich an. Sie besteht aus einer
 einzelnen PHP-Datei und einem privilegierten, positivlistenbasierten Systemdienst. PHP kann die
 geschützte Kienzlefon-TOML weder lesen noch direkt verändern.
 
@@ -64,5 +65,6 @@ Schrittnummer und den Namen der gerade verarbeiteten Ansage. Auch das Vorbereite
 und der Wiederanlauf des Whisper-Workers werden angezeigt; ein langer Qwen-Aufruf
 bleibt dadurch nicht mehr als unbestimmter Hintergrundvorgang stehen.
 
-Die Installation verändert den bisherigen Hauptinstaller nicht. Eine Übernahme dorthin ist erst
-nach dem Praxistest vorgesehen.
+Bei einem direkten Aufruf verlangt der separate Installer weiterhin seine eigene Bestätigung.
+Nach einer bereits bestätigten Auswahl im Hauptinstaller entfällt ausschließlich diese doppelte
+Startfrage; Betriebsart, Netzwerkbindung und Zugriffsschutz werden weiterhin interaktiv festgelegt.

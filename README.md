@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.1
+Version: 2.1.1
 
+- 2.1.1: Hauptinstaller bietet Installation oder Aktualisierung des Webinterfaces immer an.
 - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client ergaenzt.
 - 2.0: Lokales Qwen3-TTS, globale Sprecherwahl und differenzielle Ansagenerzeugung ergaenzt.
 Changelog:
@@ -38,7 +39,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.1**
+Version: **2.1.1**
 
 ## Eigenschaften
 
@@ -183,7 +184,7 @@ der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
 [2/4] Automatische Ansage wird erzeugt: phone_hours
 ```
 
-Kienzlefon 2.1 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
+Kienzlefon 2.1.1 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
 installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
 mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
 
@@ -262,7 +263,11 @@ systemctl status kienzlefon-worker
 
 ## Separates Administrations-Webinterface
 
-Das Webinterface wird weiterhin getrennt vom Hauptinstaller installiert:
+Das Webinterface bleibt ein eigener, schlanker Baustein. Der Hauptinstaller
+bietet bei jeder Neu- oder Ueberinstallation ausdruecklich an, diesen Baustein
+ebenfalls zu installieren beziehungsweise zu aktualisieren. Eine vorhandene
+Webinterface-Installation wird dabei als empfohlene Vorgabe erkannt. Der
+separate Installer kann weiterhin direkt ausgefuehrt werden:
 
 ```bash
 sudo ./kienzlefon-webinterface-installer.sh
