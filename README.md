@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.0
+Version: 2.1
 
+- 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client ergaenzt.
 - 2.0: Lokales Qwen3-TTS, globale Sprecherwahl und differenzielle Ansagenerzeugung ergaenzt.
 Changelog:
 - 1.9.3: Unterdrueckung vollstaendig inhaltsloser fehlerfreier Telepraxis-Eintraege dokumentiert.
@@ -37,7 +38,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.0**
+Version: **2.1**
 
 ## Eigenschaften
 
@@ -58,6 +59,7 @@ Version: **2.0**
 - ausdruecklich zu bestaetigender Demomodus mit unverschluesselter `*.json`-Ausgabe
 - optionale Anonymisierung von `id` und `telefon` in Demo-JSONs
 - lokale Piper- oder Qwen3-TTS-Ansagen in WAV, SLN16, G.722, A-law und mu-law
+- gezielte neue Qwen-Variante fuer einzelne Ansagen bei unerwuenschten Sprach-Artefakten
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
@@ -181,7 +183,7 @@ der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
 [2/4] Automatische Ansage wird erzeugt: phone_hours
 ```
 
-Kienzlefon 2.0 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
+Kienzlefon 2.1 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
 installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
 mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
 

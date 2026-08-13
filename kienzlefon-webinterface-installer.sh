@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Separater Installer fuer das Kienzlefon-Webinterface.
-# Version: 1.0
+# Version: 1.1
 # Changelog:
+# - 1.1: Gezielte neue Qwen-Varianten je Ansage und Sonderansage ergaenzt.
 # - 1.0: Globale TTS-Modell- und Sprecherwahl sowie sichere Qwen3-TTS-Ausfuehrung.
 # - 0.4.1: Eigene Position und Telefonzeitensperre je Planung; klarer Aktivstatus.
 # - 0.4.0: Mehrere geplante Sonderansagen mit Start, Ablauf und Prioritaet.
@@ -24,7 +25,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="1.0"
+VERSION="1.1"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"

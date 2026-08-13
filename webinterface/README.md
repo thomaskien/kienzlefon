@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface 1.0
+# Kienzlefon-Webinterface 1.1
 
 Diese Fassung wird bewusst getrennt vom Hauptinstaller installiert. Sie besteht aus einer
 einzelnen PHP-Datei und einem privilegierten, positivlistenbasierten Systemdienst. PHP kann die
@@ -53,6 +53,11 @@ Unter „Ansagen“ sind außerdem das globale TTS-Erzeugungsmodell und bei Qwen
 freigegebenen Sprecher auswählbar. Ein Wechsel erzeugt alle automatischen TTS-Fassungen neu;
 manuelle Aufnahmen werden weder überschrieben noch gelöscht. Ohne Text-, Modell- oder
 Sprecheränderung beendet sich die Ansagenaktualisierung ohne Qwen-Start.
+
+Bei einer aktiven Qwen-TTS-Quelle erzeugt „Noch einmal neu generieren“ nur für
+die gewählte Ansage eine neue Variante. Das gilt auch für die einzelne
+Sonderansage und gespeicherte TTS-Sonderansagen. Andere Ansagen werden nicht
+angestoßen; bei einem technischen Fehler bleibt die vorhandene Datei aktiv.
 
 Während einer laufenden Erzeugung aktualisiert die Statusanzeige fortlaufend die
 Schrittnummer und den Namen der gerade verarbeiteten Ansage. Auch das Vorbereiten

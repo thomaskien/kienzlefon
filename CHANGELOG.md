@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.0
+Version: 2.1
 Changelog:
+- 2.1: Gezielte Qwen-Varianten, Webinterface 1.1 und WireGuard-KI-Client ergaenzt.
 - 2.0: Qwen3-TTS, globale Sprecherwahl, Webinterface 1.0 und differenzielle Ansagenerzeugung ergaenzt.
 - 1.9.3: Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe unterdrueckt.
 - 1.9.2: Abbruch bestehender Nicht-Demo-Installationen bei der Updateabfrage korrigiert.
@@ -25,6 +26,18 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.1
+
+- einzelne Qwen-TTS-Ansagen koennen im Webinterface gezielt als neue Variante erzeugt werden
+- jeder erneute Versuch verwendet einen dauerhaft im Manifest gespeicherten Variantenwert und damit einen anderen Seed
+- regulaere Ansagen, die einzelne Sonderansage und gespeicherte TTS-Sonderansagen werden unterstuetzt
+- nur die ausgewaehlte Ansage wird verarbeitet; andere Ansagen und manuelle Aufnahmen bleiben unveraendert
+- eine technisch fehlgeschlagene Variante ersetzt keine vorhandene Audiodatei
+- `kienzlefon-ansagen --prompt NAME --new-variant` stellt dieselbe Funktion auf der Kommandozeile bereit
+- `--all` verwendet bei Qwen nun ebenfalls neue Varianten statt derselben deterministischen Dateien
+- das separate Webinterface traegt fuer diese Bedienfunktion die Version 1.1
+- der neue WireGuard-KI-Client richtet einen auf die VPS-VPN-Adresse begrenzten Tunnel ohne Default-Route ein
 
 ## 2.0
 

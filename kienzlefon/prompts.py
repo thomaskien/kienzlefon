@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.1
 # Changelog:
+# - 2.1: Dauerhafte Qwen-Variantenwerte und gezielte Neugenerierung ergaenzt.
 # - 2.0: Live-Fortschritt fuer Planung, aktuelle Ansage und Qwen-Wartungsphasen ergaenzt.
 # - 2.0: Differenzielle Qwen3-TTS-Erzeugung mit globaler Sprecherwahl ergaenzt.
 # - 1.5: 16-kHz-Master und gemeinsame zweistufige Lautheitsnormalisierung eingefuehrt.
@@ -357,8 +358,9 @@ class PromptGenerator:
         write_json_atomic(
             self.manifest_path,
             {
-                "version": "2.0",
+                "version": "2.1",
                 "changelog": [
+                    "2.1: Gezielte Qwen-Neugenerierung mit dauerhaftem Variantenwert ergaenzt.",
                     "2.0: Qwen3-TTS und globale Sprecherwahl differenziell beruecksichtigt.",
                     "1.5: 16-kHz-Master und gemeinsame Lautheitsnormalisierung eingefuehrt.",
                     "1.4: PIN-freie deutsche Administrationsansagen eingefuehrt.",

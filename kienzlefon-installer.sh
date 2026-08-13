@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.0
+# Version: 2.1
 # Changelog:
+# - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client veroeffentlicht.
 # - 2.0: Qwen3-TTS-Bootstrap, Modell- und Sprecherwahl sowie differenzielle Ansagenupdates.
 # - 1.9.3: Worker ohne Telepraxis-Ausgabe fuer vollstaendig inhaltslose fehlerfreie Anrufe installiert.
 # - 1.9.2: Nicht-Demo-Updates ueberspringen die Demo-Anonymisierungsabfrage fehlerfrei.
@@ -28,7 +29,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.0"
+VERSION="2.1"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -1503,7 +1504,7 @@ main(){
   configure_asterisk
   start_and_verify
   trap - ERR
-  sep "Kienzlefon 2.0 ist installiert"
+  sep "Kienzlefon 2.1 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

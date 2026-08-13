@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Kienzlefon WireGuard KI-Client
+# Version: 1.0
 set -Eeuo pipefail
 umask 077
 

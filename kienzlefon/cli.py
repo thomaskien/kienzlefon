@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.1
 # Changelog:
+# - 2.1: Gezielte Qwen-Neugenerierung mit neuer Variante je Ansage ergaenzt.
 # - 2.0: Laufende Ansagenerzeugung menschenlesbar und maschinenlesbar ausgegeben.
 # - 2.0: TTS-Modell und Qwen-Sprecher in die konservative Migration aufgenommen.
 # - 1.9.3: Migrationsausgabe auf Patchrelease 1.9.3 aktualisiert.
@@ -379,7 +380,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.0 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.1 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -412,4 +413,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.0 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.1 ergaenzt: {target}")

@@ -154,7 +154,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.0" in result.stdout
+    assert "Version: 2.1" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
