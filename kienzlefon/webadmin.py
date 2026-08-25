@@ -23,8 +23,18 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from . import __version__
 from .agi import AgiChannel, AgiHangup
-from .config import QWEN_SPEAKERS, WEEKDAYS, AppConfig, load_config
+from .config import (
+    CONFIGURABLE_PROMPT_MODES,
+    DEFAULT_PROMPT_MODES,
+    OPTIONAL_PROMPT_TEXTS,
+    PROMPT_MODE_VALUES,
+    QWEN_SPEAKERS,
+    WEEKDAYS,
+    AppConfig,
+    load_config,
+)
 from .prompts import (
     PROMPT_CATALOG,
     PROMPT_PROGRESS_PREFIX,
@@ -41,7 +51,12 @@ DEFAULT_CONFIG_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-config"
 DEFAULT_PROMPTS_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-ansagen"
 DEFAULT_RECORD_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-webaufnahme"
 DEFAULT_ASTERISK_COMMAND = "/usr/sbin/asterisk"
-EDITABLE_SCHEDULES = ("oeffnungszeiten", "telefonzeiten", "fachstellenzeiten")
+EDITABLE_SCHEDULES = (
+    "oeffnungszeiten",
+    "telefonzeiten",
+    "apothekenzeiten",
+    "fachstellenzeiten",
+)
 SOURCE_VALUES = frozenset({"tts", "manuell"})
 TTS_ENGINE_VALUES = frozenset({"piper", "qwen"})
 RECORD_SESSION_SECONDS = 1500
@@ -85,6 +100,30 @@ PROMPT_LABELS = {
     "phone_hours_prefix": "Einleitung Telefonzeiten",
     "phone_hours_closed": "Telefonisch nicht erreichbarer Wochentag",
     "phone_hours": "Zusätzlicher Telefonzeiten-Text",
+    "submenu_five": "Untermenü Rückruf oder sonstiges Anliegen",
+    "recording_hint": "Hinweis zur Aufnahme",
+    "first_name": "Vorname",
+    "last_name": "Nachname",
+    "birth_date": "Geburtsdatum",
+    "callback_number": "Rückrufnummer",
+    "first_medication": "Erstes Medikament",
+    "next_medication": "Weiteres Medikament",
+    "medication_choice": "Auswahl weiteres Medikament",
+    "specialty": "Fachrichtung der Überweisung",
+    "referral_reason": "Grund der Überweisung",
+    "appointment": "Terminwunsch",
+    "callback_reason": "Grund des Rückrufwunsches",
+    "other": "Sonstiges Anliegen",
+    "no_selection_open": "Keine Tastenauswahl bei offenen Telefonzeiten",
+    "no_selection_closed": "Keine Tastenauswahl bei geschlossenen Telefonzeiten",
+    "invalid": "Ungültige Auswahl",
+    "completed": "Abschluss",
+    "whisper_failure": "Technischer Aufnahmefehler",
+    "prescription_information": "Rezeptinformation",
+    "pharmacy_agent": "Hinweis für die Praxisqueue – care_service",
+    "specialist_agent": "Hinweis am roten Telefon – professional_urgent",
+    "personal_data_fallback": "Fallback für unvollständige Personalangaben",
+    "blocked_destination": "Gesperrtes Telefonziel",
     "override": "Temporäre Sonderansage",
     "webadmin_record": "Aufforderung zur Telefonaufnahme",
     "webadmin_record_actions": "Auswahl nach der Telefonaufnahme",
@@ -439,6 +478,9 @@ def export_state(
     default_tts = defaults.get("tts", {})
     if not isinstance(default_tts, Mapping):
         raise WebAdminError("TTS-Standardabschnitt fehlt")
+    default_modes = defaults.get("ansagen_modus", {})
+    if not isinstance(default_modes, Mapping):
+        raise WebAdminError("Ansagenmodus-Standardabschnitt ist ungültig")
     prompt_fields = [
         {
             "name": str(name),
@@ -449,6 +491,7 @@ def export_state(
             "default": str(default_prompts.get(name, value)),
         }
         for name, value in raw_prompts.items()
+        if name in default_prompts
     ]
     prompt_fields_by_name = {field["name"]: field for field in prompt_fields}
 
@@ -494,6 +537,10 @@ def export_state(
                     if field_name in prompt_fields_by_name
                 ],
                 "source": active_source,
+                "mode": config.prompt_mode(name),
+                "default_mode": str(
+                    default_modes.get(name, DEFAULT_PROMPT_MODES.get(name, "immer"))
+                ),
                 "manual_available": manual is not None,
                 "candidate_available": _candidate_path(config, name).is_file(),
                 "active_preview": active_preview,
@@ -542,6 +589,12 @@ def export_state(
         "generated_at": datetime.now(config.practice.timezone).isoformat(timespec="seconds"),
         "config_hash": _config_hash(config_path),
         "practice": config.practice.name,
+        "product": {
+            "name": "kienzlefon.de",
+            "version": __version__,
+            "author": "Dr. Thomas Kienzle",
+            "url": "https://kienzlefon.de",
+        },
         "timezone": str(config.practice.timezone),
         "auth_required": auth_required,
         "auth_ready": auth_ready,
@@ -655,6 +708,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "config_hash",
         "schedules",
         "prompts",
+        "prompt_modes",
         "override",
         "sources",
         "tts",
@@ -686,7 +740,28 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         text = str(value).strip()
         if len(text) > 5000:
             raise WebAdminError(f"Ansagentext ist zu lang: {key}")
+        if not text and key not in OPTIONAL_PROMPT_TEXTS:
+            raise WebAdminError(
+                f"Ansagentext darf nicht leer sein: {_prompt_label(str(key))}"
+            )
         prompts[str(key)] = text
+
+    prompt_modes_payload = job.get("prompt_modes", {})
+    if not isinstance(prompt_modes_payload, Mapping):
+        raise WebAdminError("Ansagenmodi müssen ein Objekt sein")
+    rendered_names = set(rendered_prompts(config))
+    allowed_mode_names = CONFIGURABLE_PROMPT_MODES & rendered_names
+    unknown_modes = set(prompt_modes_payload) - allowed_mode_names
+    if unknown_modes:
+        raise WebAdminError(
+            "Nicht freigegebene Ansagenmodi: " + ", ".join(sorted(unknown_modes))
+        )
+    prompt_modes: dict[str, str] = {}
+    for key, value in prompt_modes_payload.items():
+        mode = str(value)
+        if mode not in PROMPT_MODE_VALUES:
+            raise WebAdminError(f"Ungültiger Ansagenmodus: {key}")
+        prompt_modes[str(key)] = mode
 
     override_payload = job.get("override", {})
     if not isinstance(override_payload, Mapping):
@@ -748,7 +823,6 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
     source_payload = job.get("sources", {})
     if not isinstance(source_payload, Mapping):
         raise WebAdminError("Ansagenquellen müssen ein Objekt sein")
-    rendered_names = set(rendered_prompts(config))
     unknown_sources = set(source_payload) - rendered_names
     if unknown_sources:
         raise WebAdminError(
@@ -790,6 +864,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "config_hash": config_hash,
         "schedules": schedules,
         "prompts": prompts,
+        "prompt_modes": prompt_modes,
         "override": override,
         "sources": sources,
         "tts": tts,
@@ -803,6 +878,8 @@ def _render_updated_config(text: str, values: Mapping[str, Any]) -> str:
             updated = _set_toml_value(updated, section, day, ranges)
     for key, value in values["prompts"].items():
         updated = _set_toml_value(updated, "ansagen", key, value)
+    for key, value in values["prompt_modes"].items():
+        updated = _set_toml_value(updated, "ansagen_modus", key, value)
     override_keys = {
         "active": "aktiv",
         "announcement": "ansage",

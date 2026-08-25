@@ -1,6 +1,11 @@
 # kienzlefon tests
-# Version: 2.1.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
+# - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
+# - 2.3.1: Patchrelease fuer die DTMF-leere Eingangsphase freigegeben.
+# - 2.3: Geschuetzten Result-Speicher und Asterisk-Feature-Reload getestet.
+# - 2.2: AI-Admission-Abfragen und Releasekennung getestet.
 # - 2.1.2: Patchrelease fuer den Webinterface-Boot-Refresh freigegeben.
 # - 2.1.1: Optionale Webinterface-Installation und ihre Erfolgswege getestet.
 # - 1.9.3: Installerfreigabe fuer die Leeranrufunterdrueckung aktualisiert.
@@ -34,6 +39,59 @@ from pathlib import Path
 
 def test_installer_shell_syntax() -> None:
     subprocess.run(["bash", "-n", "kienzlefon-installer.sh"], check=True)
+
+
+def test_installer_asks_for_ai_extensions_and_exact_listener_binding() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    assert "Soll Kienzlefon AI angebunden werden?" in installer
+    assert "Anzahl der anzulegenden KI-Nebenstellen" in installer
+    assert "Konkrete WireGuard-IP" in installer
+    assert "Konkrete LAN-IP" in installer
+    assert "Wildcard- und Multicast-Bindungen sind nicht erlaubt" in installer
+    assert "kienzlefon-admission-listener.service" in installer
+    assert "/var/lib/kienzlefon/ai-call-results" in installer
+    assert "UMask=0077" in installer
+    assert "ReadWritePaths=/var/lib/kienzlefon/ai-call-results" in installer
+    assert 'asterisk -rx "features reload"' in installer
+
+
+def test_ai_config_updater_preserves_existing_passwords(tmp_path: Path) -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    marker = "# kienzlefon installer AI config updater"
+    start = installer.index(marker)
+    end = installer.index("\nPY\n", start)
+    updater = tmp_path / "ai_updater.py"
+    updater.write_text(installer[start:end] + "\n", encoding="utf-8")
+    target = tmp_path / "kienzlefon.toml"
+    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    source = source.replace(
+        "sip_passwoerter = []", 'sip_passwoerter = ["aaaaaaaaaaaaaaaaaaaaaaaa"]'
+    )
+    source = source.replace("anzahl_nebenstellen = 0", "anzahl_nebenstellen = 1")
+    target.write_text(source, encoding="utf-8")
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "CONFIG_FILE": str(target),
+            "KZF_AI_ENABLED": "y",
+            "KZF_AI_COUNT": "3",
+            "KZF_AI_LISTENER_MODE": "lan",
+            "KZF_AI_LISTENER_IP": "192.168.10.20",
+            "KZF_AI_LISTENER_PORT": "8190",
+        }
+    )
+
+    subprocess.run([os.sys.executable, str(updater)], check=True, env=environment)
+
+    with target.open("rb") as handle:
+        result = tomllib.load(handle)["ki_integration"]
+    assert result["aktiv"] is True
+    assert result["anzahl_nebenstellen"] == 3
+    assert result["listener_bindung"] == "lan"
+    assert result["listener_ip"] == "192.168.10.20"
+    assert result["sip_passwoerter"][0] == "a" * 24
+    assert len(result["sip_passwoerter"]) == 3
+    assert all(len(password) >= 24 for password in result["sip_passwoerter"])
 
 
 def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) -> None:
@@ -156,7 +214,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.1.2" in result.stdout
+    assert "Version: 2.4.0" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -164,11 +222,19 @@ def _run_webinterface_offer(
     tmp_path: Path,
     choice: str,
     installer_status: int = 0,
+    *,
+    existing: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     installer_source = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
     start = installer_source.index("install_or_update_webinterface(){")
     end = installer_source.index("\n}\n", start) + 3
     function = installer_source[start:end]
+    existing_marker = tmp_path / "existing-webinterface.json"
+    function = function.replace(
+        "/etc/kienzlefon/webinterface.json", str(existing_marker)
+    )
+    if existing:
+        existing_marker.write_text("{}", encoding="utf-8")
 
     source_target = tmp_path / "source"
     (source_target / "webinterface").mkdir(parents=True)
@@ -217,7 +283,7 @@ def test_installer_can_skip_webinterface_update(tmp_path: Path) -> None:
     result = _run_webinterface_offer(tmp_path, "n")
 
     assert result.returncode == 0, result.stderr
-    assert "Installation/Aktualisierung uebersprungen" in result.stdout
+    assert "Aktivierung uebersprungen" in result.stdout
     assert not (tmp_path / "call.log").exists()
 
 
@@ -228,11 +294,21 @@ def test_installer_runs_webinterface_update_after_confirmation(tmp_path: Path) -
     assert (tmp_path / "call.log").read_text(encoding="utf-8").strip() == "--from-main-installer"
 
 
+def test_installer_updates_existing_webinterface_without_separate_prompt(
+    tmp_path: Path,
+) -> None:
+    result = _run_webinterface_offer(tmp_path, "n", existing=True)
+
+    assert result.returncode == 0, result.stderr
+    assert "mit der Hauptversion aktualisiert" in result.stdout
+    assert (tmp_path / "call.log").read_text(encoding="utf-8").strip() == "--from-main-installer"
+
+
 def test_main_installer_always_reaches_webinterface_offer() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
     main = installer[installer.index("main(){") : installer.rindex('\nmain "$@"')]
 
-    assert 'sep "Optionales Administrations-Webinterface"' in main
+    assert 'sep "Administrations-Webinterface"' in main
     assert "install_or_update_webinterface" in main
     assert main.index("install_or_update_webinterface") < main.rindex("trap - ERR")
 

@@ -1,6 +1,9 @@
 # kienzlefon
-# Version: 2.1.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Migrationsausgabe auf die gemeinsame Hauptversion aktualisiert.
+# - 2.3: Getrennte AGI-Phasen fuer Eingangsansagen und Hauptmenue ergaenzt.
+# - 2.2: Versionsausgaben auf den AI-Admission-Release 2.2 aktualisiert.
 # - 2.1.2: Versionsausgabe der Konfigurationsmigration aktualisiert.
 # - 2.1.1: Versionsausgabe der Konfigurationsmigration aktualisiert.
 # - 2.1: Gezielte Qwen-Neugenerierung mit neuer Variante je Ansage ergaenzt.
@@ -42,7 +45,7 @@ from .dialing import (
 )
 from .errors import record_system_error
 from .health import worker_is_healthy
-from .ivr import IVR
+from .ivr import ALL_DIGITS, IVR
 from .models import CallState
 from .migration import migrate_config, set_boolean, set_string
 from .prompts import PROMPT_PROGRESS_PREFIX, PromptGenerator
@@ -77,6 +80,8 @@ def _load(path: str) -> AppConfig:
 def agi_main() -> None:
     _logging()
     parser = _parser("Kienzlefon Asterisk AGI")
+    parser.add_argument("--phase", choices=("full", "opening", "menu"), default="full")
+    parser.add_argument("--initial-digit", default="")
     arguments = parser.parse_args()
     channel = AgiChannel()
     try:
@@ -88,7 +93,16 @@ def agi_main() -> None:
         except Exception:
             pass
         raise SystemExit(1) from exc
-    IVR(config, channel).run()
+    ivr = IVR(config, channel)
+    if arguments.phase == "opening":
+        ivr.run_opening()
+    elif arguments.phase == "menu":
+        initial_digit = (
+            arguments.initial_digit if arguments.initial_digit in ALL_DIGITS else None
+        )
+        ivr.run_menu(initial_digit)
+    else:
+        ivr.run()
 
 
 def worker_main() -> None:
@@ -382,7 +396,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.1.2 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.3 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -415,4 +429,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.1.2 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.4.0 ergaenzt: {target}")

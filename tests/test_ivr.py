@@ -1,6 +1,10 @@
 # kienzlefon tests
-# Version: 1.8.3
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Lautlosen AI-Shortcut und deaktivierte Ansagen getestet.
+# - 2.3.2: Bestandteil der Regressionstests fuer Kienzlefon 2.3.2.
+# - 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe abgesichert.
+# - 2.3: Getrennte Eingangsphase und exakte DTMF-Uebergabe ins klassische Menue getestet.
 # - 1.8.3: Vollstaendige Feldfolge trotz schweigend uebersprungener Personendaten getestet.
 # - 1.8: Leeren Abbruch verwerfen und technische Fehler weiterhin einreihen getestet.
 # - 1.7: Originale Vorgangs-ID bei normalisierter Telefonanzeige abgesichert.
@@ -25,6 +29,111 @@ class DummyChannel:
 
     def set_variable(self, _name: str, _value: str) -> None:
         pass
+
+
+class VariableChannel:
+    environment = {"agi_callerid": "unknown"}
+
+    def __init__(self) -> None:
+        self.variables: dict[str, str] = {}
+
+    def set_variable(self, name: str, value: str) -> None:
+        self.variables[name] = value
+
+
+class OpeningPhaseIVR(IVR):
+    def _opening_sequence(self) -> str:
+        return "8"
+
+
+class OpeningPhaseWithoutDigitIVR(IVR):
+    def _opening_sequence(self) -> None:
+        return None
+
+
+def test_opening_phase_returns_pressed_digit_without_starting_menu(app_config) -> None:
+    channel = VariableChannel()
+    ivr = OpeningPhaseIVR(app_config, channel)  # type: ignore[arg-type]
+
+    ivr.run_opening()
+
+    assert channel.variables["KZF_IVR_OPENING_OK"] == "1"
+    assert channel.variables["KZF_IVR_INITIAL_DIGIT"] == "8"
+
+
+def test_opening_phase_without_digit_allows_ai_admission(app_config) -> None:
+    channel = VariableChannel()
+    ivr = OpeningPhaseWithoutDigitIVR(app_config, channel)  # type: ignore[arg-type]
+
+    ivr.run_opening()
+
+    assert channel.variables["KZF_IVR_OPENING_OK"] == "1"
+    assert channel.variables["KZF_IVR_INITIAL_DIGIT"] == "none"
+
+
+class InitialDigitIVR(IVR):
+    def __init__(self, config, digit: str):
+        super().__init__(config, DummyChannel())
+        self.expected = digit
+        self.handled: list[str] = []
+        self.played: list[str] = []
+
+    def _worker_healthy(self) -> bool:
+        return True
+
+    def _main_menu(self) -> str:
+        if self.expected == "6":
+            return "0"
+        raise AssertionError("Bei mitgegebener Taste darf das Hauptmenue nicht vorher laufen")
+
+    def _play(self, key: str) -> None:
+        self.played.append(key)
+
+    def _handle_menu_digit(self, digit: str) -> bool:
+        self.handled.append(digit)
+        return True
+
+
+@pytest.mark.parametrize("digit", list("012345789*#"))
+def test_menu_phase_consumes_exact_initial_digit(app_config, digit: str) -> None:
+    ivr = InitialDigitIVR(app_config, digit)
+
+    ivr.run_menu(digit)
+
+    assert ivr.handled == [digit]
+
+
+def test_menu_phase_applies_classic_opening_hours_logic_to_initial_six(app_config) -> None:
+    ivr = InitialDigitIVR(app_config, "6")
+
+    ivr.run_menu("6")
+
+    assert ivr.played == ["opening_hours"]
+    assert ivr.handled == ["0"]
+
+
+class MenuPhaseWithoutDigitIVR(IVR):
+    def __init__(self, config):
+        super().__init__(config, DummyChannel())
+        self.handled: list[str] = []
+
+    def _worker_healthy(self) -> bool:
+        return True
+
+    def _main_menu(self) -> str:
+        return "0"
+
+    def _handle_menu_digit(self, digit: str) -> bool:
+        self.handled.append(digit)
+        return True
+
+
+def test_menu_phase_without_initial_digit_starts_normally(app_config) -> None:
+    ivr = MenuPhaseWithoutDigitIVR(app_config)
+
+    ivr.run_menu()
+
+    assert ivr.handled == ["0"]
 
 
 class MenuSixIVR(IVR):
@@ -99,8 +208,39 @@ class OpeningSequenceIVR(IVR):
         super().__init__(config, DummyChannel())
         self.played: list[str] = []
 
-    def _stream(self, key: str, _digits: str = "") -> None:
+    def _stream(self, key: str, _digits: str = "", **_kwargs) -> None:
         self.played.append(key)
+
+
+def test_zero_in_classic_menu_requests_silent_ai_retry(app_config) -> None:
+    channel = VariableChannel()
+    ivr = IVR(app_config, channel)  # type: ignore[arg-type]
+
+    assert ivr._handle_menu_digit("0") is True
+    assert channel.variables["KZF_IVR_AI_REQUESTED"] == "1"
+
+
+class PromptModeChannel(VariableChannel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.played: list[str] = []
+
+    def stream_file(self, path: Path, _digits: str = "") -> None:
+        self.played.append(path.name)
+
+
+def test_disabled_prompt_is_skipped_without_blocking_following_route(app_config) -> None:
+    config = replace(
+        app_config,
+        prompt_modes={**app_config.prompt_modes, "no_selection_open": "deaktiviert"},
+    )
+    channel = PromptModeChannel()
+    ivr = IVR(config, channel)  # type: ignore[arg-type]
+
+    ivr._play("no_selection_open")
+    ivr._play("completed")
+
+    assert channel.played == ["completed"]
 
 
 def test_urgent_help_always_follows_active_override_that_blocks_phone_hours(

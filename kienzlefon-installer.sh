@@ -2,8 +2,13 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.1.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Webinterface in die Hauptversion integriert und Bestandsupdate vereinheitlicht.
+# - 2.3.2: Sofortige AI-Medienbridge fuer das Backend-Greeting freigegeben.
+# - 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
+# - 2.3: Sicheren AI-Handoff, Call-Policy, Assistentenansage und DTMF-Rueckkehr integriert.
+# - 2.2: Push-basierten AI-Admission-Listener und freigemeldete KI-Nebenstellen integriert.
 # - 2.1.2: Passwortloser Webzugriff bleibt nach einem Systemneustart erhalten.
 # - 2.1.1: Installation oder Aktualisierung des Webinterfaces wird immer angeboten.
 # - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client veroeffentlicht.
@@ -31,7 +36,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.1.2"
+VERSION="2.4.0"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -898,6 +903,155 @@ migrate_version_1_8(){
   "${VENV}/bin/kienzlefon-migration" "${arguments[@]}"
 }
 
+configure_ai_integration(){
+  local current_enabled="n" current_mode="local" current_ip="127.0.0.1"
+  local current_port="8190" current_count="0" enabled="" count="" mode_choice="1"
+  local listener_mode="local" listener_ip="127.0.0.1" listener_port="8190"
+  local reduce=""
+
+  mapfile -t ai_current < <("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    section = tomllib.load(handle).get("ki_integration", {})
+print("y" if section.get("aktiv", False) else "n")
+print(section.get("listener_bindung", "local"))
+print(section.get("listener_ip", "127.0.0.1"))
+print(section.get("listener_port", 8190))
+print(section.get("anzahl_nebenstellen", 0))
+PY
+  )
+  current_enabled="${ai_current[0]:-n}"
+  current_mode="${ai_current[1]:-local}"
+  current_ip="${ai_current[2]:-127.0.0.1}"
+  current_port="${ai_current[3]:-8190}"
+  current_count="${ai_current[4]:-0}"
+
+  printf '\nDer KI-Rechner meldet freie und nicht freie Slots aktiv an dieses Kienzlefon.\n'
+  printf 'Ohne aktuelle Freimeldung und gueltige Lease wird kein Anruf an die KI geleitet.\n'
+  ask_yes_no enabled "Soll Kienzlefon AI angebunden werden?" \
+    "$([[ "$current_enabled" == "y" ]] && printf 'j' || printf 'n')"
+
+  if [[ "$enabled" == "y" ]]; then
+    ask_value count "Anzahl der anzulegenden KI-Nebenstellen" \
+      "$([[ "$current_count" -gt 0 ]] && printf '%s' "$current_count" || printf '3')"
+    [[ "$count" =~ ^[0-9]+$ ]] && (( count >= 1 && count <= 90 )) \
+      || die "Es muessen zwischen 1 und 90 KI-Nebenstellen angelegt werden."
+    if (( count < current_count )); then
+      ask_yes_no reduce \
+        "KI-Nebenstellen wirklich von ${current_count} auf ${count} reduzieren?" "n"
+      [[ "$reduce" == "y" ]] || count="$current_count"
+    fi
+
+    printf '\nBindung des Admission-Listeners auf dem Haupt-Kienzlefon:\n'
+    printf '  1) Lokal auf 127.0.0.1 (KI spaeter auf derselben Maschine)\n'
+    printf '  2) Konkrete WireGuard-IP\n'
+    printf '  3) Konkrete LAN-IP\n'
+    case "$current_mode" in wireguard) mode_choice="2" ;; lan) mode_choice="3" ;; *) mode_choice="1" ;; esac
+    while true; do
+      ask_value mode_choice "Bindungsart (1 bis 3)" "$mode_choice"
+      case "$mode_choice" in
+        1) listener_mode="local"; listener_ip="127.0.0.1"; break ;;
+        2) listener_mode="wireguard"; ask_value listener_ip "WireGuard-IP dieses Kienzlefons" "$current_ip"; break ;;
+        3) listener_mode="lan"; ask_value listener_ip "LAN-IP dieses Kienzlefons" "$current_ip"; break ;;
+        *) printf 'Bitte 1, 2 oder 3 eingeben.\n' ;;
+      esac
+    done
+    ask_value listener_port "TCP-Port des Admission-Listeners" "$current_port"
+    [[ "$listener_port" =~ ^[0-9]+$ ]] \
+      && (( listener_port >= 1 && listener_port <= 65535 )) \
+      || die "Der Admission-Port muss zwischen 1 und 65535 liegen."
+
+    "${VENV}/bin/python" - "$listener_mode" "$listener_ip" <<'PY'
+import ipaddress
+import json
+import subprocess
+import sys
+
+mode, raw = sys.argv[1:]
+try:
+    address = ipaddress.ip_address(raw)
+except ValueError as exc:
+    raise SystemExit(f"ERROR: Ungueltige Listener-IP: {raw}") from exc
+if address.is_unspecified or address.is_multicast:
+    raise SystemExit("ERROR: Wildcard- und Multicast-Bindungen sind nicht erlaubt.")
+if mode == "local" and not address.is_loopback:
+    raise SystemExit("ERROR: Lokale Bindung erfordert eine Loopback-IP.")
+if mode != "local" and address.is_loopback:
+    raise SystemExit("ERROR: WireGuard-/LAN-Bindung darf keine Loopback-IP verwenden.")
+interfaces = json.loads(subprocess.check_output(["ip", "-j", "address", "show"], text=True))
+matches = [
+    item.get("ifname", "")
+    for item in interfaces
+    for info in item.get("addr_info", [])
+    if info.get("local") == str(address)
+]
+if not matches:
+    raise SystemExit(f"ERROR: Listener-IP {address} ist auf diesem Rechner nicht konfiguriert.")
+if mode == "wireguard" and not any(name.startswith("wg") for name in matches):
+    raise SystemExit(f"ERROR: {address} gehoert zu keiner erkennbaren WireGuard-Schnittstelle.")
+PY
+  else
+    count="0"
+    listener_mode="local"
+    listener_ip="127.0.0.1"
+    listener_port="$current_port"
+  fi
+
+  export CONFIG_FILE KZF_AI_ENABLED="$enabled" KZF_AI_COUNT="$count"
+  export KZF_AI_LISTENER_MODE="$listener_mode" KZF_AI_LISTENER_IP="$listener_ip"
+  export KZF_AI_LISTENER_PORT="$listener_port"
+  "${VENV}/bin/python" - <<'PY'
+# kienzlefon installer AI config updater
+# Version: 1.0
+import json
+import os
+import re
+import secrets
+import tomllib
+from pathlib import Path
+
+target = Path(os.environ["CONFIG_FILE"])
+text = target.read_text(encoding="utf-8")
+with target.open("rb") as handle:
+    current = tomllib.load(handle).get("ki_integration", {})
+
+enabled = os.environ["KZF_AI_ENABLED"] == "y"
+count = int(os.environ["KZF_AI_COUNT"])
+passwords = [str(value) for value in current.get("sip_passwoerter", [])][:count]
+while len(passwords) < count:
+    passwords.append(secrets.token_urlsafe(32))
+
+def literal(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False)
+
+def replace(key, value):
+    global text
+    pattern = re.compile(
+        rf"(^\[ki_integration\]\n(?:(?!^\[).)*?^{re.escape(key)}\s*=\s*)[^\n]*$",
+        re.M | re.S,
+    )
+    text, changed = pattern.subn(rf"\g<1>{literal(value)}", text, count=1)
+    if changed != 1:
+        raise SystemExit(f"ERROR: [ki_integration].{key} fehlt")
+
+replace("aktiv", enabled)
+replace("listener_bindung", os.environ["KZF_AI_LISTENER_MODE"])
+replace("listener_ip", os.environ["KZF_AI_LISTENER_IP"])
+replace("listener_port", int(os.environ["KZF_AI_LISTENER_PORT"]))
+replace("anzahl_nebenstellen", count)
+replace("sip_passwoerter", passwords)
+
+temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
+temporary.write_text(text, encoding="utf-8")
+os.chmod(temporary, 0o640)
+os.replace(temporary, target)
+PY
+}
+
 collect_configuration(){
   local reuse="" reconfigure_times="" key_source="" suggested_red demo_confirm=""
   if [[ -r "$CONFIG_FILE" ]]; then
@@ -916,6 +1070,7 @@ collect_configuration(){
       configure_additional_extensions
       configure_special_queue
       configure_demo_anonymization
+      configure_ai_integration
       return
     fi
   fi
@@ -1168,6 +1323,7 @@ PY
   chmod 0640 "$CONFIG_FILE"
   configure_additional_extensions
   configure_special_queue "$KZF_RED_ENABLED"
+  configure_ai_integration
 }
 
 #prepare_directories(){
@@ -1292,6 +1448,12 @@ prepare_directories() {
 
   install -d \
     -o root \
+    -g root \
+    -m 0700 \
+    /var/lib/kienzlefon/ai-call-results
+
+  install -d \
+    -o root \
     -g "$asterisk_group" \
     -m 2770 \
     "$uploads" \
@@ -1402,6 +1564,54 @@ EOF
   systemctl enable kienzlefon-worker.service
 }
 
+install_admission_listener_unit(){
+  local enabled bind_ip bind_port
+  enabled="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["ki_integration"]["aktiv"] else "n")' "$CONFIG_FILE")"
+  if [[ "$enabled" != "y" ]]; then
+    systemctl disable --now kienzlefon-admission-listener.service >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/kienzlefon-admission-listener.service
+    systemctl daemon-reload
+    return 0
+  fi
+  bind_ip="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["ki_integration"]["listener_ip"])' "$CONFIG_FILE")"
+  bind_port="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["ki_integration"]["listener_port"])' "$CONFIG_FILE")"
+  cat >/etc/systemd/system/kienzlefon-admission-listener.service <<EOF
+# kienzlefon-admission-listener.service
+# Version: 1.1
+# Changelog:
+# - 1.1: Dauerhaften geschuetzten Call-Result-Speicher freigegeben.
+[Unit]
+Description=Kienzlefon AI Admission-Listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=${VENV}/bin/kienzlefon-admission-listener --config ${CONFIG_FILE}
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kienzlefon/ai-call-results
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 /etc/systemd/system/kienzlefon-admission-listener.service
+  systemctl daemon-reload
+  systemctl enable kienzlefon-admission-listener.service
+  systemctl restart kienzlefon-admission-listener.service
+  systemctl is-active --quiet kienzlefon-admission-listener.service \
+    || die "Admission-Listener konnte auf ${bind_ip}:${bind_port} nicht gestartet werden."
+}
+
 install_models_and_prompts(){
   local voice voices engine prompt_arguments
   voice="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"]["stimme"])' "$CONFIG_FILE")"
@@ -1434,10 +1644,11 @@ collect_regeneration_choice(){
 }
 
 configure_asterisk(){
-  local red_enabled red_extension special_queue
+  local red_enabled red_extension special_queue ai_enabled ai_count
   "${VENV}/bin/kienzlefon-asterisk" --config "$CONFIG_FILE"
   asterisk -rx "pjsip reload"
   asterisk -rx "dialplan reload"
+  asterisk -rx "features reload"
   asterisk -rx "module reload app_queue.so" || true
   asterisk_supports_format wav16 \
     || die "Asterisk stellt das erforderliche Aufnahmeformat wav16 nicht bereit."
@@ -1446,6 +1657,12 @@ configure_asterisk(){
   special_queue="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["sonderqueue"]["name"])' "$CONFIG_FILE")"
   if [[ "$red_enabled" == "y" ]]; then
     asterisk -rx "pjsip show endpoint ${red_extension}"
+  fi
+  ai_enabled="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["ki_integration"]["aktiv"] else "n")' "$CONFIG_FILE")"
+  ai_count="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["ki_integration"]["anzahl_nebenstellen"])' "$CONFIG_FILE")"
+  if [[ "$ai_enabled" == "y" && "$ai_count" -gt 0 ]]; then
+    asterisk -rx "pjsip show endpoint 8810"
+    asterisk -rx "dialplan show 8800@kienzlefon-internal-targets"
   fi
   asterisk -rx "queue show praxis"
   asterisk -rx "queue show ${special_queue}"
@@ -1466,18 +1683,19 @@ start_and_verify(){
 }
 
 install_or_update_webinterface(){
-  local choice="" default="n"
+  local choice="n"
   local installer="${SOURCE_TARGET}/kienzlefon-webinterface-installer.sh"
   if [[ -f /etc/kienzlefon/webinterface.json \
      || -f /usr/share/kienzlefon-webinterface/admin.php \
      || -f /etc/systemd/system/kienzlefon-webinterface-worker.service ]]; then
-    default="j"
+    choice="y"
+    printf '\nVorhandenes Kienzlefon-Webinterface wird mit der Hauptversion aktualisiert.\n'
+  else
+    ask_yes_no choice "Administrations-Webinterface bei dieser Erstinstallation aktivieren?" "n"
   fi
 
-  printf '\nDas Webinterface bleibt ein eigener Baustein und wird nur nach Zustimmung aktualisiert.\n'
-  ask_yes_no choice "Webinterface jetzt installieren oder aktualisieren?" "$default"
   if [[ "$choice" != "y" ]]; then
-    printf 'Webinterface: Installation/Aktualisierung uebersprungen.\n'
+    printf 'Webinterface: Aktivierung uebersprungen.\n'
     return 0
   fi
 
@@ -1524,6 +1742,8 @@ main(){
   prepare_directories
   sep "Whisper-Worker installieren"
   install_systemd_unit
+  sep "KI-Admission-Listener installieren"
+  install_admission_listener_unit
   sep "Optionale Qwen3-TTS-Installation"
   install_qwen_tts
   sep "Modelle und Ansagen"
@@ -1531,10 +1751,10 @@ main(){
   sep "Asterisk integrieren"
   configure_asterisk
   start_and_verify
-  sep "Optionales Administrations-Webinterface"
+  sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.1.2 ist installiert"
+  sep "Kienzlefon 2.4.0 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
@@ -1556,6 +1776,21 @@ with open(sys.argv[1], "rb") as handle:
     values = tomllib.load(handle)["zusaetzliche_nebenstellen"]
 for extension, password in zip(values["nebenstellen"], values["passwoerter"], strict=True):
     print(f"Zusaetzliche Nebenstelle {extension}: Passwort {password}")
+PY
+  "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    values = tomllib.load(handle)["ki_integration"]
+if not values["aktiv"]:
+    print("Kienzlefon AI: nicht angebunden")
+else:
+    print(
+        f'AI Admission-Listener: {values["listener_ip"]}:{values["listener_port"]} '
+        f'({values["listener_bindung"]}, ohne Anwendungsauthentifizierung)'
+    )
+    for index, password in enumerate(values["sip_passwoerter"]):
+        extension = 8810 + index
+        print(f"KI-Nebenstelle {extension} / ai-slot-{index:02d}: Passwort {password}")
 PY
   printf 'Interner SIP-Registrar: %s:%s\n' "${KFX_PHONE_BIND_IP:-unbekannt}" "${KFX_PHONE_INTERNAL_PORT:-5060}"
   printf 'Telepraxis-Ausgabe: %s\n' "$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["telepraxis"]["ausgabeverzeichnis"])' "$CONFIG_FILE")"

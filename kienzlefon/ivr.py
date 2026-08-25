@@ -1,6 +1,10 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Ansagenmodi und lautlosen AI-Shortcut aus dem Hauptmenue umgesetzt.
+# - 2.3.2: Bestandteil des Kienzlefon-Release 2.3.2.
+# - 2.3.1: Fehlende DTMF-Eingaben in Eingangs- und Menuephase sicher behandelt.
+# - 2.3: Eingangsansagen und klassischen Menuepfad fuer AI-Admission getrennt.
 # - 2.0: Neue Aufnahmen waehrend der Qwen3-TTS-Wartungsphase sicher gesperrt.
 # - 1.8.3: Alle Felder trotz Schweigens weiter aufgenommen und einzeln verarbeitet.
 # - 1.8: Abbruch vor jeder verwertbaren Aufnahme ohne leeren Vorgang abgeschlossen.
@@ -37,19 +41,57 @@ class IVR:
         self.caller_id = caller_id_or_none(channel.environment.get("agi_callerid"))
 
     def run(self) -> None:
+        self._run_menu_flow(include_opening=True)
+
+    def run_opening(self) -> None:
         try:
-            displayed_caller_id = normalize_incoming_caller_id(
-                self.caller_id,
-                self.config.dial_rules.country_code,
-                self.config.local_extensions,
+            self.channel.set_variable("KZF_IVR_OPENING_OK", "0")
+            self.channel.set_variable("KZF_IVR_INITIAL_DIGIT", "none")
+            self._prepare_caller_id()
+            digit = self._opening_sequence()
+            if digit is not None and digit in ALL_DIGITS:
+                self.channel.set_variable("KZF_IVR_INITIAL_DIGIT", digit)
+            self.channel.set_variable("KZF_IVR_OPENING_OK", "1")
+        except AgiHangup:
+            LOGGER.info("Anrufer hat waehrend der Eingangsansagen aufgelegt")
+        except Exception as exc:
+            LOGGER.exception("Fehler in den Eingangsansagen")
+            record_system_error(
+                self.config,
+                code="IVR_OPENING_ERROR",
+                phase="ivr",
+                message=str(exc),
+                caller_id=self.caller_id,
             )
-            if displayed_caller_id is not None:
-                self.channel.set_variable("CALLERID(num)", displayed_caller_id)
+
+    def run_menu(self, initial_digit: str | None = None) -> None:
+        self.channel.set_variable("KZF_IVR_AI_REQUESTED", "0")
+        digit = (
+            initial_digit
+            if initial_digit is not None and initial_digit in ALL_DIGITS
+            else None
+        )
+        self._run_menu_flow(include_opening=False, initial_digit=digit)
+
+    def _prepare_caller_id(self) -> None:
+        displayed_caller_id = normalize_incoming_caller_id(
+            self.caller_id,
+            self.config.dial_rules.country_code,
+            self.config.local_extensions,
+        )
+        if displayed_caller_id is not None:
+            self.channel.set_variable("CALLERID(num)", displayed_caller_id)
+
+    def _run_menu_flow(
+        self, *, include_opening: bool, initial_digit: str | None = None
+    ) -> None:
+        try:
+            self._prepare_caller_id()
+            digit = self._opening_sequence() if include_opening else initial_digit
             if not self._worker_healthy():
                 self._play("whisper_failure")
                 self._goto_queue()
                 return
-            digit = self._opening_sequence()
             attempts = 0
             while attempts < self.config.ivr.attempts:
                 digit = digit or self._main_menu()
@@ -92,9 +134,10 @@ class IVR:
         current_override = self.config.current_override()
         override_active = current_override is not None
         forced_closed = override_active and current_override.block_phone_hours
+        effective_practice_open = self.config.practice_is_open() and not forced_closed
         greeting = (
             "greeting_open"
-            if self.config.practice_is_open() and not forced_closed
+            if effective_practice_open
             else "greeting_closed"
         )
         if not override_active:
@@ -106,7 +149,15 @@ class IVR:
         else:
             opening_prompts = (greeting, current_override.prompt_name)
         for prompt in opening_prompts:
-            digit = self._stream(prompt, ALL_DIGITS)
+            digit = self._stream(
+                prompt,
+                ALL_DIGITS,
+                practice_open=(
+                    effective_practice_open
+                    if prompt in {"greeting_open", "greeting_closed"}
+                    else None
+                ),
+            )
             if digit:
                 return digit
         digit = self._stream("emergency", ALL_DIGITS)
@@ -149,6 +200,9 @@ class IVR:
         return self._wait_for_digit()
 
     def _handle_menu_digit(self, digit: str) -> bool:
+        if digit == "0":
+            self.channel.set_variable("KZF_IVR_AI_REQUESTED", "1")
+            return True
         if digit == "1" and self.config.phone_is_open():
             self._goto_queue()
             return True
@@ -173,9 +227,7 @@ class IVR:
 
     def _submenu_five(self) -> bool:
         for _ in range(self.config.ivr.attempts):
-            digit = self.channel.get_option(
-                self._prompt("submenu_five"), "12", self.config.ivr.digit_timeout_ms
-            )
+            digit = self._get_option("submenu_five", "12")
             if digit == "1":
                 self._record_structured(CallType.CALLBACK_DETAILS, "rueckruf")
                 return True
@@ -259,9 +311,7 @@ class IVR:
                 index=index,
             ):
                 return
-            digit = self.channel.get_option(
-                self._prompt("medication_choice"), "12", self.config.ivr.digit_timeout_ms
-            )
+            digit = self._get_option("medication_choice", "12")
             if digit != "1":
                 return
             index += 1
@@ -356,9 +406,19 @@ class IVR:
         return self.config.paths.prompts / key
 
     def _play(self, key: str) -> None:
+        if not self.config.prompt_is_active(key):
+            return
         self.channel.stream_file(self._prompt(key))
 
-    def _stream(self, key: str, digits: str) -> str | None:
+    def _stream(
+        self,
+        key: str,
+        digits: str,
+        *,
+        practice_open: bool | None = None,
+    ) -> str | None:
+        if not self.config.prompt_is_active(key, practice_open=practice_open):
+            return None
         digit = self.channel.stream_file(self._prompt(key), digits)
         if digit or self.config.ivr.announcement_pause_ms == 0:
             return digit
@@ -367,6 +427,14 @@ class IVR:
             return None
         digit = chr(response.result)
         return digit if digit in digits else None
+
+    def _get_option(self, key: str, digits: str) -> str | None:
+        if not self.config.prompt_is_active(key):
+            digit = self._wait_for_digit()
+            return digit if digit in digits else None
+        return self.channel.get_option(
+            self._prompt(key), digits, self.config.ivr.digit_timeout_ms
+        )
 
     def _wait_for_digit(self) -> str | None:
         response = self.channel.command(f"WAIT FOR DIGIT {self.config.ivr.digit_timeout_ms}")

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.5
+Version: 2.4.0
 Changelog:
+- 2.4.0: Explizite Abspielmodi und sichere Behandlung leerer Texte dokumentiert.
 - 1.5: Signaltonhinweis des telefonischen Aufnahmebausteins aktualisiert.
 - 1.4: PIN-Bausteine entfernt und Administrationsnummern klar neu belegt.
 - 1.3: Stabile Nummerierung aller generierten und administrativen Ansagen eingefuehrt.
@@ -13,6 +14,15 @@ Die Nummern sind verbindlich und werden in spaeteren Versionen nicht
 verschoben. Neue Bausteine werden ausschliesslich am Ende angehaengt. Die
 Texte stehen unter `[ansagen]` in `/etc/kienzlefon/kienzlefon.toml`; dynamische
 Zeittexte werden aus den Zeitprofilen gebildet.
+
+Die Wiedergabe wird getrennt vom Text unter `[ansagen_modus]` gesteuert.
+Zulaessige Werte sind `immer`, `offen`, `zu` und `deaktiviert`. Fehlende Werte
+bleiben aus Kompatibilitaetsgruenden `immer`; fuer `greeting_open`,
+`greeting_closed` und `emergency` liefert die Vorlage die passenden
+Standardmodi. Deaktivierte Ansagen bleiben fuer Vorschau und spaetere
+Aktivierung erzeugbar. Ein leerer erforderlicher Text ist kein
+Deaktivierungsweg und wird abgelehnt; nur der zusaetzliche Textbaustein
+`phone_hours` darf leer bleiben.
 
 1. `appointment`: Terminwunsch
 2. `birth_date`: Geburtsdatum

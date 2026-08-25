@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.9.3
+Version: 2.4.0
 Changelog:
+- 2.4.0: Integriertes Webinterface und gemeinsame TTS-Erzeugungslogik dokumentiert.
 - 1.9.3: Worker-Abschluss ohne Telepraxis-Datei fuer vollstaendig leere Anrufe dokumentiert.
 - 1.9.2: Erfolgreichen Nicht-Demo-Zweig der Updatekonfiguration dokumentiert.
 - 1.9.1: Fehlerfreie wav16-Vorpruefung vor dem Worker-Neustart dokumentiert.
@@ -51,10 +52,10 @@ Medikamente besitzen einen eigenen Prompt, der Medikamentenname oder Wirkstoff,
 Wirkstaerke und Packungsgroesse beschreibt. Die Modellwahl folgt ausschliesslich
 dem bereits strukturierten Feldtyp des Transkriptionsauftrags.
 
-`kienzlefon-ansagen` erzeugt aus den TOML-Texten lokale Piper-Master-WAVs und
-die Asterisk-Formate. CLI und ein spaeteres Webinterface verwenden dieselbe
+`kienzlefon-ansagen` erzeugt aus den TOML-Texten lokale Master-WAVs und die
+Asterisk-Formate. CLI und integriertes Webinterface verwenden dieselbe
 Erzeugungslogik. Eine gleichnamige menschliche WAV-Datei im konfigurierten
-Upload-Verzeichnis hat Vorrang vor Piper.
+Upload-Verzeichnis hat Vorrang vor der automatischen TTS-Ansage.
 
 `length_scale` und `sentence_silence` werden an Piper uebergeben. Marker wie
 `{pause:800}` werden vor der Synthese strukturiert zerlegt und als exakte

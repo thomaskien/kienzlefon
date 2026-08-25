@@ -1,6 +1,9 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Fehlende Ansagenmodi konservativ aus der Vorlage ergaenzt.
+# - 2.3.2: Obsolete Hauptserver-Assistentenansage aus bestehenden Konfigurationen entfernt.
+# - 2.3: Fehlende AI-Assistentenansage konservativ aus der Vorlage ergaenzt.
 # - 2.0: Fehlende Qwen3-TTS-Optionen konservativ aus der Vorlage ergaenzt.
 # - 1.9: Fehlende Demo-Anonymisierung ergaenzt und boolesche Werte sicher aktualisiert.
 # - 1.8.2: Freigegebene Notruf- und Fallback-Standardtexte konservativ aktualisiert.
@@ -14,16 +17,17 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tomllib
-import json
 from pathlib import Path
 
 REMOVED_KEYS = {
     "whisper": {"modell"},
     "ansagen_ivr": {"pin", "pin_versuche"},
     "ansagen": {
+        "ai_assistant_intro",
         "admin_pin",
         "admin_pin_failed",
         "admin_override_menu",

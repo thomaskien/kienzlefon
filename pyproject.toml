@@ -1,6 +1,11 @@
 # kienzlefon
-# Version: 2.1.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Integriertes Webinterface und konfigurierbaren Anrufsbaum freigegeben.
+# - 2.3.2: Sofortige AI-Medienbridge fuer das Backend-Greeting freigegeben.
+# - 2.3.1: DTMF-leere Eingangs- und Menuephase korrigiert.
+# - 2.3: Sicheren AI-Handoff, Call-Policy und DTMF-Rueckkehr integriert.
+# - 2.2: Push-basierten Kienzlefon-AI-Admission-Listener und KI-Nebenstellen integriert.
 # - 2.1.2: Webinterface-Laufzeitstatus wird nach einem Reboot sicher wiederhergestellt.
 # - 2.1.1: Hauptinstaller bietet Installation oder Aktualisierung des Webinterfaces an.
 # - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client veroeffentlicht.
@@ -31,7 +36,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kienzlefon"
-version = "2.1.2"
+version = "2.4.0"
 description = "Konfigurationsgesteuertes Asterisk-IVR mit lokaler Whisper-Transkription"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -57,6 +62,8 @@ kienzlefon-ansagen-ivr = "kienzlefon.cli:admin_main"
 kienzlefon-wahlpruefung = "kienzlefon.cli:dial_main"
 kienzlefon-callerid = "kienzlefon.cli:callerid_main"
 kienzlefon-migration = "kienzlefon.cli:migrate_main"
+kienzlefon-admission = "kienzlefon.admission:admission_agi_main"
+kienzlefon-admission-listener = "kienzlefon.admission:listener_main"
 kienzlefon-webadmin-worker = "kienzlefon.webadmin:worker_main"
 kienzlefon-webadmin-export = "kienzlefon.webadmin:export_main"
 kienzlefon-webaufnahme = "kienzlefon.webadmin:record_main"

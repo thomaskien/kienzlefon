@@ -1,6 +1,10 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Explizite Abspielmodi fuer Ansagen und sichere Leertextpruefung ergaenzt.
+# - 2.3.2: Obsolete Hauptserver-Assistentenansage aus den Pflichtbausteinen entfernt.
+# - 2.3: Ansage fuer den digitalen Telefonassistenten als Pflichtbaustein ergaenzt.
+# - 2.2: AI-Listener, Slotanzahl, Lease-Zeiten und SIP-Passwoerter validiert.
 # - 2.0: Piper und lokales Qwen3-TTS mit globaler, validierter Sprecherwahl unterstuetzt.
 # - 1.9: Optionale Anonymisierung der Rufnummern in der Demoausgabe konfigurierbar gemacht.
 # - 1.8.2: Bereitschaftsdienst auch vor der ersten Tagesoeffnung aktiviert.
@@ -16,6 +20,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import re
@@ -44,6 +49,12 @@ QWEN_SPEAKERS = (
 DEFAULT_MENU_INTRO = (
     "Bitte wählen Sie nun durch Tastendruck auf Ihrem Telefon eine der folgenden Möglichkeiten."
 )
+PROMPT_MODE_VALUES = frozenset({"immer", "offen", "zu", "deaktiviert"})
+DEFAULT_PROMPT_MODES = {
+    "greeting_open": "offen",
+    "greeting_closed": "zu",
+    "emergency": "immer",
+}
 WEEKDAYS = ("montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag")
 UNKNOWN_CALLER_IDS = frozenset(
     {"", "anonymous", "unknown", "unavailable", "private", "restricted", "withheld"}
@@ -250,6 +261,26 @@ class AsteriskConfig:
 
 
 @dataclass(frozen=True)
+class AIIntegrationConfig:
+    enabled: bool
+    listener_mode: str
+    listener_ip: str
+    listener_port: int
+    extension_count: int
+    lease_ttl_ms: int
+    publisher_timeout_ms: int
+    sip_passwords: tuple[str, ...]
+
+    @property
+    def slot_ids(self) -> tuple[str, ...]:
+        return tuple(f"ai-slot-{index:02d}" for index in range(self.extension_count))
+
+    @property
+    def extensions(self) -> tuple[str, ...]:
+        return tuple(str(8810 + index) for index in range(self.extension_count))
+
+
+@dataclass(frozen=True)
 class AnnouncementIVRConfig:
     extension: str
     silence_seconds: int
@@ -311,12 +342,14 @@ class AppConfig:
     telepraxis: TelepraxisConfig
     tts: TTSConfig
     asterisk: AsteriskConfig
+    ai_integration: AIIntegrationConfig
     announcement_ivr: AnnouncementIVRConfig
     standalone_extensions: tuple[StandaloneExtensionConfig, ...]
     special_queue: SpecialQueueConfig
     dial_rules: DialRulesConfig
     prompts: PromptConfig
     prompt_sources: Mapping[str, str]
+    prompt_modes: Mapping[str, str]
     opening_hours: WeeklySchedule
     phone_hours: WeeklySchedule
     pharmacy_hours: WeeklySchedule
@@ -333,6 +366,8 @@ class AppConfig:
             values.append(self.ivr.red_extension)
         values.append(self.announcement_ivr.extension)
         values.extend(entry.extension for entry in self.standalone_extensions)
+        values.extend(str(extension) for extension in range(8800, 8805))
+        values.extend(self.ai_integration.extensions)
         return tuple(dict.fromkeys(values))
 
     def now(self) -> datetime:
@@ -374,6 +409,24 @@ class AppConfig:
     def specialist_is_available(self, value: datetime | None = None) -> bool:
         current = _localize(value or self.now(), self.practice.timezone)
         return self.specialist_hours.is_active(current)
+
+    def prompt_mode(self, name: str) -> str:
+        return self.prompt_modes.get(name, DEFAULT_PROMPT_MODES.get(name, "immer"))
+
+    def prompt_is_active(
+        self,
+        name: str,
+        value: datetime | None = None,
+        *,
+        practice_open: bool | None = None,
+    ) -> bool:
+        mode = self.prompt_mode(name)
+        if mode == "deaktiviert":
+            return False
+        if mode == "immer":
+            return True
+        open_now = self.practice_is_open(value) if practice_open is None else practice_open
+        return open_now if mode == "offen" else not open_now
 
 
 REQUIRED_PROMPTS = frozenset(
@@ -440,6 +493,9 @@ REQUIRED_PROMPTS = frozenset(
         "webadmin_record_discarded",
     }
 )
+
+OPTIONAL_PROMPT_TEXTS = frozenset({"phone_hours"})
+CONFIGURABLE_PROMPT_MODES = REQUIRED_PROMPTS | {"opening_hours"}
 
 
 def _localize(value: datetime, timezone: ZoneInfo) -> datetime:
@@ -637,6 +693,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     telepraxis = _section(raw, "telepraxis")
     tts = _section(raw, "tts")
     asterisk = _section(raw, "asterisk")
+    ai_integration = _section(raw, "ki_integration")
     announcement_ivr = _section(raw, "ansagen_ivr")
     standalone = _section(raw, "zusaetzliche_nebenstellen")
     special_queue = _section(raw, "sonderqueue")
@@ -647,6 +704,9 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     prompt_sources_raw = raw.get("ansagen_quellen", {})
     if not isinstance(prompt_sources_raw, Mapping):
         raise ConfigError("[ansagen_quellen] muss ein TOML-Abschnitt sein")
+    prompt_modes_raw = raw.get("ansagen_modus", {})
+    if not isinstance(prompt_modes_raw, Mapping):
+        raise ConfigError("[ansagen_modus] muss ein TOML-Abschnitt sein")
 
     whisper_models = {
         "modell_standard": str(_required(whisper, "modell_standard", "whisper")),
@@ -665,6 +725,16 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     missing_prompts = REQUIRED_PROMPTS - prompt_values.keys()
     if missing_prompts:
         raise ConfigError(f"Fehlende Ansagetexte: {', '.join(sorted(missing_prompts))}")
+    empty_prompts = {
+        key
+        for key in REQUIRED_PROMPTS - OPTIONAL_PROMPT_TEXTS
+        if not prompt_values[key].strip()
+    }
+    if empty_prompts:
+        raise ConfigError(
+            "Leere Ansagetexte sind nicht zulaessig: "
+            + ", ".join(sorted(empty_prompts))
+        )
 
     attempts = int(ivr.get("menue_durchlaeufe", 2))
     if attempts != 2:
@@ -695,8 +765,33 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             "[ansagen_quellen] enthaelt unbekannte Ansagen: "
             + ", ".join(sorted(unknown_source_keys))
         )
+    prompt_modes = {str(key): str(value) for key, value in prompt_modes_raw.items()}
+    unknown_mode_keys = set(prompt_modes) - CONFIGURABLE_PROMPT_MODES
+    if unknown_mode_keys:
+        raise ConfigError(
+            "[ansagen_modus] enthaelt unbekannte Ansagen: "
+            + ", ".join(sorted(unknown_mode_keys))
+        )
+    invalid_modes = {
+        key: value
+        for key, value in prompt_modes.items()
+        if value not in PROMPT_MODE_VALUES
+    }
+    if invalid_modes:
+        detail = ", ".join(
+            f"{key}={value!r}" for key, value in sorted(invalid_modes.items())
+        )
+        raise ConfigError(f"Ungueltige Ansagenmodi: {detail}")
 
     standalone_extensions = _standalone_extensions(standalone)
+    ai_enabled_value = ai_integration.get("aktiv", False)
+    if not isinstance(ai_enabled_value, bool):
+        raise ConfigError("[ki_integration].aktiv muss true oder false sein")
+    ai_password_values = ai_integration.get("sip_passwoerter", [])
+    if not isinstance(ai_password_values, list):
+        raise ConfigError("[ki_integration].sip_passwoerter muss eine Liste sein")
+    if any(not isinstance(value, str) for value in ai_password_values):
+        raise ConfigError("[ki_integration].sip_passwoerter darf nur Zeichenketten enthalten")
     special_members = special_queue.get("zusaetzliche_nebenstellen", [])
     if not isinstance(special_members, list):
         raise ConfigError("[sonderqueue].zusaetzliche_nebenstellen muss eine Liste sein")
@@ -829,6 +924,16 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             direct_queue=_sip_line(direct_queue, "sip_direkte_queue"),
             direct_red=_sip_line(direct_red, "sip_rotes_telefon"),
         ),
+        ai_integration=AIIntegrationConfig(
+            enabled=ai_enabled_value,
+            listener_mode=str(ai_integration.get("listener_bindung", "local")).strip(),
+            listener_ip=str(ai_integration.get("listener_ip", "127.0.0.1")).strip(),
+            listener_port=int(ai_integration.get("listener_port", 8190)),
+            extension_count=int(ai_integration.get("anzahl_nebenstellen", 0)),
+            lease_ttl_ms=int(ai_integration.get("lease_ttl_ms", 5000)),
+            publisher_timeout_ms=int(ai_integration.get("publisher_timeout_ms", 7000)),
+            sip_passwords=tuple(str(value) for value in ai_password_values),
+        ),
         announcement_ivr=AnnouncementIVRConfig(
             extension=str(announcement_ivr.get("nebenstelle", "777")),
             silence_seconds=int(announcement_ivr.get("aufnahme_stille_sekunden", 3)),
@@ -865,6 +970,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         ),
         prompts=PromptConfig(prompt_values),
         prompt_sources={**prompt_sources, **scheduled_sources},
+        prompt_modes=prompt_modes,
         opening_hours=_schedule(raw, "oeffnungszeiten"),
         phone_hours=_schedule(raw, "telefonzeiten"),
         pharmacy_hours=_schedule(raw, "apothekenzeiten"),
@@ -931,6 +1037,45 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         raise ConfigError("Die Ansagen-Nebenstelle 777 darf nicht Teil der Praxisqueue sein")
     if config.announcement_ivr.silence_seconds < 1 or config.announcement_ivr.max_seconds < 1:
         raise ConfigError("Aufnahmezeiten des Ansagen-IVR muessen positiv sein")
+    if config.ai_integration.listener_mode not in {"wireguard", "lan", "local"}:
+        raise ConfigError(
+            "[ki_integration].listener_bindung muss wireguard, lan oder local sein"
+        )
+    try:
+        listener_address = ipaddress.ip_address(config.ai_integration.listener_ip)
+    except ValueError as exc:
+        raise ConfigError("[ki_integration].listener_ip ist keine gueltige IP-Adresse") from exc
+    if listener_address.is_unspecified or listener_address.is_multicast:
+        raise ConfigError(
+            "[ki_integration].listener_ip darf keine Wildcard- oder Multicast-Adresse sein"
+        )
+    if config.ai_integration.listener_mode == "local" and not listener_address.is_loopback:
+        raise ConfigError("Die lokale KI-Anbindung muss an eine Loopback-IP binden")
+    if config.ai_integration.listener_mode != "local" and listener_address.is_loopback:
+        raise ConfigError("WireGuard-/LAN-Bindung darf keine Loopback-IP verwenden")
+    if not 1 <= config.ai_integration.listener_port <= 65535:
+        raise ConfigError("[ki_integration].listener_port muss zwischen 1 und 65535 liegen")
+    if config.ai_integration.enabled:
+        if not 1 <= config.ai_integration.extension_count <= 90:
+            raise ConfigError(
+                "Aktive KI-Anbindung benoetigt 1 bis 90 KI-Nebenstellen"
+            )
+    elif config.ai_integration.extension_count != 0:
+        raise ConfigError(
+            "Deaktivierte KI-Anbindung muss anzahl_nebenstellen = 0 verwenden"
+        )
+    if len(config.ai_integration.sip_passwords) != config.ai_integration.extension_count:
+        raise ConfigError(
+            "[ki_integration].sip_passwoerter muss genau ein Passwort je KI-Nebenstelle enthalten"
+        )
+    if any(len(password) < 24 for password in config.ai_integration.sip_passwords):
+        raise ConfigError("KI-SIP-Passwoerter muessen mindestens 24 Zeichen lang sein")
+    if not 1000 <= config.ai_integration.lease_ttl_ms <= 30000:
+        raise ConfigError("[ki_integration].lease_ttl_ms muss zwischen 1000 und 30000 liegen")
+    if config.ai_integration.publisher_timeout_ms <= config.ai_integration.lease_ttl_ms:
+        raise ConfigError(
+            "[ki_integration].publisher_timeout_ms muss groesser als lease_ttl_ms sein"
+        )
     if config.dial_rules.country_code != "49":
         raise ConfigError("[wahlregeln].landesvorwahl ist verbindlich auf '49' festgelegt")
     if not re.fullmatch(r"0[1-9][0-9]+", config.dial_rules.area_code):
@@ -943,8 +1088,17 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         config.ivr.red_extension,
         config.announcement_ivr.extension,
     }
+    ai_numbers = {str(value) for value in range(8800, 8805)} | set(
+        config.ai_integration.extensions
+    )
+    if reserved.intersection(ai_numbers):
+        raise ConfigError("KI-Nummernplan 8800 ff. kollidiert mit festen Nebenstellen")
     extensions = [entry.extension for entry in config.standalone_extensions]
-    if len(extensions) != len(set(extensions)) or reserved.intersection(extensions):
+    if (
+        len(extensions) != len(set(extensions))
+        or reserved.intersection(extensions)
+        or ai_numbers.intersection(extensions)
+    ):
         raise ConfigError("Zusaetzliche Nebenstellen sind doppelt oder mit festen Nebenstellen belegt")
     expected = [str(int(config.ivr.red_extension) + offset) for offset in range(1, len(extensions) + 1)]
     if extensions != expected:

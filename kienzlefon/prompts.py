@@ -1,6 +1,9 @@
 # kienzlefon
-# Version: 2.1
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Ansagen bleiben auch deaktiviert fuer Vorschau und spaetere Aktivierung erzeugbar.
+# - 2.3.2: Obsolete Hauptserver-Assistentenansage aus dem Katalog entfernt.
+# - 2.3: Assistentenansage stabil an den Ansagenkatalog angehaengt.
 # - 2.1: Dauerhafte Qwen-Variantenwerte und gezielte Neugenerierung ergaenzt.
 # - 2.0: Live-Fortschritt fuer Planung, aktuelle Ansage und Qwen-Wartungsphasen ergaenzt.
 # - 2.0: Differenzielle Qwen3-TTS-Erzeugung mit globaler Sprecherwahl ergaenzt.
@@ -156,7 +159,7 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
     if additional_phone_hours:
         rendered_phone_hours = f"{rendered_phone_hours} {additional_phone_hours}"
     values["phone_hours"] = rendered_phone_hours
-    return values
+    return {key: value for key, value in values.items() if key in PROMPT_CATALOG}
 
 
 class PromptGenerator:

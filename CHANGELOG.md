@@ -1,7 +1,12 @@
 <!--
 kienzlefon
-Version: 2.1.2
+Version: 2.4.0
 Changelog:
+- 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
+- 2.3.2: AI-Medienbridge fuer ein hoerbares Backend-Greeting sofort gestartet.
+- 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
+- 2.3: Sicheren AI-Handoff, Call-Policy, Assistentenansage und DTMF-Rueckkehr integriert.
+- 2.2: Push-basierten AI-Admission-Listener und freigemeldete KI-Nebenstellen integriert.
 - 2.1.2: Passwortloser WireGuard-Zugriff bleibt nach einem Systemneustart erhalten.
 - 2.1.1: Hauptinstaller bietet Webinterface-Installation oder -Aktualisierung immer an.
 - 2.1: Gezielte Qwen-Varianten, Webinterface 1.1 und WireGuard-KI-Client ergaenzt.
@@ -28,6 +33,92 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.4.0
+
+- ein gueltiges, claim- und lease-gebundenes `super_priority`-Ergebnis wird nach
+  persistentem Einmalverbrauch nicht erneut anhand der Fachstellenzeiten
+  verworfen; `specialist_transfer_allowed` bleibt unveraendert Teil der AI-Policy
+- `practice_queue` und `pharmacy_queue` bleiben zeitabhaengig, ein fehlender
+  Policy-Provider bleibt fuer alle nichtklassischen Ziele fail-closed
+- Taste `0` versucht Kienzlefon AI auch aus dem klassischen Hauptmenue lautlos;
+  fehlende Kapazitaet fuehrt zurueck ins Menue, eine AI-Rekursion bleibt gesperrt
+- `[ansagen_modus]` steuert Ansagen explizit mit `immer`, `offen`, `zu` oder
+  `deaktiviert`; bestehende Konfigurationen erhalten nur fehlende Standardwerte
+- deaktivierte Ansagen werden uebersprungen, waehrend die anschliessende
+  Durchstellung oder Aufnahme unveraendert ausgefuehrt wird
+- leere erforderliche Ansagentexte werden vor dem Austausch der TOML-Datei
+  abgelehnt und lassen das Webinterface nicht mehr in einer laufenden Erzeugung
+  haengen
+- die Zeitseite zeigt Oeffnungszeiten, Telefonzeiten, `care_service` mit den
+  genannten Versorgungsdiensten und `professional_urgent` mit den genannten
+  Fachdiensten samt Hinweis auf das rote Telefon untereinander
+- der neue Navigationspunkt „Anrufsbaum“ bietet Aktivierung, Deaktivierung und
+  Audiovorschau als alternativen Zugriff auf die vorhandenen Ansagen
+- das Webinterface gehoert zur Hauptversion, wird bei vorhandenen Installationen
+  automatisch aktualisiert und zeigt Kienzlefon-Version, `kienzlefon.de` sowie
+  „von Dr. Thomas Kienzle“ an
+- Spezifikation v1.1 dokumentiert die unveraenderten Policy-Felder und die neue
+  Behandlung bereits bestaetigter `super_priority`-Handoffs
+
+## 2.3.2
+
+- die Medienbridge zum angenommenen KI-Slot startet ohne eine vorgeschaltete
+  Asterisk-`A()`-Ansage
+- das vom KI-Backend unmittelbar erzeugte Greeting erreicht dadurch den Anrufer
+  vollstaendig statt waehrend der noch getrennten Kanaele verloren zu gehen
+- externe Anrufe und die Direktwahl ab `8810` verwenden denselben korrigierten
+  Dialpfad
+- die nicht mehr verwendete Hauptserver-Ansage `ai_assistant_intro` wurde aus
+  Konfigurationsvorlage, Migration, Ansagenkatalog und Webinterface entfernt
+- Taste `0` waehrend der Eingangsansagen beendet den Ansagenblock sofort und
+  startet unmittelbar die AI-Zulassung; ohne freien Slot folgt das klassische
+  Hauptmenue ohne eine ungueltige Null-Eingabe
+
+## 2.3.1
+
+- die Eingangsphase behandelt einen normalen Ablauf ohne Tastendruck wieder als
+  erfolgreich und erreicht danach die AI-Admission
+- der klassische Menuepfad startet auch ohne bereits gedrueckte Anfangstaste
+  fehlerfrei
+- Regressionstests decken beide DTMF-leeren Pfade ab
+
+## 2.3
+
+- Begruessung, alle drei Positionen der Sonderansage, Notfallansage und bei Bedarf
+  Bereitschaftsdienstansage laufen unveraendert vor der AI-Zulassung
+- die AI-Zulassung erfolgt genau an der bisherigen Stelle des klassischen Hauptmenues
+- ein Tastendruck waehrend der Eingangsansagen bleibt vollstaendig im klassischen
+  Kienzlefon; die bereits gedrueckte Taste wird als erste Menueeingabe verwendet
+- die neue Ansage `ai_assistant_intro` wird erst nach Annahme einer freigemeldeten
+  AI-Nebenstelle und vor dem Medienbridge abgespielt
+- jede Anrufer-DTMF-Taste `0` bis `9`, `*` oder `#` im AI-Gespraech beendet das
+  AI-Leg und wird unveraendert an das klassische Hauptmenue uebergeben
+- der aktive AI-Publisher kann eine aktuelle, claim-gebundene Call-Policy mit Praxis-,
+  Telefon-, Apotheken- und Fachstellenstatus sowie Wochenzeitprofilen abrufen
+- Handoff-Ergebnisse werden vor positiver Bestaetigung atomar mit Modus `0600`
+  gespeichert, kurz befristet und lokal genau einmal verbraucht
+- nur `classic`, `practice_queue`, `pharmacy_queue` und `super_priority` werden fest
+  auf `8801` bis `8804` abgebildet; dynamische Ziele und Handoffs nach Commit sind gesperrt
+- ein fehlgeschlagenes bestaetigtes Queue-Ziel `8802` bis `8804` faellt hoechstens
+  einmal auf `8801` zurueck; `8801` startet weder Rekursion noch erneute AI-Zulassung
+- der Installer richtet den geschuetzten Result-Speicher und die DTMF-Features ein
+- die vollstaendige JSONL-Laufzeitschnittstelle ist in
+  `SPEZIFIKATION-KIENZLEFON-AI-RUNTIME-SCHNITTSTELLE-v1.0.md` festgehalten
+
+## 2.2
+
+- der Hauptinstaller fragt, ob Kienzlefon AI angebunden werden soll
+- bei aktiver Anbindung wird die Anzahl der anzulegenden KI-Nebenstellen abgefragt
+- die Nebenstellen beginnen bei `8810` und erhalten getrennte zufaellige SIP-Passwoerter
+- der Admission-Listener laeuft auf dem Haupt-Kienzlefon und bindet ausschliesslich an eine konkrete Loopback-, WireGuard- oder LAN-IP
+- der KI-Rechner baut die Verbindung aktiv auf und meldet alle Slots als `free` oder `not_free`
+- nur eine aktuelle, einmalig atomar verbrauchte Freimeldungs-Lease erlaubt einen KI-Wahlversuch
+- `not_free`, Lease-TTL, Publisher-Timeout und Verbindungsabbruch sperren neue KI-Anrufe fail-closed
+- die internen Ziele `8800` bis `8804` und die direkten KI-Ziele ab `8810` werden im Asterisk-Dialplan erzeugt
+- PJSIP-Header uebergeben Protokoll-, Request-, Lease- und Slot-ID an das spaetere AI-SIP-Gateway
+- der Listener verwendet auf ausdrueckliche Vorgabe weder Anwendungsauthentifizierung noch TLS
+- Spezifikation 1.4 beschreibt die verbindlichen JSONL-Kommandos
 
 ## 2.1.2
 

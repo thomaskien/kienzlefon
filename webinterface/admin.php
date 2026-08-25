@@ -363,7 +363,14 @@ $days = [
 $scheduleLabels = [
     'oeffnungszeiten' => 'Öffnungszeiten',
     'telefonzeiten' => 'Telefonzeiten',
-    'fachstellenzeiten' => 'Fachdienstzeiten',
+    'apothekenzeiten' => 'Zeiten care_service',
+    'fachstellenzeiten' => 'Zeiten professional_urgent',
+];
+$scheduleDescriptions = [
+    'oeffnungszeiten' => 'Reguläre Öffnungszeiten der Praxis.',
+    'telefonzeiten' => 'Zeiten für die persönliche Erreichbarkeit der Praxis.',
+    'apothekenzeiten' => 'Apotheke, Pflegeheim oder Pflegedienst · bestehender Apotheken- und Versorgungsweg über pharmacy_queue / 8803.',
+    'fachstellenzeiten' => 'Arzt oder Arztpraxis, Krankenhaus, Rettungsdienst oder Notarzt · bestehender Prioritätsweg über super_priority / 8804 und, sofern aktiviert, das rote Telefon.',
 ];
 $groupLabels = [
     'hauptansagen' => 'Hauptansagen',
@@ -440,6 +447,33 @@ if ($effectivePresetId !== '') {
 } elseif ($legacyEffective) {
     $currentOverrideName = 'Bisherige Sonderansage';
 }
+$sourcesByName = [];
+foreach (($state['sources'] ?? []) as $source) {
+    $sourcesByName[(string)($source['name'] ?? '')] = $source;
+}
+$treeGroups = [
+    'Eingang' => ['greeting_open', 'greeting_closed', 'emergency', 'urgent_help'],
+    'Klassisches Hauptmenü' => ['menu_intro', 'menu_open', 'menu_closed', 'opening_hours_choice', 'pharmacy_access', 'specialist_access', 'phone_hours'],
+    'Gemeinsame Datenerfassung' => ['recording_hint', 'first_name', 'last_name', 'birth_date', 'callback_number'],
+    'Taste 2 · Rezept' => ['first_medication', 'next_medication', 'medication_choice', 'prescription_information'],
+    'Taste 3 · Überweisung' => ['specialty', 'referral_reason'],
+    'Taste 4 · Termin' => ['appointment'],
+    'Taste 5 · Rückruf oder sonstiges Anliegen' => ['submenu_five', 'callback_reason', 'other'],
+    'Durchstellung und internes Ziel' => ['pharmacy_agent', 'specialist_agent', 'blocked_destination'],
+    'Keine Taste und Abschluss' => ['no_selection_open', 'no_selection_closed', 'completed'],
+    'Fehler und Fallback' => ['invalid', 'whisper_failure', 'personal_data_fallback'],
+];
+$conditionalModeNames = ['greeting_open', 'greeting_closed', 'emergency'];
+$modeLabels = [
+    'immer' => 'Immer',
+    'offen' => 'Nur geöffnet',
+    'zu' => 'Nur geschlossen',
+    'deaktiviert' => 'Deaktiviert',
+];
+$productName = (string)($state['product']['name'] ?? 'kienzlefon.de');
+$productVersion = (string)($state['product']['version'] ?? '2.4.0');
+$productAuthor = (string)($state['product']['author'] ?? 'Dr. Thomas Kienzle');
+$productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 ?>
 <!doctype html>
 <html lang="de">
@@ -464,6 +498,7 @@ if ($effectivePresetId !== '') {
         nav button { border:0; border-radius:10px; padding:11px 12px; background:transparent; color:#dbe5ec; text-align:left; }
         nav button:hover,nav button.active { background:#203b52; color:#fff; }
         .aside-foot { position:absolute; left:18px; right:18px; bottom:22px; color:#aebcca; font-size:12px; }
+        .aside-foot a { color:#dbe5ec; }
         main { padding:34px clamp(20px,4vw,58px) 60px; max-width:1500px; width:100%; }
         .topline { display:flex; justify-content:space-between; gap:20px; align-items:flex-start; margin-bottom:28px; }
         h1 { margin:0; font-size:clamp(25px,3vw,34px); letter-spacing:-.03em; }
@@ -534,9 +569,26 @@ if ($effectivePresetId !== '') {
         .login-card .brand { color:var(--ink); margin:0 0 24px; }
         .error-box { background:#fff0f0; color:#781f1f; border:1px solid #eccaca; border-radius:9px; padding:10px 12px; margin-bottom:15px; }
         .empty { padding:28px; text-align:center; color:var(--muted); }
+        .tree-stage { position:relative; margin:0 0 20px 18px; padding:0 0 0 28px; border-left:2px solid #cfe2df; }
+        .tree-stage::before { content:""; position:absolute; left:-7px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--accent); }
+        .tree-stage h3 { margin-bottom:12px; }
+        .tree-node { display:grid; grid-template-columns:minmax(0,1fr) minmax(170px,240px); gap:14px; align-items:center; background:var(--paper); border:1px solid var(--line); border-radius:11px; padding:14px; margin-bottom:9px; }
+        .tree-node-title { border:0; background:transparent; color:var(--ink); padding:0; text-align:left; font-weight:700; }
+        .tree-node-title:hover { color:var(--accent-dark); }
+        .tree-node-controls { display:flex; align-items:center; justify-content:flex-end; gap:9px; }
+        .tree-node-controls select { min-width:150px; }
+        .tree-node audio { grid-column:1/-1; width:100%; height:38px; }
+        .tree-decision { display:grid; grid-template-columns:1fr auto 1fr; gap:16px; align-items:center; background:#eaf6f4; border-radius:11px; padding:15px; margin-bottom:10px; }
+        .tree-decision-center { color:var(--muted); text-align:center; }
+        .tree-route { display:grid; gap:9px; }
+        .tree-route-row { display:grid; grid-template-columns:140px minmax(0,1fr); gap:12px; padding:10px 0; border-bottom:1px solid #edf0f2; }
+        .tree-route-row:last-child { border-bottom:0; }
+        .product-footer { color:var(--muted); font-size:12px; text-align:center; margin-top:32px; }
+        .product-footer a { color:var(--accent-dark); }
+        .login-product { color:var(--muted); font-size:12px; text-align:center; margin-top:22px; }
         .mt18 { margin-top:18px; }
         .mb18 { margin-bottom:18px; }
-        @media (max-width:900px) { .shell{grid-template-columns:1fr}.grid.two,.recording-bar,.planning-grid{grid-template-columns:1fr}aside{position:static;height:auto;padding:14px}.brand{margin:0 4px 12px}nav{grid-template-columns:repeat(4,1fr)}nav button{text-align:center;padding:9px 5px;font-size:13px}.aside-foot{display:none}main{padding:24px 16px 50px}.field-row{grid-template-columns:1fr}.topline{display:block}.topline form{margin-top:12px}.announcement-head,.preset-head{display:block}.announcement-status{justify-content:flex-start;margin-top:8px} }
+        @media (max-width:900px) { .shell{grid-template-columns:1fr}.grid.two,.recording-bar,.planning-grid{grid-template-columns:1fr}aside{position:static;height:auto;padding:14px}.brand{margin:0 4px 12px}nav{grid-template-columns:repeat(5,minmax(105px,1fr));overflow-x:auto}nav button{text-align:center;padding:9px 5px;font-size:13px}.aside-foot{display:none}main{padding:24px 16px 50px}.field-row,.tree-node,.tree-decision,.tree-route-row{grid-template-columns:1fr}.tree-node-controls{justify-content:flex-start;flex-wrap:wrap}.tree-decision-center{text-align:left}.topline{display:block}.topline form{margin-top:12px}.announcement-head,.preset-head{display:block}.announcement-status{justify-content:flex-start;margin-top:8px} }
     </style>
 </head>
 <body>
@@ -550,10 +602,11 @@ if ($effectivePresetId !== '') {
         <?php if ($loginError !== ''): ?><div class="error-box"><?= h($loginError) ?></div><?php endif; ?>
         <div class="field"><label for="password">Kennwort</label><input id="password" type="password" name="password" required autofocus autocomplete="current-password"></div>
         <button class="button" type="submit" name="login" value="1">Anmelden</button>
+        <div class="login-product">Kienzlefon <?= h($productVersion) ?> · <a href="<?= h($productUrl) ?>"><?= h($productName) ?></a> · von <?= h($productAuthor) ?></div>
     </form>
 </div>
 <?php elseif (!$stateAvailable): ?>
-<div class="login"><div class="login-card"><h1>Nicht verfügbar</h1><p>Der sichere Verwaltungsstatus konnte nicht gelesen werden. Bitte prüfen Sie den Webinterface-Dienst.</p></div></div>
+<div class="login"><div class="login-card"><h1>Nicht verfügbar</h1><p>Der sichere Verwaltungsstatus konnte nicht gelesen werden. Bitte prüfen Sie den Webinterface-Dienst.</p><div class="login-product">Kienzlefon <?= h($productVersion) ?> · <a href="<?= h($productUrl) ?>"><?= h($productName) ?></a> · von <?= h($productAuthor) ?></div></div></div>
 <?php else: ?>
 <div class="shell">
     <aside>
@@ -561,10 +614,11 @@ if ($effectivePresetId !== '') {
         <nav aria-label="Hauptnavigation">
             <button type="button" data-page="overview" class="active">Übersicht</button>
             <button type="button" data-page="times">Zeiten</button>
+            <button type="button" data-page="calltree">Anrufsbaum</button>
             <button type="button" data-page="prompts">Ansagen</button>
             <button type="button" data-page="override">Sonderansage</button>
         </nav>
-        <div class="aside-foot">Konfiguration nur für Zeiten und Ansagen</div>
+        <div class="aside-foot">Kienzlefon <?= h($productVersion) ?><br><a href="<?= h($productUrl) ?>"><?= h($productName) ?></a> · von <?= h($productAuthor) ?></div>
     </aside>
     <main>
         <div class="topline">
@@ -586,12 +640,59 @@ if ($effectivePresetId !== '') {
         <section id="page-times" class="page" aria-labelledby="times-title">
             <div class="toolbar"><div><h2 id="times-title">Zeiten</h2><p class="muted">Mehrere Zeiträume durch Komma trennen, zum Beispiel 08:00-12:00, 14:00-17:00.</p></div><button class="button" type="button" id="save-times">Zeiten speichern</button></div>
             <?php foreach ($scheduleLabels as $section => $label): ?>
-            <div class="card mb18"><h3><?= h($label) ?></h3>
+            <div class="card mb18"><h3><?= h($label) ?></h3><p class="hint"><?= h($scheduleDescriptions[$section] ?? '') ?></p>
                 <?php foreach ($days as $day => $dayLabel): $ranges = $state['schedules'][$section][$day] ?? []; $defaults = $state['schedule_defaults'][$section][$day] ?? []; ?>
                 <div class="field-row"><label for="<?= h($section . '-' . $day) ?>"><?= h($dayLabel) ?></label><input type="text" id="<?= h($section . '-' . $day) ?>" data-schedule="<?= h($section) ?>" data-day="<?= h($day) ?>" data-default="<?= h(implode(', ', $defaults)) ?>" value="<?= h(implode(', ', $ranges)) ?>" placeholder="geschlossen"><button class="button secondary small reset-input" type="button">Auf Standard</button></div>
                 <?php endforeach; ?>
             </div>
             <?php endforeach; ?>
+        </section>
+
+        <section id="page-calltree" class="page" aria-labelledby="calltree-title">
+            <div class="toolbar"><div><h2 id="calltree-title">Anrufsbaum</h2><p class="muted">Fester Anrufablauf mit alternativem Zugriff auf Wiedergabemodi und vorhandene Ansagen.</p></div><button class="button" type="button" id="save-calltree">Anrufsbaum speichern</button></div>
+
+            <div class="tree-stage">
+                <h3>1 · Eingang</h3>
+                <?php foreach (($treeGroups['Eingang'] ?? []) as $name): if (!isset($sourcesByName[$name])) continue; $source = $sourcesByName[$name]; $mode = (string)($source['mode'] ?? 'immer'); ?>
+                <article class="tree-node">
+                    <div><button class="tree-node-title" type="button" <?= !empty($source['active_preview']) ? 'data-tree-play="tree-audio-' . h($name) . '"' : 'disabled' ?>><?= h($source['label'] ?? $name) ?></button><div class="hint"><?= h($name) ?> · <?= ($source['source'] ?? 'tts') === 'manuell' ? 'manuelle Aufnahme' : 'TTS' ?></div></div>
+                    <div class="tree-node-controls">
+                        <?php if (in_array($name, $conditionalModeNames, true)): ?><label for="tree-mode-<?= h($name) ?>">Wiedergabe</label><select id="tree-mode-<?= h($name) ?>" data-prompt-mode="<?= h($name) ?>" data-default="<?= h($source['default_mode'] ?? 'immer') ?>"><?php foreach ($modeLabels as $value => $modeLabel): ?><option value="<?= h($value) ?>" <?= $mode === $value ? 'selected' : '' ?>><?= h($modeLabel) ?></option><?php endforeach; ?></select>
+                        <?php else: ?><label class="checkbox"><input type="checkbox" data-prompt-enabled="<?= h($name) ?>" data-default="<?= ($source['default_mode'] ?? 'immer') === 'deaktiviert' ? '0' : '1' ?>" <?= $mode !== 'deaktiviert' ? 'checked' : '' ?>>Ansage aktiv</label><?php endif; ?>
+                    </div>
+                    <?php if (!empty($source['active_preview'])): ?><audio id="tree-audio-<?= h($name) ?>" controls preload="none" src="?api=audio&amp;kind=active&amp;name=<?= h($name) ?>"></audio><?php endif; ?>
+                </article>
+                <?php endforeach; ?>
+            </div>
+
+            <div class="tree-stage">
+                <h3>2 · Kienzlefon AI</h3>
+                <div class="tree-decision"><div><strong>AI-Slot verfügbar</strong><div class="hint">Gültiger Claim und gültige Lease → Übergabe ohne zusätzliche Ansage</div></div><div class="tree-decision-center">Kapazität prüfen</div><div><strong>Nicht verfügbar</strong><div class="hint">Ohne zusätzliche Ansage → klassisches Hauptmenü</div></div></div>
+            </div>
+
+            <?php $treeIndex = 3; foreach ($treeGroups as $groupLabel => $names): if ($groupLabel === 'Eingang') continue; ?>
+            <div class="tree-stage">
+                <h3><?= h((string)$treeIndex) ?> · <?= h($groupLabel) ?></h3>
+                <?php foreach ($names as $name): if (!isset($sourcesByName[$name])) continue; $source = $sourcesByName[$name]; $mode = (string)($source['mode'] ?? 'immer'); ?>
+                <article class="tree-node">
+                    <div><button class="tree-node-title" type="button" <?= !empty($source['active_preview']) ? 'data-tree-play="tree-audio-' . h($name) . '"' : 'disabled' ?>><?= h($source['label'] ?? $name) ?></button><div class="hint"><?= h($name) ?> · <?= ($source['source'] ?? 'tts') === 'manuell' ? 'manuelle Aufnahme' : 'TTS' ?></div></div>
+                    <div class="tree-node-controls"><label class="checkbox"><input type="checkbox" data-prompt-enabled="<?= h($name) ?>" data-default="<?= ($source['default_mode'] ?? 'immer') === 'deaktiviert' ? '0' : '1' ?>" <?= $mode !== 'deaktiviert' ? 'checked' : '' ?>>Ansage aktiv</label></div>
+                    <?php if (!empty($source['active_preview'])): ?><audio id="tree-audio-<?= h($name) ?>" controls preload="none" src="?api=audio&amp;kind=active&amp;name=<?= h($name) ?>"></audio><?php endif; ?>
+                </article>
+                <?php endforeach; ?>
+                <?php if ($groupLabel === 'Klassisches Hauptmenü'): ?>
+                <details open><summary>Tasten und feste Ziele</summary><div class="details-body tree-route">
+                    <div class="tree-route-row"><strong>Taste 0</strong><span>Kienzlefon AI lautlos erneut versuchen, sofern möglich; nach einer vorherigen AI-Übergabe keine Rekursion.</span></div>
+                    <div class="tree-route-row"><strong>Taste 1</strong><span>Praxisqueue innerhalb der bestehenden Telefonregel.</span></div>
+                    <div class="tree-route-row"><strong>Tasten 2–5</strong><span>Rezept, Überweisung, Termin sowie Rückruf oder sonstiges Anliegen.</span></div>
+                    <div class="tree-route-row"><strong>Taste 6</strong><span>Öffnungszeiten wiedergeben.</span></div>
+                    <div class="tree-route-row"><strong>Taste 8</strong><span>care_service: Apotheke, Pflegeheim oder Pflegedienst → bestehender Weg pharmacy_queue / 8803.</span></div>
+                    <div class="tree-route-row"><strong>Taste 9</strong><span>professional_urgent: Arzt oder Arztpraxis, Krankenhaus, Rettungsdienst oder Notarzt → bestehender Prioritätsweg super_priority / 8804 und gegebenenfalls rotes Telefon.</span></div>
+                    <div class="tree-route-row"><strong>Keine Taste</strong><span>Telefonzeiten offen: Ansage und Praxisqueue. Telefonzeiten geschlossen oder gesperrt: Ansage und bestehende Nachrichtenaufnahme.</span></div>
+                </div></details>
+                <?php endif; ?>
+            </div>
+            <?php $treeIndex++; endforeach; ?>
         </section>
 
         <section id="page-prompts" class="page" aria-labelledby="prompts-title">
@@ -733,6 +834,7 @@ if ($effectivePresetId !== '') {
                 </div><?php endif; ?>
             </div>
         </section>
+        <footer class="product-footer">Kienzlefon <?= h($productVersion) ?> · <a href="<?= h($productUrl) ?>"><?= h($productName) ?></a> · von <?= h($productAuthor) ?></footer>
     </main>
 </div>
 <div id="flash" class="flash" role="status" aria-live="polite"><strong id="flash-title"></strong><div id="flash-detail"></div></div>
@@ -761,9 +863,12 @@ async function queue(payload) { const response = await fetch('?api=job', {method
 async function poll(job, action) { for (;;) { await new Promise(resolve => setTimeout(resolve, 900)); const response = await fetch('?api=status&job=' + encodeURIComponent(job), {cache:'no-store'}); const value = await response.json(); if (!value.status) continue; const status = value.status; showFlash(status.label || status.code, status.detail || '', ['ansagenerzeugung_fehlgeschlagen','aufnahme_verworfen','nebenstelle_nicht_erreichbar','auftrag_abgelehnt'].includes(status.code)); if (action === 'record_override_preset' && ['ansagen_aktuell','aufnahme_gespeichert'].includes(status.code)) continue; if (terminalCodes.has(status.code)) { if (['ansagen_aktuell','aufnahme_gespeichert','vorlage_gespeichert','vorlage_geloescht'].includes(status.code)) setTimeout(() => location.reload(), 700); return; } } }
 async function safely(task) { try { await task(); } catch (error) { showFlash('Vorgang nicht möglich', error instanceof Error ? error.message : String(error), true); } }
 function promptValues() { const prompts = {}; document.querySelectorAll('textarea[data-prompt]').forEach(input => prompts[input.dataset.prompt] = input.value); return prompts; }
+function promptModeValues() { const modes = {}; document.querySelectorAll('[data-prompt-mode]').forEach(input => modes[input.dataset.promptMode] = input.value); document.querySelectorAll('[data-prompt-enabled]').forEach(input => modes[input.dataset.promptEnabled] = input.checked ? 'immer' : 'deaktiviert'); return modes; }
 function sourceValues() { const sources = {}; document.querySelectorAll('[data-source]').forEach(input => sources[input.dataset.source] = input.value); return sources; }
 function ttsValues() { return {engine:document.getElementById('tts-engine').value, qwen_voice:document.getElementById('qwen-voice').value}; }
-async function savePrompts() { const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts:promptValues(), sources:sourceValues(), tts}); }
+function validatePromptTexts(prompts) { for (const [name, value] of Object.entries(prompts)) { if (name !== 'phone_hours' && !value.trim()) throw new Error('Ansagetexte dürfen nicht leer gespeichert werden. Deaktivieren Sie die Ansage ausdrücklich im Anrufsbaum.'); } }
+async function savePrompts() { const prompts = promptValues(); validatePromptTexts(prompts); const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts, sources:sourceValues(), tts}); }
+async function saveCalltree() { await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues()}); }
 function overridePresetValues() { const priority = Number(document.getElementById('override-preset-priority').value); if (!Number.isInteger(priority)) throw new Error('Bitte geben Sie eine ganzzahlige Priorität ein.'); return {preset_id:editingPresetId, name:document.getElementById('override-preset-name').value, announcement:document.getElementById('override-text').value, active:document.getElementById('override-preset-active').checked, priority, valid_from:document.getElementById('override-preset-valid-from').value, expires_at:document.getElementById('override-preset-expiry').value, block_phone_hours:document.getElementById('override-preset-block').checked, position:document.getElementById('override-preset-position').value, source:document.getElementById('override-preset-source').value}; }
 async function saveOverride() { const source = document.getElementById('override-source').value; const override = {active:document.getElementById('override-active').checked, announcement:document.getElementById('override-text').value, expires_at:document.getElementById('override-expiry').value, block_phone_hours:document.getElementById('override-block').checked, position:document.getElementById('override-position').value}; if (source === 'manuell' && selectedManualPreset) override.manual_preset_id = selectedManualPreset; await queue({action:'save', config_hash:configHash, override, sources:{override:source}}); }
 function findPreset(id) { return overridePresets.find(item => item.id === id); }
@@ -771,6 +876,7 @@ function loadPreset(id, source) { const preset = findPreset(id); if (!preset) th
 async function saveOverridePreset() { await queue({action:'save_override_preset', ...overridePresetValues()}); }
 async function recordOverridePreset(values = overridePresetValues()) { const extension = document.getElementById('override-record-extension').value; await queue({action:'record_override_preset', ...values, extension}); }
 document.getElementById('save-times').addEventListener('click', () => safely(async () => { const schedules = {}; document.querySelectorAll('[data-schedule]').forEach(input => { schedules[input.dataset.schedule] ??= {}; schedules[input.dataset.schedule][input.dataset.day] = splitRanges(input.value); }); await queue({action:'save', config_hash:configHash, schedules}); }));
+document.getElementById('save-calltree').addEventListener('click', () => safely(saveCalltree));
 document.getElementById('save-prompts').addEventListener('click', () => safely(savePrompts));
 document.getElementById('save-override').addEventListener('click', () => safely(saveOverride));
 document.getElementById('save-override-preset').addEventListener('click', () => safely(saveOverridePreset));
@@ -785,6 +891,7 @@ document.querySelectorAll('.activate-candidate').forEach(button => button.addEve
 document.querySelectorAll('.load-preset').forEach(button => button.addEventListener('click', () => safely(async () => loadPreset(button.dataset.presetId, button.dataset.presetSource))));
 document.querySelectorAll('.rerecord-preset').forEach(button => button.addEventListener('click', () => safely(async () => { const preset = findPreset(button.dataset.presetId); if (!preset) throw new Error('Die gespeicherte Sonderansage wurde nicht gefunden.'); await recordOverridePreset({preset_id:preset.id, name:preset.name, announcement:preset.announcement, active:Boolean(preset.active), priority:Number(preset.priority), valid_from:preset.valid_from || '', expires_at:preset.expires_at || '', block_phone_hours:Boolean(preset.block_phone_hours), position:preset.position || 'statt_begruessung', source:'manuell'}); })));
 document.querySelectorAll('.delete-preset').forEach(button => button.addEventListener('click', () => safely(async () => { const preset = findPreset(button.dataset.presetId); if (!preset) throw new Error('Die gespeicherte Sonderansage wurde nicht gefunden.'); if (!confirm('Gespeicherte Sonderansage „' + preset.name + '“ löschen?')) return; await queue({action:'delete_override_preset', preset_id:preset.id}); })));
+document.querySelectorAll('[data-tree-play]').forEach(button => button.addEventListener('click', () => safely(async () => { const audio = document.getElementById(button.dataset.treePlay); if (!(audio instanceof HTMLAudioElement)) throw new Error('Für diese Ansage ist noch keine Vorschau verfügbar.'); document.querySelectorAll('#page-calltree audio').forEach(item => { if (item !== audio) { item.pause(); item.currentTime = 0; } }); await audio.play(); })));
 </script>
 <?php endif; ?>
 </body>

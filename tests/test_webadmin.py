@@ -90,8 +90,15 @@ def test_explicit_manual_source_requires_recording(app_config) -> None:
 
 
 def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: Path) -> None:
-    with app_config.source.open("a", encoding="utf-8") as handle:
-        handle.write('\n[webinterface]\npasswort = "sehr-geheim-123"\n')
+    text = app_config.source.read_text(encoding="utf-8").replace(
+        "[ansagen]\n",
+        '[ansagen]\nai_assistant_intro = "Nicht mehr verwendete Alt-Ansage."\n',
+        1,
+    )
+    app_config.source.write_text(
+        text + '\n[webinterface]\npasswort = "sehr-geheim-123"\n',
+        encoding="utf-8",
+    )
     runtime = tmp_path / "runtime"
     state = export_state(
         app_config.source,
@@ -105,6 +112,8 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     serialized = json.dumps(state, ensure_ascii=False)
     assert "sehr-geheim-123" not in serialized
     assert "CHANGE_ME_RED_PHONE_SECRET" not in serialized
+    assert "ai_assistant_intro" not in serialized
+    assert "Nicht mehr verwendete Alt-Ansage." not in serialized
     assert state["auth_required"] is True
     assert state["auth_ready"] is True
     assert (runtime / "password.hash").read_text().startswith("$")
@@ -119,6 +128,19 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     assert state["tts"]["engine"] == "piper"
     assert state["tts"]["qwen_voice"] == "ryan"
     assert state["tts"]["qwen_available"] is False
+    assert set(state["schedules"]) == {
+        "oeffnungszeiten",
+        "telefonzeiten",
+        "apothekenzeiten",
+        "fachstellenzeiten",
+    }
+    assert state["product"] == {
+        "name": "kienzlefon.de",
+        "version": "2.4.0",
+        "author": "Dr. Thomas Kienzle",
+        "url": "https://kienzlefon.de",
+    }
+    assert sources["urgent_help"]["mode"] == "immer"
 
     first_hash = (runtime / "password.hash").read_text()
     export_state(
@@ -259,6 +281,55 @@ def test_worker_rejects_non_allowlisted_fields_without_changing_config(
     assert app_config.source.read_bytes() == before
     status = json.loads((worker.status_directory / f"{job_id}.json").read_text())
     assert status["code"] == "auftrag_abgelehnt"
+
+
+def test_worker_rejects_empty_announcement_before_replacing_config(
+    app_config, tmp_path: Path
+) -> None:
+    worker = _worker(app_config, tmp_path)
+    before = app_config.source.read_bytes()
+    job_id = "e" * 32
+    _queue(
+        worker,
+        job_id,
+        {
+            "action": "save",
+            "config_hash": hashlib.sha256(before).hexdigest(),
+            "prompts": {"greeting_open": "   "},
+        },
+    )
+
+    assert worker.run_once() is True
+    assert app_config.source.read_bytes() == before
+    status = json.loads((worker.status_directory / f"{job_id}.json").read_text())
+    assert status["code"] == "auftrag_abgelehnt"
+    assert "darf nicht leer sein" in status["detail"]
+
+
+def test_worker_saves_prompt_modes_without_changing_prompt_texts(
+    app_config, tmp_path: Path
+) -> None:
+    worker = _worker(app_config, tmp_path)
+    before_prompt = app_config.prompts["emergency"]
+    job_id = "6" * 32
+    _queue(
+        worker,
+        job_id,
+        {
+            "action": "save",
+            "config_hash": hashlib.sha256(app_config.source.read_bytes()).hexdigest(),
+            "prompt_modes": {
+                "emergency": "deaktiviert",
+                "no_selection_open": "deaktiviert",
+            },
+        },
+    )
+
+    assert worker.run_once() is True
+    updated = load_config(app_config.source)
+    assert updated.prompt_mode("emergency") == "deaktiviert"
+    assert updated.prompt_mode("no_selection_open") == "deaktiviert"
+    assert updated.prompts["emergency"] == before_prompt
 
 
 def test_worker_changes_global_qwen_voice_only_when_generator_is_allowlisted(
@@ -681,7 +752,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="1.1.2"' in installer
+    assert 'VERSION="2.4.0"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -761,6 +832,12 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     state = {
         "config_hash": "a" * 64,
         "practice": "Praxis Test",
+        "product": {
+            "name": "kienzlefon.de",
+            "version": "2.4.0",
+            "author": "Dr. Thomas Kienzle",
+            "url": "https://kienzlefon.de",
+        },
         "auth_required": False,
         "auth_ready": True,
         "network": {"listen": "10.9.0.1", "port": 8088, "server": "standalone"},
@@ -790,6 +867,8 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
                     }
                 ],
                 "source": "tts",
+                "mode": "immer",
+                "default_mode": "immer",
                 "manual_available": False,
                 "candidate_available": False,
                 "active_preview": True,
@@ -896,6 +975,14 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert '<div class="shell">' in result.stdout
     assert "Praxis Test" in result.stdout
     assert "Öffnungszeiten" in result.stdout
+    assert "Zeiten care_service" in result.stdout
+    assert "Zeiten professional_urgent" in result.stdout
+    assert "Anrufsbaum" in result.stdout
+    assert "Taste 0" in result.stdout
+    assert "Keine Taste" in result.stdout
+    assert "Kienzlefon 2.4.0" in result.stdout
+    assert "kienzlefon.de" in result.stdout
+    assert "Dr. Thomas Kienzle" in result.stdout
     assert "Genau diese Ansage aufnehmen" in result.stdout
     assert "Genau diese Sonderansage aufnehmen" in result.stdout
     assert "Neue Sonderansage aufnehmen" in result.stdout

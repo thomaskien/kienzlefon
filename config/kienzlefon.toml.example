@@ -1,6 +1,10 @@
 # kienzlefon
-# Version: 2.0
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Abspielmodi fuer Begruessungen, Notfallhinweis und weitere Ansagen ergaenzt.
+# - 2.3.2: Nicht mehr verwendete Hauptserver-Assistentenansage entfernt.
+# - 2.3: Ansage fuer die Uebergabe an den digitalen Telefonassistenten ergaenzt.
+# - 2.2: Push-basierte AI-Admission- und KI-Nebenstellenkonfiguration ergaenzt.
 # - 2.0: Qwen3-TTS-Modell, Sprecher, Sprache, Seed und Generatorpfad ergaenzt.
 # - 1.9.3: Konfigurationsvorlage unveraendert fuer das Leeranruf-Patchrelease uebernommen.
 # - 1.9.2: Konfigurationsvorlage unveraendert fuer das Nicht-Demo-Update-Patchrelease uebernommen.
@@ -105,6 +109,16 @@ hauptausgang_nummer = "CHANGE_ME_MAIN_NUMBER"
 ausgehend_zaehlt_kanalgrenze = true
 erste_queue_nebenstelle = 201
 queue_nebenstellen_anzahl = 1
+
+[ki_integration]
+aktiv = false
+listener_bindung = "local"
+listener_ip = "127.0.0.1"
+listener_port = 8190
+anzahl_nebenstellen = 0
+lease_ttl_ms = 5000
+publisher_timeout_ms = 7000
+sip_passwoerter = []
 
 [ansagen_ivr]
 nebenstelle = "777"
@@ -258,3 +272,8 @@ webadmin_record = "Bitte sprechen Sie Ihre neue Ansage nach dem Signalton. Beend
 webadmin_record_actions = "Sie hörten grade Ihre neue Aufnahme. Drücken Sie 1 zum Übernehmen, 2 zum erneuten Aufnehmen oder 3 zum Verwerfen."
 webadmin_record_saved = "Die Aufnahme wurde gespeichert, aber noch nicht aktiviert."
 webadmin_record_discarded = "Die Aufnahme wurde verworfen."
+
+[ansagen_modus]
+greeting_open = "offen"
+greeting_closed = "zu"
+emergency = "immer"

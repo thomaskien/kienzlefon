@@ -1,6 +1,10 @@
 # kienzlefon
-# Version: 1.8
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
+# - 2.3.2: AI-Medienbridge sofort gestartet und Taste 0 als direkter AI-Shortcut belegt.
+# - 2.3: AI-Handoff, Menue-Admission, Assistentenansage und DTMF-Rueckkehr integriert.
+# - 2.2: AI-Nebenstellen, interne Ziele und lease-gesteuertes Routing integriert.
 # - 1.8: Versionsstand der erzeugten Asterisk-Dateien aktualisiert.
 # - 1.7.1: Aktiviertes rotes Telefon als Mitglied der Sonderqueue aufgenommen.
 # - 1.7: Sonderqueue, Penalty-Initialisierung und Caller-ID-Anzeige ergaenzt.
@@ -26,6 +30,14 @@ from .config import AppConfig, SipLineConfig
 
 class AsteriskConfigError(RuntimeError):
     pass
+
+
+AI_DTMF_FEATURES = tuple(
+    (f"kzf_ai_dtmf_{digit}", digit, digit) for digit in "0123456789"
+) + (
+    ("kzf_ai_dtmf_star", "*", "*"),
+    ("kzf_ai_dtmf_hash", "#", "#"),
+)
 
 
 def _asterisk_value(value: str) -> str:
@@ -112,9 +124,19 @@ def render_pjsip(config: AppConfig) -> str:
         )
         for entry in config.standalone_extensions
     )
+    ai_endpoints = "\n".join(
+        _ai_endpoint(extension, password, config.asterisk.phone_transport)
+        for extension, password in zip(
+            config.ai_integration.extensions,
+            config.ai_integration.sip_passwords,
+            strict=True,
+        )
+    )
     return f"""; kienzlefon
-; Version: 1.8
+; Version: 2.3
 ; Changelog:
+; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
+; - 2.2: AI-Slotendpunkte mit Busy-on-Busy und deaktiviertem direct_media ergaenzt.
 ; - 1.8: Versionsstand fuer Kienzlefon 1.8 aktualisiert.
 ; - 1.7.1: Rotes Telefon als zusaetzliches Sonderqueue-Mitglied vorbereitet.
 ; - 1.7: Rotes Telefon optional und Caller-ID-Routing vorbereitet.
@@ -130,8 +152,25 @@ def render_pjsip(config: AppConfig) -> str:
 
 {standalone}
 
+{ai_endpoints}
+
 {_registration("kienzlefon-direct-queue", "kienzlefon-direct-queue-in", config.asterisk.direct_queue)}
 {_registration("kienzlefon-direct-red", "kienzlefon-direct-red-in", config.asterisk.direct_red)}
+"""
+
+
+def render_features() -> str:
+    entries = "\n".join(
+        f'{name} = {activation},self,Gosub,"kienzlefon-ai-dtmf,s,1({digit})"'
+        for name, activation, digit in AI_DTMF_FEATURES
+    )
+    return f"""; kienzlefon
+; Version: 2.3
+; Changelog:
+; - 2.3: Alle DTMF-Zeichen im AI-Gespraech auf den klassischen Menuepfad gelegt.
+
+[applicationmap]
+{entries}
 """
 
 
@@ -159,6 +198,36 @@ allow=g722,alaw,ulaw
 auth={extension}-auth
 aors={extension}
 callerid={caller_name} <{extension}>
+direct_media=no
+rewrite_contact=yes
+rtp_symmetric=yes
+force_rport=yes
+device_state_busy_at=1
+"""
+
+
+def _ai_endpoint(extension: str, password: str, transport: str) -> str:
+    return f"""[{extension}-auth]
+type=auth
+auth_type=userpass
+username={extension}
+password={_asterisk_value(password)}
+
+[{extension}]
+type=aor
+max_contacts=1
+remove_existing=yes
+qualify_frequency=10
+
+[{extension}]
+type=endpoint
+transport={transport}
+context=kienzlefon-ai-endpoint-in
+disallow=all
+allow=alaw,ulaw
+auth={extension}-auth
+aors={extension}
+callerid=Kienzlefon AI {extension} <{extension}>
 direct_media=no
 rewrite_contact=yes
 rtp_symmetric=yes
@@ -220,6 +289,7 @@ def render_extensions(config: AppConfig) -> str:
 """
     specialist_route = f"""{red_attempt} same => n,Set(QUEUE_PRIO={config.ivr.red_fallback_priority})
  same => n,{specialist_queue}
+ same => n,Gosub(kienzlefon-ai-queue-fallback,s,1)
  same => n(done),Hangup()
 """
     red_endpoint = (
@@ -251,9 +321,49 @@ def render_extensions(config: AppConfig) -> str:
  same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-ansagen-ivr,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,Hangup()
 """
+    internal_targets = [str(value) for value in range(8800, 8805)]
+    internal_targets.extend(config.ai_integration.extensions)
+    ai_local_routes = "".join(
+        f"exten => {extension},1,Goto(kienzlefon-internal-targets,{extension},1)\n"
+        for extension in internal_targets
+    )
+    ai_specific_routes = "".join(
+        f"""exten => {extension},1,NoOp(Kienzlefon AI Direktwahl {slot_id})
+ same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-admission,--config,/etc/kienzlefon/kienzlefon.toml,--selection,specific,--slot-id,{slot_id})
+ same => n,GotoIf($["${{KZF_AI_ACCEPTED}}"="1"]?dial:busy)
+ same => n(dial),Gosub(kienzlefon-ai-dial,s,1)
+ same => n,GotoIf($["${{KZF_AI_DTMF_HANDOFF}}"="1"]?classic)
+ same => n,GotoIf($["${{KZF_AI_DIAL_FAILED}}"="1"]?busy:done)
+ same => n(classic),Set(KZF_IVR_INITIAL_DIGIT=${{KZF_AI_DTMF_DIGIT}})
+ same => n,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Goto(kienzlefon-classic-menu,s,1)
+ same => n(busy),Busy(1)
+ same => n(done),Hangup()
+"""
+        for slot_id, extension in zip(
+            config.ai_integration.slot_ids, config.ai_integration.extensions, strict=True
+        )
+    )
+    ai_enabled = "1" if config.ai_integration.enabled else "0"
+    ai_dtmf_features = "#".join(name for name, _activation, _digit in AI_DTMF_FEATURES)
+    queue_failure_checks = "\n".join(
+        f' same => n,GotoIf($["${{QUEUESTATUS}}"="{status}"]?fallback)'
+        for status in (
+            "TIMEOUT",
+            "FULL",
+            "JOINEMPTY",
+            "LEAVEEMPTY",
+            "JOINUNAVAIL",
+            "LEAVEUNAVAIL",
+        )
+    )
     return f"""; kienzlefon
-; Version: 1.8
+; Version: 2.4.0
 ; Changelog:
+; - 2.4.0: Taste 0 im Hauptmenue versucht AI ohne Ansage und ohne AI-Rekursion.
+; - 2.3.2: AI-Medienbridge sofort gestartet und Taste 0 als direkter AI-Shortcut belegt.
+; - 2.3: AI erst vor dem Hauptmenue zugelassen und sichere Handoffs ergaenzt.
+; - 2.2: Interne Ziele 8800 bis 8804 und lease-gesteuerte AI-Ziele ergaenzt.
 ; - 1.8: Versionsstand fuer Kienzlefon 1.8 aktualisiert.
 ; - 1.7.1: Fallback auf Sonderqueue einschliesslich rotem Telefon aktualisiert.
 ; - 1.7: Sonderqueue, Penalty-Initialisierung und Caller-ID-Anzeige ergaenzt.
@@ -274,11 +384,131 @@ exten => s,1,NoOp(Kienzlefon IVR)
  same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-agi,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,Hangup()
 
+[kienzlefon-entry]
+exten => s,1,NoOp(Kienzlefon vollstaendiger Eingang 8800)
+ same => n,Set(CHANNEL(language)=de)
+ same => n,Set(AGISIGHUP=no)
+ same => n,Set(AGIEXITONHANGUP=no)
+ same => n,Answer()
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_DONE}}"="1"]?classic-full)
+ same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-agi,--config,/etc/kienzlefon/kienzlefon.toml,--phase,opening)
+ same => n,GotoIf($["${{KZF_IVR_OPENING_OK}}"!="1"]?done)
+ same => n,GotoIf($["${{KZF_IVR_INITIAL_DIGIT}}"="0"]?ai-shortcut)
+ same => n,GotoIf($["${{KZF_IVR_INITIAL_DIGIT}}"!="none"]?classic-menu)
+ same => n,GotoIf($["{ai_enabled}"="1"]?admission:classic-menu)
+ same => n(ai-shortcut),Set(KZF_IVR_INITIAL_DIGIT=none)
+ same => n,GotoIf($["{ai_enabled}"="1"]?admission:classic-menu)
+ same => n(admission),AGI(/opt/kienzlefon/venv/bin/kienzlefon-admission,--config,/etc/kienzlefon/kienzlefon.toml,--selection,any)
+ same => n,GotoIf($["${{KZF_AI_ACCEPTED}}"="1"]?dial:classic-menu)
+ same => n(dial),Gosub(kienzlefon-ai-dial,s,1)
+ same => n,GotoIf($["${{KZF_AI_DTMF_HANDOFF}}"="1"]?classic-dtmf)
+ same => n,GotoIf($["${{KZF_AI_DIAL_FAILED}}"="1"]?classic-menu:done)
+ same => n(classic-dtmf),Set(KZF_IVR_INITIAL_DIGIT=${{KZF_AI_DTMF_DIGIT}})
+ same => n,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Goto(classic-menu)
+ same => n(classic-menu),Goto(kienzlefon-classic-menu,s,1)
+ same => n(classic-full),Goto(kienzlefon-in,s,1)
+ same => n(done),Hangup()
+
+[kienzlefon-classic-menu]
+exten => s,1,NoOp(Kienzlefon klassisches Hauptmenue)
+ same => n,Set(KZF_IVR_AI_REQUESTED=0)
+ same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-agi,--config,/etc/kienzlefon/kienzlefon.toml,--phase,menu,--initial-digit,${{KZF_IVR_INITIAL_DIGIT}})
+ same => n,GotoIf($["${{KZF_IVR_AI_REQUESTED}}"!="1"]?done)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_DONE}}"="1"]?retry-menu)
+ same => n,GotoIf($["{ai_enabled}"="1"]?ai-shortcut:retry-menu)
+ same => n(ai-shortcut),Goto(kienzlefon-entry,s,ai-shortcut)
+ same => n(retry-menu),Set(KZF_IVR_INITIAL_DIGIT=none)
+ same => n,Goto(s,1)
+ same => n(done),Hangup()
+
+[kienzlefon-ai-dial]
+exten => s,1,NoOp(Kienzlefon AI Lease ${{KZF_AI_SLOT_ID}})
+ same => n,Set(__KZF_AI_REQUEST_ID=${{KZF_AI_REQUEST_ID}})
+ same => n,Set(__KZF_AI_LEASE_ID=${{KZF_AI_LEASE_ID}})
+ same => n,Set(__KZF_AI_SLOT_ID=${{KZF_AI_SLOT_ID}})
+ same => n,Set(__KZF_AI_EXTENSION=${{KZF_AI_EXTENSION}})
+ same => n,Set(KZF_AI_DIAL_FAILED=0)
+ same => n,Set(KZF_AI_DTMF_HANDOFF=0)
+ same => n,Set(KZF_AI_DTMF_DIGIT=)
+ same => n,Set(KZF_AI_PREVIOUS_DYNAMIC_FEATURES=${{DYNAMIC_FEATURES}})
+ same => n,Set(DYNAMIC_FEATURES={ai_dtmf_features})
+ same => n,Dial(PJSIP/${{KZF_AI_EXTENSION}},120,gb(kienzlefon-ai-headers^s^1))
+ same => n,Set(DYNAMIC_FEATURES=${{KZF_AI_PREVIOUS_DYNAMIC_FEATURES}})
+ same => n,GotoIf($["${{KZF_AI_DTMF_DIGIT}}"!=""]?dtmf)
+ same => n,GotoIf($["${{DIALSTATUS}}"="ANSWER"]?result)
+ same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-admission,--config,/etc/kienzlefon/kienzlefon.toml,--selection,release,--request-id,${{KZF_AI_REQUEST_ID}},--lease-id,${{KZF_AI_LEASE_ID}})
+ same => n,Set(KZF_AI_DIAL_FAILED=1)
+ same => n,Goto(done)
+ same => n(dtmf),Set(KZF_AI_DTMF_HANDOFF=1)
+ same => n,Goto(done)
+ same => n(result),AGI(/opt/kienzlefon/venv/bin/kienzlefon-admission,--config,/etc/kienzlefon/kienzlefon.toml,--selection,call-result,--request-id,${{KZF_AI_REQUEST_ID}},--lease-id,${{KZF_AI_LEASE_ID}})
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_ALLOWED}}"!="1"]?done)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_TARGET}}"="classic"]?handoff-classic)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_TARGET}}"="practice_queue"]?handoff-practice)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_TARGET}}"="pharmacy_queue"]?handoff-pharmacy)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_TARGET}}"="super_priority"]?handoff-super)
+ same => n,Goto(done)
+ same => n(handoff-classic),Goto(kienzlefon-ai-handoff,classic,1)
+ same => n(handoff-practice),Goto(kienzlefon-ai-handoff,practice,1)
+ same => n(handoff-pharmacy),Goto(kienzlefon-ai-handoff,pharmacy,1)
+ same => n(handoff-super),Goto(kienzlefon-ai-handoff,super,1)
+ same => n(done),Return()
+
+[kienzlefon-ai-dtmf]
+exten => s,1,Set(__KZF_AI_DTMF_DIGIT=${{ARG1}})
+ same => n,SoftHangup(${{BRIDGEPEER}})
+ same => n,Return()
+
+[kienzlefon-ai-handoff]
+exten => classic,1,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Goto(kienzlefon-internal-targets,8801,1)
+exten => practice,1,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Set(__KZF_AI_HANDOFF_ACTIVE=1)
+ same => n,Set(__KZF_AI_HANDOFF_FALLBACK_USED=0)
+ same => n,Goto(kienzlefon-internal-targets,8802,1)
+exten => pharmacy,1,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Set(__KZF_AI_HANDOFF_ACTIVE=1)
+ same => n,Set(__KZF_AI_HANDOFF_FALLBACK_USED=0)
+ same => n,Goto(kienzlefon-internal-targets,8803,1)
+exten => super,1,Set(__KZF_AI_HANDOFF_DONE=1)
+ same => n,Set(__KZF_AI_HANDOFF_ACTIVE=1)
+ same => n,Set(__KZF_AI_HANDOFF_FALLBACK_USED=0)
+ same => n,Goto(kienzlefon-internal-targets,8804,1)
+
+[kienzlefon-ai-queue-fallback]
+exten => s,1,GotoIf($["${{KZF_AI_HANDOFF_ACTIVE}}"!="1"]?done)
+ same => n,GotoIf($["${{KZF_AI_HANDOFF_FALLBACK_USED}}"="1"]?done)
+{queue_failure_checks}
+ same => n,Goto(done)
+ same => n(fallback),Set(__KZF_AI_HANDOFF_FALLBACK_USED=1)
+ same => n,Goto(kienzlefon-internal-targets,8801,1)
+ same => n(done),Return()
+
+[kienzlefon-ai-headers]
+exten => s,1,Set(PJSIP_HEADER(add,X-Kienzlefon-Protocol)={"kienzlefon-ai-admission-v1"})
+ same => n,Set(PJSIP_HEADER(add,X-Kienzlefon-Request-ID)=${{KZF_AI_REQUEST_ID}})
+ same => n,Set(PJSIP_HEADER(add,X-Kienzlefon-Lease-ID)=${{KZF_AI_LEASE_ID}})
+ same => n,Set(PJSIP_HEADER(add,X-Kienzlefon-Slot-ID)=${{KZF_AI_SLOT_ID}})
+ same => n,Return()
+
+[kienzlefon-internal-targets]
+exten => 8800,1,Goto(kienzlefon-entry,s,1)
+exten => 8801,1,Goto(kienzlefon-in,s,1)
+exten => 8802,1,Goto(kfx-phone-queue,s,1)
+exten => 8803,1,Goto(kienzlefon-pharmacy-queue,s,1)
+exten => 8804,1,Goto(kienzlefon-specialist,s,1)
+{ai_specific_routes}
+
+[kienzlefon-ai-endpoint-in]
+exten => _X.,1,Hangup(21)
+
 [kienzlefon-pharmacy-queue]
 exten => s,1,NoOp(Kienzlefon Apotheke in bestehende Praxisqueue)
  same => n,Set(QUEUE_PRIO={config.ivr.pharmacy_priority})
  same => n,Set(QUEUE_RAISE_PENALTY=0)
  same => n,Queue({config.ivr.queue_name},r,,kienzlefon/pharmacy_agent)
+ same => n,Gosub(kienzlefon-ai-queue-fallback,s,1)
  same => n,Hangup()
 
 [kienzlefon-specialist]
@@ -312,12 +542,14 @@ exten => inbound-calls,1,Goto(kienzlefon-direct-red-in,{config.asterisk.direct_r
 {"".join(internal_routes)}
 {local_routes}
 {admin_route}
+{ai_local_routes}
 {_outbound_route(config, red_endpoint, red_number)}
 
 [kienzlefon-standalone-local]
 {"".join(internal_routes)}
 {local_routes}
 {admin_route}
+{ai_local_routes}
 exten => _XXX,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
  same => n,Set(KZF_OUT_CALLERID={config.asterisk.main_outbound_number})
  same => n,Goto(kienzlefon-outbound,${{EXTEN}},1)
@@ -366,16 +598,22 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
     pjsip_target = etc / "pjsip-kienzlefon.conf"
     extensions_target = etc / "extensions-kienzlefon.conf"
     queues_target = etc / "queues-kienzlefon.conf"
+    features_target = etc / "features-kienzlefon.conf"
     _atomic_install(pjsip_target, render_pjsip(config))
     _atomic_install(extensions_target, render_extensions(config))
     _atomic_install(queues_target, render_queues(config))
+    _atomic_install(features_target, render_features())
     _ensure_include(etc / "pjsip.conf", '#tryinclude "/etc/asterisk/pjsip-kienzlefon.conf"')
     _ensure_include(
         etc / "extensions.conf", '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"'
     )
     _ensure_include(etc / "queues.conf", '#include "/etc/asterisk/queues-kienzlefon.conf"')
+    _ensure_include(
+        etc / "features.conf", '#include "/etc/asterisk/features-kienzlefon.conf"'
+    )
     _patch_kienzlefax_ivr_route(etc / "extensions-kfx-telefonie.conf")
     _patch_kienzlefax_queue_callerid(etc / "extensions-kfx-telefonie.conf")
+    _patch_kienzlefax_queue_handoff_fallback(etc / "extensions-kfx-telefonie.conf")
     _patch_internal_routes(config, etc / "extensions-kfx-telefonie.conf")
     _patch_direct_did_routes(config, etc / "extensions-kfx-telefonie.conf", "kfx-phone-in")
     _patch_direct_did_routes(config, etc / "extensions.conf", "kfx-provider-in")
@@ -405,14 +643,18 @@ def _ensure_include(path: Path, line: str) -> None:
 def _patch_kienzlefax_ivr_route(path: Path) -> None:
     if not path.is_file():
         raise AsteriskConfigError(f"Kienzlefax-Telefoniedialplan fehlt: {path}")
-    original = "same => n(accepted),Goto(kfx-phone-queue,s,1)"
-    replacement = "same => n(accepted),Goto(kienzlefon-in,s,1)"
+    originals = (
+        "same => n(accepted),Goto(kfx-phone-queue,s,1)",
+        "same => n(accepted),Goto(kienzlefon-in,s,1)",
+    )
+    replacement = "same => n(accepted),Goto(kienzlefon-entry,s,1)"
     text = path.read_text(encoding="utf-8")
     if replacement in text:
         return
-    if original not in text:
+    matches = [original for original in originals if original in text]
+    if len(matches) != 1:
         raise AsteriskConfigError("Kienzlefax-IVR-Uebergabepunkt wurde nicht eindeutig gefunden")
-    _atomic_install(path, text.replace(original, replacement, 1))
+    _atomic_install(path, text.replace(matches[0], replacement, 1))
 
 
 def _patch_kienzlefax_queue_callerid(path: Path) -> None:
@@ -431,6 +673,21 @@ def _patch_kienzlefax_queue_callerid(path: Path) -> None:
     _atomic_install(path, text.replace(anchor, anchor + "\n" + marker, 1))
 
 
+def _patch_kienzlefax_queue_handoff_fallback(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    marker = " same => n,Gosub(kienzlefon-ai-queue-fallback,s,1)"
+    context = re.search(r"^\[kfx-phone-queue\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if context is None:
+        raise AsteriskConfigError("Kienzlefax-Praxisqueue wurde nicht gefunden")
+    if marker in context["body"]:
+        return
+    queue = re.search(r"^[ \t]*same => n,Queue\([^\n]+\)$", context["body"], re.M)
+    if queue is None:
+        raise AsteriskConfigError("Queue-Aufruf der Kienzlefax-Praxisqueue wurde nicht gefunden")
+    insertion = context.start("body") + queue.end()
+    _atomic_install(path, text[:insertion] + "\n" + marker + text[insertion:])
+
+
 def _patch_internal_routes(config: AppConfig, path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     marker = "; kienzlefon internal routes begin"
@@ -440,6 +697,12 @@ def _patch_internal_routes(config: AppConfig, path: Path) -> None:
     routes = "".join(
         f"exten => {extension},1,Dial(PJSIP/{extension},120)\n same => n,Hangup()\n"
         for extension in extensions
+    )
+    internal_targets = [str(value) for value in range(8800, 8805)]
+    internal_targets.extend(config.ai_integration.extensions)
+    routes += "".join(
+        f"exten => {extension},1,Goto(kienzlefon-internal-targets,{extension},1)\n"
+        for extension in internal_targets
     )
     route = (
         f"{marker}\n{routes}"

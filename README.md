@@ -1,7 +1,12 @@
 <!--
 kienzlefon
-Version: 2.1.2
+Version: 2.4.0
 
+- 2.4.0: Integriertes Webinterface, Anrufsbaum, Ansagenmodi und Notfall-Handoff freigegeben.
+- 2.3.2: Sofortige AI-Medienbridge korrigiert und obsolete Hauptserver-Ansage entfernt.
+- 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
+- 2.3: Sicheren AI-Handoff, Call-Policy, Assistentenansage und DTMF-Rueckkehr integriert.
+- 2.2: Push-basierten AI-Admission-Listener und freigemeldete KI-Nebenstellen integriert.
 - 2.1.2: Passwortloser WireGuard-Zugriff bleibt nach einem Systemneustart erhalten.
 - 2.1.1: Hauptinstaller bietet Installation oder Aktualisierung des Webinterfaces immer an.
 - 2.1: Gezielte neue Qwen-Varianten und WireGuard-KI-Client ergaenzt.
@@ -40,7 +45,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.1.2**
+Version: **2.4.0**
 
 ## Eigenschaften
 
@@ -66,6 +71,30 @@ Version: **2.1.2**
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
 - keine TTS-HTTP-Schnittstelle und kein dauerhaft geladener TTS-Dienst
+- optionaler AI-Admission-Listener auf dem Haupt-Kienzlefon
+- KI-Nebenstellen ab `8810`, die nur mit einer aktiven AI-Freimeldungs-Lease
+  angerufen werden
+- interne Ziele `8800` bis `8804` fuer Gesamteingang, klassischen IVR und
+  priorisierte Warteschlangen
+- aktivierte Begruessungs-, Sonder-, Notfall- und Bereitschaftsansagen liegen
+  vor einer moeglichen AI-Uebergabe; die Admission-Pruefung bleibt am
+  bisherigen Einstieg ins Hauptmenue
+- Taste `0` waehrend dieser Eingangsansagen springt sofort zur AI-Zulassung
+- Taste `0` im klassischen Hauptmenue versucht dieselbe AI-Zulassung lautlos
+  erneut, ohne nach einer AI-Rueckkehr einen Kreisverkehr zu erzeugen
+- sofortige Medienbridge nach Annahme der freigemeldeten AI-Nebenstelle, damit
+  das vom KI-Backend erzeugte Greeting vollstaendig hoerbar ist
+- jede Anrufer-DTMF-Taste waehrend des AI-Gespraechs beendet das AI-Leg und
+  wird unveraendert an das klassische Kienzlefon-Hauptmenue uebergeben
+- dauerhaftes, einmalig verbrauchbares AI-Handoff-Ergebnis mit festen lokalen
+  Zielen `8801` bis `8804` und fail-closed-Pruefung der aktuellen Praxisregeln
+- kurz gueltige Call-Policy fuer Oeffnungs-, Telefon-, Apotheken- und
+  Fachstellenlogik sowie die vollstaendigen Wochenzeitprofile
+- bestaetigte `super_priority`-Handoffs werden nach allen Claim-, Lease-,
+  Persistenz- und Einmalverbrauchspruefungen nicht erneut durch die
+  Fachstellenzeiten blockiert
+- integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
+  alternativen Anrufsbaum und expliziten Ansagenmodi
 
 ## Installation
 
@@ -88,6 +117,19 @@ ausgegebenen Demo-JSONs die Felder `id` und `telefon` durch `#anonymisiert demo#
 Audiodateien und in Freitexten genannte Rufnummern werden dadurch nicht
 veraendert. Seit Version 1.6 werden die
 Whisper-Modelle fuer Namen, Medikamente und alle uebrigen Aufnahmen getrennt ab.
+
+Bei aktivierter Kienzlefon-AI-Anbindung fragt der Installer die Anzahl der
+anzulegenden KI-Nebenstellen und die konkrete Listener-Bindung ab. Der Listener
+liegt auf dem Haupt-Kienzlefon und bindet wahlweise an Loopback, eine
+WireGuard-IP oder eine LAN-IP. Die KI-Maschine meldet jeden Slot aktiv als
+`free` oder `not_free`; Kienzlefon fragt die Kapazitaet nicht auf der
+KI-Maschine ab. Ohne aktuelle, einmalig verbrauchbare Lease wird kein Anruf an
+eine KI-Nebenstelle geleitet. Die Schnittstelle besitzt auf ausdrueckliche
+Vorgabe keine Anwendungsauthentifizierung und darf nur in einem geschuetzten
+Netz betrieben werden.
+
+Der verbindliche Laufzeitvertrag fuer Kapazitaet, Call-Policy und Handoff ist
+in `SPEZIFIKATION-KIENZLEFON-AI-RUNTIME-SCHNITTSTELLE-v1.1.md` dokumentiert.
 `large-v3-turbo` ist etwa dreimal so schnell und speichersparender;
 `large-v3` kann bei Eigennamen genauer sein.
 
@@ -95,8 +137,9 @@ Bei einem Update kann die vorhandene Grundkonfiguration erhalten und separat
 entschieden werden, ob die Zeitprofile neu konfiguriert werden sollen. Neu
 eingegebene Zeiten werden nach dem Schreiben aus der TOML-Datei zurueckgelesen
 und mit den Eingaben verglichen.
-Fehlende 1.7-Eintraege werden dabei ergaenzt, vorhandene TOML-Werte nicht
-ueberschrieben. Passwoerter unveraenderter Zusatztelefone bleiben erhalten.
+Fehlende Eintraege werden dabei aus der aktuellen Vorlage ergaenzt, vorhandene
+TOML-Werte nicht ueberschrieben. Das gilt auch fuer `[ansagen_modus]` in 2.4.0.
+Passwoerter unveraenderter Zusatztelefone bleiben erhalten.
 Der Installer erklaert die priorisierte Sonderqueue und fragt, welche bereits
 konfigurierten Zusatznebenstellen dort neben den normalen Queue-Telefonen
 gleichzeitig klingeln sollen.
@@ -262,25 +305,40 @@ sudo kienzlefon-status
 systemctl status kienzlefon-worker
 ```
 
-## Separates Administrations-Webinterface
+## Administrations-Webinterface
 
-Das Webinterface bleibt ein eigener, schlanker Baustein. Der Hauptinstaller
-bietet bei jeder Neu- oder Ueberinstallation ausdruecklich an, diesen Baustein
-ebenfalls zu installieren beziehungsweise zu aktualisieren. Eine vorhandene
-Webinterface-Installation wird dabei als empfohlene Vorgabe erkannt. Der
-separate Installer kann weiterhin direkt ausgefuehrt werden:
+Das Webinterface gehoert ab Version 2.4.0 zur Kienzlefon-Hauptversion und fuehrt
+keine eigene Produktversion mehr. Eine vorhandene Installation wird vom
+Hauptinstaller automatisch mitaktualisiert; bei einer Erstinstallation bleibt
+die Aktivierung optional. Der technische Installationshelfer kann weiterhin
+direkt ausgefuehrt werden:
 
 ```bash
 sudo ./kienzlefon-webinterface-installer.sh
 ```
 
-Der Webinterface-Installer 1.1.2 aktiviert den Export des fluechtigen
+Der Installationshelfer aktiviert den Export des fluechtigen
 Laufzeitstatus als Boot-Dienst. Dadurch werden nach dem Leeren von `/run` bei
 einem Systemneustart insbesondere der konfigurierte Passwortmodus und die
 WireGuard-Bindung vor dem Webserverstart wiederhergestellt.
 
-Es bearbeitet nur Zeiten und Ansagen. Ansagen koennen direkt im Browser
+Es bearbeitet Zeiten und Ansagen. Die Zeitseite zeigt Oeffnungszeiten,
+Telefonzeiten, `care_service` fuer Apotheke, Pflegeheim oder Pflegedienst sowie
+`professional_urgent` fuer Arztpraxis, Krankenhaus, Rettungsdienst oder Notarzt
+weiterhin untereinander. Die vorhandenen technischen TOML-Felder
+`apothekenzeiten` und `fachstellenzeiten` bleiben unveraendert.
+
+Der zusaetzliche Navigationspunkt „Anrufsbaum“ zeigt den festen Ablauf als
+alternativen Zugang zu den vorhandenen Ansagen. Ansagen koennen dort
+ausdruecklich aktiviert oder deaktiviert und weiterhin abgespielt werden.
+Begruessungen und Notfallhinweis unterstuetzen `immer`, `offen`, `zu` und
+`deaktiviert`. Das Abschalten zeigt keine Warnabfrage und aendert nur die
+Wiedergabe, nicht das anschliessende Routing.
+
+Ansagen koennen direkt im Browser
 abgespielt und ueber eine freigegebene Nebenstelle neu aufgenommen werden.
+Ein leerer erforderlicher Ansagentext wird vor der TOML-Uebernahme abgelehnt;
+Deaktivieren erfolgt ueber den expliziten Ansagenmodus.
 Benannte Sonderansagen behalten ihren TTS-Text, die erzeugte TTS-WAV, eine
 optional eingesprochene WAV und die ausgewaehlte Audioquelle gemeinsam. Mehrere
 Eintraege koennen gleichzeitig geplant werden. Beruecksichtigt werden der

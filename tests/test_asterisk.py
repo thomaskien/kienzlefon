@@ -1,6 +1,9 @@
 # kienzlefon tests
-# Version: 1.8
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Taste 0 im klassischen Hauptmenue und Rekursionsschutz getestet.
+# - 2.3.2: Sofortige AI-Medienbridge und Taste 0 als direkter AI-Shortcut abgesichert.
+# - 2.3: Menue-Admission, Call-Result-Handoff und DTMF-Rueckkehr getestet.
 # - 1.8: Erzeugte Asterisk-Dateien fuer Release 1.8 getestet.
 # - 1.7.1: Rotes Telefon als bedingtes Mitglied der Sonderqueue getestet.
 # - 1.7: Sonderqueue, Penalty-Fix, optionales Rottelefon und Caller-ID-Patch getestet.
@@ -10,12 +13,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from dataclasses import replace
+from pathlib import Path
 
 from kienzlefon.asterisk import (
     install_asterisk_config,
     render_extensions,
+    render_features,
     render_pjsip,
     render_queues,
 )
@@ -78,6 +82,7 @@ def test_installer_patches_only_known_kienzlefax_route(app_config, tmp_path: Pat
     (etc / "pjsip.conf").write_text("[system]\ntype=system\n", encoding="utf-8")
     (etc / "extensions.conf").write_text("[general]\nstatic=yes\n", encoding="utf-8")
     (etc / "queues.conf").write_text("[general]\n", encoding="utf-8")
+    (etc / "features.conf").write_text("[general]\n", encoding="utf-8")
     kfx_queues = "[praxis]\nstrategy=ringall\nmember => PJSIP/201,0\n"
     (etc / "queues-kfx.conf").write_text(kfx_queues, encoding="utf-8")
     (etc / "extensions-kfx-telefonie.conf").write_text(
@@ -96,9 +101,10 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     )
     install_asterisk_config(app_config, etc)
     kfx = (etc / "extensions-kfx-telefonie.conf").read_text(encoding="utf-8")
-    assert "Goto(kienzlefon-in,s,1)" in kfx
+    assert "Goto(kienzlefon-entry,s,1)" in kfx
     assert "; kienzlefon internal routes begin" in kfx
     assert "exten => 299,1,Dial(PJSIP/299,120)" in kfx
+    assert "exten => 8800,1,Goto(kienzlefon-internal-targets,8800,1)" in kfx
     assert "kienzlefon-callerid" in kfx
     assert (etc / "queues-kienzlefon.conf").is_file()
     assert '#include "/etc/asterisk/queues-kienzlefon.conf"' in (
@@ -108,6 +114,90 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     assert '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"' in (
         etc / "extensions.conf"
     ).read_text(encoding="utf-8")
+    assert '#include "/etc/asterisk/features-kienzlefon.conf"' in (
+        etc / "features.conf"
+    ).read_text(encoding="utf-8")
+    assert kfx.count("Gosub(kienzlefon-ai-queue-fallback,s,1)") == 1
+
+
+def test_ai_slots_are_push_admitted_and_busy_on_busy(app_config) -> None:
+    ai = replace(
+        app_config.ai_integration,
+        enabled=True,
+        extension_count=3,
+        sip_passwords=("a" * 24, "b" * 24, "c" * 24),
+    )
+    config = replace(app_config, ai_integration=ai)
+
+    pjsip = render_pjsip(config)
+    extensions = render_extensions(config)
+
+    assert "[8810-auth]" in pjsip
+    assert "username=8810" in pjsip
+    assert "[8812]" in pjsip
+    assert "device_state_busy_at=1" in pjsip
+    assert "direct_media=no" in pjsip
+    assert "exten => 8800,1,Goto(kienzlefon-entry,s,1)" in extensions
+    assert "exten => 8801,1,Goto(kienzlefon-in,s,1)" in extensions
+    assert "exten => 8802,1,Goto(kfx-phone-queue,s,1)" in extensions
+    assert "exten => 8803,1,Goto(kienzlefon-pharmacy-queue,s,1)" in extensions
+    assert "exten => 8804,1,Goto(kienzlefon-specialist,s,1)" in extensions
+    assert "--selection,specific,--slot-id,ai-slot-02" in extensions
+    assert (
+        "Dial(PJSIP/${KZF_AI_EXTENSION},120,"
+        "gb(kienzlefon-ai-headers^s^1))"
+    ) in extensions
+    assert "A(:kienzlefon/ai_assistant_intro)" not in extensions
+    assert "X-Kienzlefon-Lease-ID" in extensions
+    assert "SIP `REFER`" not in extensions
+    assert "--phase,opening" in extensions
+    zero_shortcut = 'GotoIf($["${KZF_IVR_INITIAL_DIGIT}"="0"]?ai-shortcut)'
+    classic_digit = 'GotoIf($["${KZF_IVR_INITIAL_DIGIT}"!="none"]?classic-menu)'
+    assert zero_shortcut in extensions
+    assert "n(ai-shortcut),Set(KZF_IVR_INITIAL_DIGIT=none)" in extensions
+    assert extensions.index(zero_shortcut) < extensions.index(classic_digit)
+    assert "--phase,menu,--initial-digit,${KZF_IVR_INITIAL_DIGIT}" in extensions
+    classic_menu = extensions.split("[kienzlefon-classic-menu]", 1)[1].split(
+        "[kienzlefon-ai-dial]", 1
+    )[0]
+    assert "Set(KZF_IVR_AI_REQUESTED=0)" in classic_menu
+    assert '${KZF_IVR_AI_REQUESTED}"!="1' in classic_menu
+    assert '${KZF_AI_HANDOFF_DONE}"="1' in classic_menu
+    assert "Goto(kienzlefon-entry,s,ai-shortcut)" in classic_menu
+    assert "--selection,call-result" in extensions
+    assert 'GotoIf($["${KZF_AI_HANDOFF_TARGET}"="classic"]?handoff-classic)' in extensions
+    assert "Goto(kienzlefon-internal-targets,8801,1)" in extensions
+    assert "Goto(kienzlefon-internal-targets,8810,1)" not in extensions.split(
+        "[kienzlefon-ai-handoff]", 1
+    )[1].split("[kienzlefon-ai-queue-fallback]", 1)[0]
+    handoff = extensions.split("[kienzlefon-ai-handoff]", 1)[1].split(
+        "[kienzlefon-ai-queue-fallback]", 1
+    )[0]
+    for logical, extension in (
+        ("classic", "8801"),
+        ("practice", "8802"),
+        ("pharmacy", "8803"),
+        ("super", "8804"),
+    ):
+        route = handoff.split(f"exten => {logical},1", 1)[1].split("exten =>", 1)[0]
+        assert f"Goto(kienzlefon-internal-targets,{extension},1)" in route
+    assert "${KZF_AI_HANDOFF_TARGET}" not in handoff
+    fallback = extensions.split("[kienzlefon-ai-queue-fallback]", 1)[1].split(
+        "[kienzlefon-ai-headers]", 1
+    )[0]
+    assert fallback.count("Goto(kienzlefon-internal-targets,8801,1)") == 1
+
+    features = render_features()
+    for digit in "0123456789":
+        assert f"kzf_ai_dtmf_{digit} = {digit},self,Gosub" in features
+    assert "kzf_ai_dtmf_star = *,self,Gosub" in features
+    assert "kzf_ai_dtmf_hash = #,self,Gosub" in features
+    assert "SoftHangup(${BRIDGEPEER})" in extensions
+    assert "Set(DYNAMIC_FEATURES=kzf_ai_dtmf_0#" in extensions
+    assert "Set(__DYNAMIC_FEATURES=" not in extensions
+    direct = extensions.split("exten => 8810,1", 1)[1].split("exten => 8811,1", 1)[0]
+    assert direct.index("--selection,specific") < direct.index("Gosub(kienzlefon-ai-dial")
+    assert direct.index("Gosub(kienzlefon-ai-dial") < direct.index("Busy(1)")
 
 
 def test_direct_numbers_get_registration_and_capacity_routes(app_config, tmp_path: Path) -> None:
@@ -136,10 +226,14 @@ def test_direct_numbers_get_registration_and_capacity_routes(app_config, tmp_pat
         "[kfx-provider-in]\nexten => 1,1,NoOp()\n", encoding="utf-8"
     )
     (etc / "queues.conf").write_text("[general]\n", encoding="utf-8")
+    (etc / "features.conf").write_text("[general]\n", encoding="utf-8")
     (etc / "extensions-kfx-telefonie.conf").write_text(
         """[kfx-phone-in]
 exten => _X.,1,Goto(s,1)
  same => n(accepted),Goto(kfx-phone-queue,s,1)
+[kfx-phone-queue]
+exten => s,1,NoOp(KienzleFax Telefoniewarteschlange)
+ same => n,Queue(praxis,r)
 [kfx-phone-local]
 exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
  same => n(dial),Set(CALLERID(num)=4923311234)
@@ -170,9 +264,13 @@ def test_additional_phones_are_outside_queue_and_patch_is_repeatable(app_config,
     (etc / "pjsip.conf").write_text("[system]\ntype=system\n", encoding="utf-8")
     (etc / "extensions.conf").write_text("[general]\nstatic=yes\n", encoding="utf-8")
     (etc / "queues.conf").write_text("[general]\n", encoding="utf-8")
+    (etc / "features.conf").write_text("[general]\n", encoding="utf-8")
     (etc / "extensions-kfx-telefonie.conf").write_text(
         """[kfx-phone-in]
  same => n(accepted),Goto(kfx-phone-queue,s,1)
+[kfx-phone-queue]
+exten => s,1,NoOp(KienzleFax Telefoniewarteschlange)
+ same => n,Queue(praxis,r)
 [kfx-phone-local]
 exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
  same => n(dial),Set(CALLERID(num)=4923311234)

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 1.8.3
+Version: 2.4.0
 Changelog:
+- 2.4.0: Ansagenmodi, AI-Shortcut im Hauptmenue und zeitabhaengigen Abschluss dokumentiert.
 - 1.8.3: Fortsetzung aller Feldaufnahmen trotz schweigend uebersprungener Felder dokumentiert.
 - 1.8.2: Bereitschaftsdienst vor erster und nach letzter Tagesoeffnung dokumentiert.
 - 1.8: Verhalten bei Abbruch vor der ersten Aufnahme dokumentiert.
@@ -19,6 +20,7 @@ Changelog:
 
 ## Hauptmenue
 
+- Taste 0: Kienzlefon AI lautlos versuchen, sofern aktuell moeglich
 - Taste 1: bestehende Praxisqueue, nur waehrend der Telefonzeiten
 - Taste 2: Rezeptbestellung
 - Taste 3: Ueberweisung
@@ -32,6 +34,10 @@ Nach Taste 5 waehlt Taste 1 die Rueckrufbitte und Taste 2 das sonstige
 Anliegen. Das Hauptmenue wird zweimal angeboten. Taste 6 kehrt zum Hauptmenue
 zurueck und verbraucht keinen dieser beiden Durchlaeufe.
 
+Ist fuer Taste 0 keine AI-Kapazitaet freigemeldet, wird ohne zusaetzliche
+Ansage zum klassischen Hauptmenue zurueckgekehrt. Nach einer vorherigen
+AI-Uebergabe wird kein erneuter AI-Kreisverkehr gestartet.
+
 Vor jedem Menue-Durchlauf fordert eine eigene Ansage zur Tastenauswahl auf.
 Zwischen den einzelnen IVR-Ansagen liegt standardmaessig eine Pause von 700
 Millisekunden. Auch waehrend dieser Pause werden Tastendruecke angenommen.
@@ -40,6 +46,8 @@ Ohne Auswahl wird waehrend der Telefonzeiten zur Queue verbunden. Ausserhalb
 der Telefonzeiten folgt eine einzige zusammenhaengende Rueckrufaufnahme. Dabei
 bleiben die strukturierten Personenfelder leer und das vollstaendige
 Transkript wird in `grund` geschrieben.
+Die Ansagen `no_selection_open` und `no_selection_closed` koennen deaktiviert
+werden; Durchstellung beziehungsweise Aufnahme finden dann lautlos statt.
 
 ## Aufnahmen
 
@@ -106,6 +114,13 @@ Hinweis „An Wochenenden ist die Praxis geschlossen.“ Identische Telefonzeite
 von Montag bis Freitag werden als „werktäglich“ zusammengefasst.
 Sind auch dort Samstag und Sonntag leer, lautet die gemeinsame Ansage:
 „Am Wochenende sind wir telefonisch nicht erreichbar.“
+
+Unter `[ansagen_modus]` koennen Ansagen explizit aktiviert oder deaktiviert
+werden. Fuer Begruessungen und den Notfallhinweis stehen `immer`, `offen`, `zu`
+und `deaktiviert` zur Verfuegung. `offen` und `zu` beziehen sich auf die
+Praxisoeffnung; eine wirksame Sonderansage mit Telefonzeitensperre behaelt die
+bisherige Auswahl der Geschlossen-Begruessung. Das Deaktivieren veraendert nur
+die Wiedergabe und nicht den danach vorgesehenen Anrufweg.
 
 ## Internes Ansagen-IVR
 

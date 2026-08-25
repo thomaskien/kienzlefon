@@ -1,6 +1,11 @@
 # kienzlefon
-# Version: 2.1.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Haupt- und Webinterface-Version auf 2.4.0 vereinheitlicht.
+# - 2.3.2: Releasekennung auf 2.3.2 angehoben.
+# - 2.3.1: Releasekennung auf 2.3.1 angehoben.
+# - 2.3: Releasekennung auf 2.3 angehoben.
+# - 2.2: Releasekennung auf 2.2 angehoben.
 # - 2.1.2: Releasekennung auf 2.1.2 angehoben.
 # - 2.1.1: Releasekennung auf 2.1.1 angehoben.
 # - 2.1: Releasekennung auf 2.1 angehoben.
@@ -27,4 +32,4 @@
 
 """Kienzlefon Kernpaket."""
 
-__version__ = "2.1.2"
+__version__ = "2.4.0"

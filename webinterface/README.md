@@ -1,7 +1,9 @@
-# Kienzlefon-Webinterface 1.1.2
+# Kienzlefon-Webinterface in Kienzlefon 2.4.0
 
-Diese Fassung bleibt ein eigener, schlanker Installationsbaustein. Der Kienzlefon-Hauptinstaller
-bietet seine Installation oder Aktualisierung bei jedem Lauf ausdrücklich an. Sie besteht aus einer
+Das Webinterface gehoert zur Kienzlefon-Hauptversion und besitzt keine eigene
+Produktversion mehr. Der Hauptinstaller aktualisiert eine vorhandene
+Webinterface-Installation automatisch; bei einer Erstinstallation bleibt die
+Aktivierung optional. Technisch besteht es weiterhin aus einer
 einzelnen PHP-Datei und einem privilegierten, positivlistenbasierten Systemdienst. PHP kann die
 geschützte Kienzlefon-TOML weder lesen noch direkt verändern.
 
@@ -50,6 +52,24 @@ TTS-Umschaltmöglichkeiten auf ihrer eigenen Seite. Sperrt eine wirksame Sondera
 Telefonzeiten, wird anschließend unabhängig von der Uhrzeit immer der Hinweis auf den ärztlichen
 Bereitschaftsdienst abgespielt.
 
+Die Zeitseite zeigt vier Bloecke untereinander: Oeffnungszeiten,
+Telefonzeiten, `care_service` fuer Apotheke, Pflegeheim oder Pflegedienst und
+`professional_urgent` fuer Arztpraxis, Krankenhaus, Rettungsdienst oder
+Notarzt. Die technischen Abschnitte bleiben `[apothekenzeiten]` und
+`[fachstellenzeiten]`; beim Prioritaetsweg wird auf das rote Telefon
+hingewiesen.
+
+„Anrufsbaum“ ist ein alternativer Zugang zu den vorhandenen Ansagen. Er zeigt
+den festen Ablauf, die Tastenwege, den lautlosen AI-Versuch ueber Taste `0` und
+den zeitabhaengigen Abschluss ohne Tasteneingabe. Ansagen koennen dort ohne
+Warnabfrage aktiviert oder deaktiviert und unabhaengig vom Aktivstatus
+abgespielt werden. Begruessungen und Notfallhinweis unterstuetzen die Modi
+`immer`, `offen`, `zu` und `deaktiviert`.
+
+Leere erforderliche Ansagentexte werden bereits vor dem atomaren Austausch der
+TOML-Datei abgelehnt. Das ausdrueckliche Deaktivieren erfolgt stattdessen ueber
+`[ansagen_modus]`.
+
 Unter „Ansagen“ sind außerdem das globale TTS-Erzeugungsmodell und bei Qwen3-TTS einer der neun
 freigegebenen Sprecher auswählbar. Ein Wechsel erzeugt alle automatischen TTS-Fassungen neu;
 manuelle Aufnahmen werden weder überschrieben noch gelöscht. Ohne Text-, Modell- oder
@@ -65,12 +85,12 @@ Schrittnummer und den Namen der gerade verarbeiteten Ansage. Auch das Vorbereite
 und der Wiederanlauf des Whisper-Workers werden angezeigt; ein langer Qwen-Aufruf
 bleibt dadurch nicht mehr als unbestimmter Hintergrundvorgang stehen.
 
-Bei einem direkten Aufruf verlangt der separate Installer weiterhin seine eigene Bestätigung.
+Bei einem direkten Aufruf verlangt der technische Installationshelfer weiterhin seine eigene Bestätigung.
 Nach einer bereits bestätigten Auswahl im Hauptinstaller entfällt ausschließlich diese doppelte
 Startfrage; Betriebsart, Netzwerkbindung und Zugriffsschutz werden weiterhin interaktiv festgelegt.
 
 Der von PHP benoetigte Laufzeitstatus liegt absichtlich unter `/run` und wird
-bei einem Neustart geloescht. Seit Installer 1.1.2 wird
+bei einem Neustart geloescht. Der Installationshelfer fuehrt
 `kienzlefon-webinterface-refresh.service` deshalb bei jedem Boot nach dem
 Anlegen der Laufzeitverzeichnisse und vor dem Webserver ausgefuehrt. Der
 passwortlose WireGuard-Modus bleibt dadurch auch nach einem Reboot wirksam.

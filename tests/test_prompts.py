@@ -1,6 +1,9 @@
 # kienzlefon tests
-# Version: 1.8.2
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Deaktivierte Ansagen bleiben fuer Vorschauen generierbar.
+# - 2.3.2: Obsolete Hauptserver-Assistentenansage aus Katalog und Rendering entfernt.
+# - 2.3: Assistentenansage und stabile Erweiterung des Ansagenkatalogs getestet.
 # - 1.8.2: Notrufnummern als Woerter und Geburtstag in Fallbacks getestet.
 # - 1.5: Zweistufige Normalisierung und 16-kHz-Masterqualitaet getestet.
 # - 1.4: PIN-freien Katalog und Bereinigung entfernter Audiodateien getestet.
@@ -49,6 +52,7 @@ def test_rendered_prompts_contain_released_texts(app_config) -> None:
     assert "Geburtstag" in prompts["personal_data_fallback"]
     assert "Geburtsdatum" not in prompts["no_selection_closed"]
     assert "Geburtsdatum" not in prompts["personal_data_fallback"]
+    assert "ai_assistant_intro" not in prompts
 
 
 def test_additional_phone_hours_text_is_part_of_rendered_prompt(app_config) -> None:
@@ -105,6 +109,8 @@ def test_prompt_catalog_keeps_released_numbers(app_config) -> None:
     assert PROMPT_CATALOG[35] == "whisper_failure"
     assert PROMPT_CATALOG[36] == "blocked_destination"
     assert PROMPT_CATALOG[37] == "admin_main"
+    assert PROMPT_CATALOG[-1] == "webadmin_record_discarded"
+    assert "ai_assistant_intro" not in PROMPT_CATALOG
     assert "admin_pin" not in PROMPT_CATALOG
     assert "Override" not in rendered_prompts(app_config)["admin_special_menu"]
 

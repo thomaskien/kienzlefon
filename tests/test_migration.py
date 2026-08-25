@@ -1,6 +1,9 @@
 # kienzlefon tests
-# Version: 1.9
+# Version: 2.4.0
 # Changelog:
+# - 2.4.0: Verlustfreie Migration der Ansagenmodi getestet.
+# - 2.3.2: Obsolete Hauptserver-Assistentenansage aus Alt-Konfigurationen entfernt.
+# - 2.3: Fehlende Assistentenansage konservativ migriert.
 # - 1.9: Demo-Anonymisierung konservativ migriert und boolesch aktualisiert.
 # - 1.8.2: Notruf- und Fallback-Standardtexte konservativ migriert.
 # - 1.8: Fehlenden Demomodus konservativ als deaktiviert migriert.
@@ -39,6 +42,20 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     source = source.replace(
         'blocked_destination = "Dieses Anrufziel ist gesperrt."\n', ""
     )
+    source = source.replace(
+        "[ansagen]\n",
+        '[ansagen]\nai_assistant_intro = "Nicht mehr verwendete Alt-Ansage."\n',
+        1,
+    )
+    source = re.sub(r"\n\[ansagen_modus\].*\Z", "\n", source, flags=re.S)
+    source = source.replace(
+        'greeting_open = "Guten Tag, Sie sind verbunden mit der Praxis {praxisname}. Die Praxis ist momentan geöffnet."',
+        'greeting_open = "Eigene Begrüßung der Praxis."',
+    )
+    source = source.replace(
+        "[apothekenzeiten]\nmontag = []",
+        '[apothekenzeiten]\nmontag = ["07:00-18:00"]',
+    )
     target = tmp_path / "kienzlefon.toml"
     target.write_text(source, encoding="utf-8")
 
@@ -51,6 +68,7 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     assert result["tts"]["max_true_peak_db"] == -2.0
     assert result["ansagen_ivr"]["nebenstelle"] == "777"
     assert result["ansagen"]["blocked_destination"] == "Dieses Anrufziel ist gesperrt."
+    assert "ai_assistant_intro" not in result["ansagen"]
     assert result["ivr"]["rotes_telefon_aktiv"] is True
     assert result["sonderqueue"]["name"] == "kienzlefon-sonder"
     assert result["sonderqueue"]["zusaetzliche_nebenstellen"] == []
@@ -59,6 +77,13 @@ def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> No
     assert result["tts"]["qwen_stimme"] == "ryan"
     assert result["tts"]["qwen_sprache"] == "German"
     assert result["tts"]["qwen_seed"] == 42
+    assert result["ansagen_modus"] == {
+        "greeting_open": "offen",
+        "greeting_closed": "zu",
+        "emergency": "immer",
+    }
+    assert result["ansagen"]["greeting_open"] == "Eigene Begrüßung der Praxis."
+    assert result["apothekenzeiten"]["montag"] == ["07:00-18:00"]
 
 
 def test_migration_removes_pin_and_only_replaces_old_defaults(tmp_path: Path) -> None:
