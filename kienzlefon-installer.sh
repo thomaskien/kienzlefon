@@ -4,6 +4,7 @@
 #
 # Version: 2.4.1
 # Changelog:
+# - 2.4.1: Paketinstallationen warten bis zu 300 Sekunden auf die dpkg-Sperre.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Webinterface in die Hauptversion integriert und Bestandsupdate vereinheitlicht.
 # - 2.3.2: Sofortige AI-Medienbridge fuer das Backend-Greeting freigegeben.
@@ -459,7 +460,7 @@ prepare_source(){
 install_packages(){
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y python3 python3-venv python3-pip ffmpeg curl wget openssl rsync acl libgomp1
+  apt-get -o DPkg::Lock::Timeout=300 install -y python3 python3-venv python3-pip ffmpeg curl wget openssl rsync acl libgomp1
   ffmpeg_supports_filter loudnorm \
     || die "Das installierte FFmpeg unterstuetzt den erforderlichen loudnorm-Filter nicht."
   python3 - <<'PY'
@@ -1622,7 +1623,7 @@ install_kokoro_tts(){
   local engine
   engine="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","kokoro"))' "$CONFIG_FILE")"
   [[ "$engine" == "kokoro" ]] || return 0
-  apt-get install -y git espeak-ng libsndfile1
+  apt-get -o DPkg::Lock::Timeout=300 install -y git espeak-ng libsndfile1
   "${VENV}/bin/python" "${SOURCE_TARGET}/scripts/kokoro/install.py" --config "$CONFIG_FILE"
 }
 

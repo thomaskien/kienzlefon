@@ -36,6 +36,67 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+
+
+@pytest.mark.parametrize("function", ["install_packages", "install_kokoro_tts"])
+@pytest.mark.parametrize("apt_status", [0, 100])
+def test_package_install_waits_for_lock_and_stops_on_failure(
+    tmp_path: Path, function: str, apt_status: int,
+) -> None:
+    source = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = source.index(f"{function}(){{")
+    end = source.index("\n}\n", start) + 3
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    apt = bin_dir / "apt-get"
+    apt.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$APT_LOG"\n'
+        '[ "$1" != update ] || exit 0\n'
+        '[ "$1" = -o ] && [ "$2" = DPkg::Lock::Timeout=300 ] '
+        '&& [ "$3" = install ] && [ "$4" = -y ] || exit 99\n'
+        'exit "$APT_STATUS"\n',
+        encoding="utf-8",
+    )
+    apt.chmod(0o755)
+    (bin_dir / "python").symlink_to(os.sys.executable)
+    config = tmp_path / "config.toml"
+    config.write_text('[tts]\nengine = "kokoro"\n', encoding="utf-8")
+    runtime = tmp_path / "scripts" / "kokoro" / "install.py"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text(
+        'import os\nfrom pathlib import Path\nPath(os.environ["MODEL_STARTED"]).touch()\n',
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ,
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+        "APT_LOG": str(tmp_path / "apt.log"),
+        "APT_STATUS": str(apt_status),
+        "MODEL_STARTED": str(tmp_path / "model-started"),
+        "VENV": str(tmp_path),
+        "SOURCE_TARGET": str(tmp_path),
+        "CONFIG_FILE": str(config),
+    }
+    script = (
+        "set -euo pipefail\n"
+        "ffmpeg_supports_filter(){ return 0; }\n"
+        "python3(){ return 0; }\n"
+        + source[start:end] + f"\n{function}\nprintf 'PACKAGES_READY\\n'\n"
+    )
+    result = subprocess.run(
+        ["bash", "-c", script], env=environment, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == apt_status
+    assert ("PACKAGES_READY" in result.stdout) is (apt_status == 0)
+    assert (tmp_path / "model-started").exists() is (
+        function == "install_kokoro_tts" and apt_status == 0
+    )
+    calls = (tmp_path / "apt.log").read_text().splitlines()
+    installs = [call for call in calls if call != "update"]
+    assert len(installs) == 1
+    assert installs[0].startswith("-o DPkg::Lock::Timeout=300 install -y ")
+
 
 def test_installer_shell_syntax() -> None:
     subprocess.run(["bash", "-n", "kienzlefon-installer.sh"], check=True)

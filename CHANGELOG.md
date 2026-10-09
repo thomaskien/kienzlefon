@@ -37,6 +37,9 @@ Changelog:
 
 ## 2.4.1
 
+- Installerkorrektur: System- und Kokoro-Paketinstallationen warten bis zu
+  300 Sekunden auf eine belegte dpkg-Sperre, statt bei einem parallelen
+  `apt-get` sofort abzubrechen. Ein verbleibender Paketfehler bricht weiterhin ab.
 - Kokoro-Thorsten als Standard fuer lokale, vorberechnete Ansagen; Piper und
   Qwen bleiben im Installer und Webinterface waehlbar.
 - Eigenstaendige CPU-Umgebung mit den fixierten Kokoro-/Misaki-Staenden und
