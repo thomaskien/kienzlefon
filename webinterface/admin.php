@@ -471,7 +471,7 @@ $modeLabels = [
     'deaktiviert' => 'Deaktiviert',
 ];
 $productName = (string)($state['product']['name'] ?? 'kienzlefon.de');
-$productVersion = (string)($state['product']['version'] ?? '2.4.0');
+$productVersion = (string)($state['product']['version'] ?? '2.4.1');
 $productAuthor = (string)($state['product']['author'] ?? 'Dr. Thomas Kienzle');
 $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 ?>
@@ -629,7 +629,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
         <section id="page-overview" class="page active" aria-labelledby="overview-title">
             <h2 id="overview-title">Übersicht</h2>
             <div class="grid two">
-                <div class="card"><div class="status"><span class="status-dot"></span><div><strong>Ansagen bereit</strong><div class="muted">Automatische Erzeugung: <?= ($state['tts']['engine'] ?? 'piper') === 'qwen' ? 'Qwen3-TTS · ' . h($qwenVoiceLabels[$state['tts']['qwen_voice'] ?? ''] ?? ($state['tts']['qwen_voice'] ?? '')) : 'Piper' ?></div></div></div></div>
+                <div class="card"><div class="status"><span class="status-dot"></span><div><strong>Ansagen bereit</strong><div class="muted">Automatische Erzeugung: <?= ($state['tts']['engine'] ?? 'kokoro') === 'qwen' ? 'Qwen3-TTS · ' . h($qwenVoiceLabels[$state['tts']['qwen_voice'] ?? ''] ?? ($state['tts']['qwen_voice'] ?? '')) : (($state['tts']['engine'] ?? 'kokoro') === 'kokoro' ? 'Kokoro · Thorsten' : 'Piper') ?></div></div></div></div>
                 <div class="card"><div class="muted">Erreichbarkeit</div><div class="metric"><?= h(($state['network']['listen'] ?? '') . ':' . ($state['network']['port'] ?? '')) ?></div><span class="badge"><?= !empty($state['auth_required']) ? 'Kennwortschutz' : 'WireGuard, passwortlos' ?></span></div>
                 <div class="card"><div class="muted">Konfigurierbare Ansagetexte</div><div class="metric"><?= count($state['prompts'] ?? []) ?></div></div>
                 <div class="card"><div class="muted">Aufnahmefähige Nebenstellen</div><div class="metric"><?= count($state['extensions'] ?? []) ?></div></div>
@@ -703,8 +703,9 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                 <div class="planning-grid">
                     <div class="field">
                         <label for="tts-engine">Erzeugungsmodell</label>
-                        <select id="tts-engine" data-default="<?= h($state['tts']['defaults']['engine'] ?? 'piper') ?>">
-                            <option value="piper" <?= ($state['tts']['engine'] ?? 'piper') === 'piper' ? 'selected' : '' ?>>Piper</option>
+                        <select id="tts-engine" data-default="<?= h($state['tts']['defaults']['engine'] ?? 'kokoro') ?>">
+                            <option value="kokoro" <?= ($state['tts']['engine'] ?? 'kokoro') === 'kokoro' ? 'selected' : '' ?> <?= empty($state['tts']['kokoro_available']) && ($state['tts']['engine'] ?? '') !== 'kokoro' ? 'disabled' : '' ?>>Kokoro · Thorsten (Standard)<?= empty($state['tts']['kokoro_available']) ? ' – nicht verfügbar' : '' ?></option>
+                            <option value="piper" <?= ($state['tts']['engine'] ?? 'kokoro') === 'piper' ? 'selected' : '' ?>>Piper</option>
                             <option value="qwen" <?= ($state['tts']['engine'] ?? '') === 'qwen' ? 'selected' : '' ?> <?= empty($state['tts']['qwen_available']) && ($state['tts']['engine'] ?? '') !== 'qwen' ? 'disabled' : '' ?>>Qwen3-TTS 0.6B CustomVoice<?= empty($state['tts']['qwen_available']) ? ' – nicht verfügbar' : '' ?></option>
                         </select>
                         <button class="button secondary small reset-select" type="button">Auf Standard</button>
@@ -750,7 +751,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                     <div class="announcement-controls">
                         <div class="source-control"><label for="source-<?= h($source['name']) ?>">Aktive Audioquelle</label><select id="source-<?= h($source['name']) ?>" data-source="<?= h($source['name']) ?>"><option value="tts" <?= ($source['source'] ?? '') === 'tts' ? 'selected' : '' ?>>Automatisch (TTS)</option><option value="manuell" <?= ($source['source'] ?? '') === 'manuell' ? 'selected' : '' ?> <?= empty($source['manual_available']) ? 'disabled' : '' ?>>Manuelle Aufnahme</option></select></div>
                         <button class="button secondary use-tts" data-prompt="<?= h($source['name']) ?>" type="button">Auf TTS umschalten</button>
-                        <?php if (($source['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($source['name']) ?>" type="button">Noch einmal neu generieren</button><?php endif; ?>
+                        <?php if (($source['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'kokoro') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($source['name']) ?>" type="button">Noch einmal neu generieren</button><?php endif; ?>
                         <button class="button record-announcement" data-prompt="<?= h($source['name']) ?>" data-extension-select="record-extension" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Genau diese Ansage aufnehmen</button>
                         <?php if (!empty($source['candidate_available'])): ?><button class="button activate-candidate" data-prompt="<?= h($source['name']) ?>" type="button">Neue Aufnahme aktivieren</button><?php endif; ?>
                     </div>
@@ -782,7 +783,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                     <div class="source-control"><label for="override-source">Aktive Audioquelle</label><select id="override-source"><option value="tts" <?= ($state['override']['source'] ?? '') === 'tts' ? 'selected' : '' ?>>Automatisch (TTS)</option><option value="manuell" <?= ($state['override']['source'] ?? '') === 'manuell' ? 'selected' : '' ?> <?= empty($state['override']['manual_available']) ? 'disabled' : '' ?>>Manuelle Aufnahme</option></select></div>
                     <div class="source-control"><label for="override-record-extension">Aufnahme-Nebenstelle</label><select id="override-record-extension" <?= empty($state['extensions']) ? 'disabled' : '' ?>><?php foreach (($state['extensions'] ?? []) as $extension): ?><option value="<?= h($extension) ?>"><?= h($extension) ?></option><?php endforeach; ?></select></div>
                     <button class="button secondary" id="use-override-tts" type="button">Auf TTS umschalten</button>
-                    <?php if (($state['override']['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="override" type="button">Noch einmal neu generieren</button><?php endif; ?>
+                    <?php if (($state['override']['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'kokoro') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="override" type="button">Noch einmal neu generieren</button><?php endif; ?>
                     <button class="button record-announcement" data-prompt="override" data-extension-select="override-record-extension" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Genau diese Sonderansage aufnehmen</button>
                     <?php if (!empty($state['override']['candidate_available'])): ?><button class="button activate-candidate" data-prompt="override" type="button">Neue Sonderansage aktivieren</button><?php endif; ?>
                 </div>
@@ -824,7 +825,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                         </div>
                         <div class="announcement-controls">
                             <button class="button secondary load-preset" data-preset-id="<?= h($preset['id']) ?>" data-preset-source="tts" type="button">Mit TTS bearbeiten</button>
-                            <?php if (($preset['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'piper') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($preset['prompt_name'] ?? ('override_' . $preset['id'])) ?>" type="button">TTS noch einmal neu generieren</button><?php endif; ?>
+                            <?php if (($preset['source'] ?? 'tts') === 'tts' && ($state['tts']['engine'] ?? 'kokoro') === 'qwen'): ?><button class="button secondary regenerate-tts" data-prompt="<?= h($preset['prompt_name'] ?? ('override_' . $preset['id'])) ?>" type="button">TTS noch einmal neu generieren</button><?php endif; ?>
                             <?php if (!empty($preset['manual_available'])): ?><button class="button secondary load-preset" data-preset-id="<?= h($preset['id']) ?>" data-preset-source="manuell" type="button">Mit WAV bearbeiten</button><?php endif; ?>
                             <button class="button secondary rerecord-preset" data-preset-id="<?= h($preset['id']) ?>" type="button" <?= empty($state['extensions']) ? 'disabled' : '' ?>>Neu aufnehmen</button>
                             <button class="button danger delete-preset" data-preset-id="<?= h($preset['id']) ?>" type="button">Löschen</button>
@@ -842,7 +843,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 const csrf = <?= json_encode($csrf, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const configHash = <?= json_encode($state['config_hash'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const overridePresets = <?= json_encode($state['override_presets'] ?? [], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-const initialTtsEngine = <?= json_encode($state['tts']['engine'] ?? 'piper', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+const initialTtsEngine = <?= json_encode($state['tts']['engine'] ?? 'kokoro', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const initialQwenVoice = <?= json_encode($state['tts']['qwen_voice'] ?? 'ryan', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const terminalCodes = new Set(['ansagen_aktuell','ansagenerzeugung_fehlgeschlagen','aufnahme_gespeichert','aufnahme_verworfen','nebenstelle_nicht_erreichbar','vorlage_gespeichert','vorlage_geloescht','auftrag_abgelehnt']);
 let selectedManualPreset = '';

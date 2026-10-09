@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.0
+Version: 2.4.1
 
+- 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Integriertes Webinterface, Anrufsbaum, Ansagenmodi und Notfall-Handoff freigegeben.
 - 2.3.2: Sofortige AI-Medienbridge korrigiert und obsolete Hauptserver-Ansage entfernt.
 - 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
@@ -45,7 +46,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.4.0**
+Version: **2.4.1**
 
 ## Eigenschaften
 
@@ -65,7 +66,8 @@ Version: **2.4.0**
 - OpenSSL-kompatible `AES-256-CBC`/RSA-Ausgabe als `*.json.enc`
 - ausdruecklich zu bestaetigender Demomodus mit unverschluesselter `*.json`-Ausgabe
 - optionale Anonymisierung von `id` und `telefon` in Demo-JSONs
-- lokale Piper- oder Qwen3-TTS-Ansagen in WAV, SLN16, G.722, A-law und mu-law
+- lokale Kokoro-Thorsten-Ansagen (Standard), alternativ Piper oder Qwen3-TTS,
+  in WAV, SLN16, G.722, A-law und mu-law
 - gezielte neue Qwen-Variante fuer einzelne Ansagen bei unerwuenschten Sprach-Artefakten
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
@@ -138,14 +140,21 @@ entschieden werden, ob die Zeitprofile neu konfiguriert werden sollen. Neu
 eingegebene Zeiten werden nach dem Schreiben aus der TOML-Datei zurueckgelesen
 und mit den Eingaben verglichen.
 Fehlende Eintraege werden dabei aus der aktuellen Vorlage ergaenzt, vorhandene
-TOML-Werte nicht ueberschrieben. Das gilt auch fuer `[ansagen_modus]` in 2.4.0.
+TOML-Werte nicht ueberschrieben. Das gilt auch fuer `[ansagen_modus]` seit 2.4.0.
+Die nachfolgende TTS-Auswahl bietet bei bisherigem
+Piper den Wechsel zu Kokoro-Thorsten als Standard an; Auswahl 2 behaelt Piper.
+Bei Wechsel von Piper zu Kokoro werden die vorhandenen automatischen Ansagen
+auch ohne Vollerzeugung neu erzeugt und ersetzt; eigene Aufnahmen bleiben erhalten.
+Eine bestehende Qwen-Auswahl bleibt vorausgewaehlt, sofern Qwen installiert ist.
 Passwoerter unveraenderter Zusatztelefone bleiben erhalten.
 Der Installer erklaert die priorisierte Sonderqueue und fragt, welche bereits
 konfigurierten Zusatznebenstellen dort neben den normalen Queue-Telefonen
 gleichzeitig klingeln sollen.
 
-Die Installation laedt jedes konfigurierte Whisper-Modell genau einmal und bei
-Piper die konfigurierte Stimme. Qwen3-TTS wird nur nach ausdruecklicher Auswahl
+Die Installation laedt jedes konfigurierte Whisper-Modell genau einmal, die
+Piper-Stimme als weiter waehlbare Alternative und bei Kokoro-Auswahl das
+pruefsummengesicherte Thorsten-Modell in einer separaten CPU-Umgebung.
+Qwen3-TTS wird nur nach ausdruecklicher Auswahl
 mit dem geprueften Offline-Installer v1.5 eingerichtet. Bei weniger als 16 GB warnt der Installer vor der
 gleichzeitigen Verwendung beider Whisper-Modelle, erlaubt sie aber nach
 ausdruecklicher Bestaetigung.
@@ -228,9 +237,33 @@ der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
 [2/4] Automatische Ansage wird erzeugt: phone_hours
 ```
 
-Kienzlefon 2.1.2 unterstuetzt unter `[tts]` sowohl Piper als auch das separat
-installierte, nicht residente Qwen3-TTS. Qwen wird vom Hauptinstaller auf Wunsch
-mit dem fest freigegebenen Offline-Installer v1.5 eingerichtet:
+Ab 2.4.1 ist **Kokoro-Thorsten** die Standardstimme fuer lokale Ansagen.
+Der Hauptinstaller richtet bei Auswahl 1 die aus Kienzlefon-AI uebernommenen,
+fixierten Kokoro-/Misaki-Versionen und das deutsche Thorsten-Modell ein.
+Voraussetzung ist Linux x86_64 mit Python 3.11 oder 3.12 samt venv-Paket.
+Die Synthese laeuft auf CPU, ohne dauerhaft geladenen TTS-Dienst und nach dem
+Modelldownload offline. Die bestehende Normalisierung und die Telefonieformate
+bleiben erhalten; bei einem Fehler wird nicht automatisch auf Piper gewechselt.
+
+```toml
+[tts]
+engine = "kokoro"
+kokoro_generator = "/usr/local/bin/kienzlefon-kokoro-tts-generate"
+kokoro_modellverzeichnis = "/var/lib/kienzlefon/kokoro-thorsten"
+kokoro_speed = 1.0
+```
+
+`kokoro_speed` muss endlich und groesser als 0 sein; groessere Werte sprechen
+schneller. Text, Engine, Geschwindigkeit und Generatorstand fliessen in die
+Aenderungserkennung ein. Unveraenderte Ansagen werden nicht erneut synthetisiert.
+Piper bleibt mit `engine = "piper"` waehlbar. Das Webinterface bietet alle drei
+Engines an und prueft vor dem Wechsel, ob Kokoro bzw. Qwen eingerichtet ist.
+Wenn Kokoro bei einer Installation nicht gewaehlt wurde, den Hauptinstaller
+mit Auswahl 1 erneut ausfuehren, bevor im Webinterface darauf gewechselt wird.
+
+Auch das separat installierte, nicht residente Qwen3-TTS bleibt verfuegbar.
+Qwen wird vom Hauptinstaller auf Wunsch mit dem fest freigegebenen
+Offline-Installer v1.5 eingerichtet:
 
 ```toml
 engine = "qwen"
@@ -274,8 +307,8 @@ internationale Ziele sind standardmaessig gesperrt.
 
 Telefonisch neu aufgenommene Ansagen starten nach einem Signalton und werden
 als `wav16` mit 16 kHz gespeichert. Vor der Vorschau erfolgt eine zweistufige
-Lautheitsnormalisierung. Dieselbe Masterung gilt auch fuer Piper-Ansagen. Die
-Standardwerte unter `[tts]` sind:
+Lautheitsnormalisierung. Dieselbe Masterung gilt auch fuer Kokoro-, Piper- und
+Qwen-Ansagen. Die Standardwerte unter `[tts]` sind:
 
 ```toml
 ziel_lautheit_lufs = -19.0

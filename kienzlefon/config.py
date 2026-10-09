@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Explizite Abspielmodi fuer Ansagen und sichere Leertextpruefung ergaenzt.
 # - 2.3.2: Obsolete Hauptserver-Assistentenansage aus den Pflichtbausteinen entfernt.
 # - 2.3: Ansage fuer den digitalen Telefonassistenten als Pflichtbaustein ergaenzt.
@@ -34,7 +35,7 @@ from zoneinfo import ZoneInfo
 from .models import CallType, FieldName
 
 SUPPORTED_WHISPER_MODELS = frozenset({"large-v3-turbo", "large-v3"})
-SUPPORTED_TTS_ENGINES = frozenset({"piper", "qwen"})
+SUPPORTED_TTS_ENGINES = frozenset({"kokoro", "piper", "qwen"})
 QWEN_SPEAKERS = (
     "ryan",
     "vivian",
@@ -221,6 +222,9 @@ class TelepraxisConfig:
 @dataclass(frozen=True)
 class TTSConfig:
     engine: str
+    kokoro_generator: Path
+    kokoro_model_directory: Path
+    kokoro_speed: float
     voice: str
     qwen_voice: str
     qwen_language: str
@@ -893,7 +897,14 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             public_key=_path(base, public_key_value) if public_key_value else None,
         ),
         tts=TTSConfig(
-            engine=str(tts.get("engine", "piper")).strip().lower(),
+            engine=str(tts.get("engine", "kokoro")).strip().lower(),
+            kokoro_generator=Path(tts.get(
+                "kokoro_generator", "/usr/local/bin/kienzlefon-kokoro-tts-generate"
+            )),
+            kokoro_model_directory=Path(tts.get(
+                "kokoro_modellverzeichnis", "/var/lib/kienzlefon/kokoro-thorsten"
+            )),
+            kokoro_speed=float(tts.get("kokoro_speed", 1.0)),
             voice=str(_required(tts, "stimme", "tts")),
             qwen_voice=str(tts.get("qwen_stimme", "ryan")).strip().lower(),
             qwen_language=str(tts.get("qwen_sprache", "German")).strip(),
@@ -992,7 +1003,13 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if config.recording.format != "wav":
         raise ConfigError("[aufnahme].format ist fuer Version 1.7 verbindlich auf 'wav' festgelegt")
     if config.tts.engine not in SUPPORTED_TTS_ENGINES:
-        raise ConfigError("[tts].engine muss piper oder qwen sein")
+        raise ConfigError("[tts].engine muss kokoro, piper oder qwen sein")
+    if not config.tts.kokoro_generator.is_absolute():
+        raise ConfigError("[tts].kokoro_generator muss ein absoluter Pfad sein")
+    if not config.tts.kokoro_model_directory.is_absolute():
+        raise ConfigError("[tts].kokoro_modellverzeichnis muss ein absoluter Pfad sein")
+    if not math.isfinite(config.tts.kokoro_speed) or config.tts.kokoro_speed <= 0:
+        raise ConfigError("[tts].kokoro_speed muss eine endliche Zahl groesser als 0 sein")
     if not config.tts.voice.strip():
         raise ConfigError("[tts].stimme darf nicht leer sein")
     if config.tts.qwen_voice not in QWEN_SPEAKERS:

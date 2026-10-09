@@ -148,7 +148,7 @@ class AnnouncementAdmin:
         except Exception:
             _atomic_text(self.config.source, previous_config)
             raise
-        self._audit("piper_aktiviert", ansage=name)
+        self._audit("tts_aktiviert", ansage=name, engine=self.config.tts.engine)
         self._play("admin_generated")
 
     def _special_announcement_menu(self) -> None:

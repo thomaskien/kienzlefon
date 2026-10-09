@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface in Kienzlefon 2.4.0
+# Kienzlefon-Webinterface in Kienzlefon 2.4.1
 
 Das Webinterface gehoert zur Kienzlefon-Hauptversion und besitzt keine eigene
 Produktversion mehr. Der Hauptinstaller aktualisiert eine vorhandene
@@ -94,3 +94,8 @@ bei einem Neustart geloescht. Der Installationshelfer fuehrt
 `kienzlefon-webinterface-refresh.service` deshalb bei jedem Boot nach dem
 Anlegen der Laufzeitverzeichnisse und vor dem Webserver ausgefuehrt. Der
 passwortlose WireGuard-Modus bleibt dadurch auch nach einem Reboot wirksam.
+
+Unter **Ansagen → Automatische Spracherzeugung** ist Kokoro · Thorsten der
+Standard. Piper und Qwen bleiben auswählbar; Kokoro und Qwen setzen ihre lokale
+Installation voraus. Die Auswahl erzeugt betroffene TTS-Ansagen neu und erhält
+manuelle Aufnahmen. Kokoro wird mit dem Hauptinstaller eingerichtet.

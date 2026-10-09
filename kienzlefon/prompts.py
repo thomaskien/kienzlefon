@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Ansagen bleiben auch deaktiviert fuer Vorschau und spaetere Aktivierung erzeugbar.
 # - 2.3.2: Obsolete Hauptserver-Assistentenansage aus dem Katalog entfernt.
 # - 2.3: Assistentenansage stabil an den Ansagenkatalog angehaengt.
@@ -37,6 +38,7 @@ from typing import Any, Callable
 
 from .config import AppConfig, TimeWindow, WEEKDAYS, WeeklySchedule
 from .health import worker_is_healthy
+from .kokoro import MODEL_FILES, MODEL_REVISION, RUNTIME_VERSION
 from .spool import write_json_atomic
 
 LOGGER = logging.getLogger(__name__)
@@ -173,6 +175,7 @@ class PromptGenerator:
         self.manifest_path = config.paths.prompt_masters / "manifest.json"
         self._scheduled_tts_overrides: dict[str, Path] = {}
         self._cached_qwen_identity: str | None = None
+        self._cached_kokoro_identity: tuple[str, ...] | None = None
         self._maintenance_depth = 0
 
     def generate(
@@ -836,7 +839,15 @@ class PromptGenerator:
         human_digest = ""
         if human_source is not None:
             human_digest = hashlib.sha256(human_source.read_bytes()).hexdigest()
-        if self.config.tts.engine == "piper":
+        if self.config.tts.engine == "kokoro":
+            parts = (
+                text,
+                *self._kokoro_identity(),
+                str(self.config.tts.target_loudness_lufs),
+                str(self.config.tts.max_true_peak_db),
+                human_digest,
+            )
+        elif self.config.tts.engine == "piper":
             # Das Piper-Schema bleibt absichtlich kompatibel zum 1.9-Manifest.
             # Eine unveraenderte Drueberinstallation erzeugt daher nichts neu.
             parts = (
@@ -886,7 +897,9 @@ class PromptGenerator:
         return (self.config.tts.qwen_seed + variant) % (2**31)
 
     def _tts_identity(self) -> str:
-        if self.config.tts.engine == "piper":
+        if self.config.tts.engine == "kokoro":
+            parts = self._kokoro_identity()
+        elif self.config.tts.engine == "piper":
             parts = (
                 "piper",
                 self.config.tts.voice,
@@ -912,6 +925,20 @@ class PromptGenerator:
                 )
             ).encode("utf-8")
         ).hexdigest()
+
+    def _kokoro_identity(self) -> tuple[str, ...]:
+        if self._cached_kokoro_identity is None:
+            generator = self.config.tts.kokoro_generator
+            identity = (
+                hashlib.sha256(generator.read_bytes()).hexdigest()
+                if generator.is_file() else f"missing:{generator}"
+            )
+            self._cached_kokoro_identity = (
+                "kokoro", "thorsten", MODEL_REVISION, RUNTIME_VERSION,
+                str(generator), identity, str(self.config.tts.kokoro_model_directory),
+                str(self.config.tts.kokoro_speed),
+            )
+        return self._cached_kokoro_identity
 
     def _qwen_generator_identity(self) -> str:
         if self._cached_qwen_identity is not None:
@@ -1027,9 +1054,25 @@ class PromptGenerator:
     def _tts_command(
         self, text: str, output: Path, *, qwen_seed: int | None = None
     ) -> list[str]:
+        if self.config.tts.engine == "kokoro":
+            return self._kokoro_command(text, output)
         if self.config.tts.engine == "qwen":
             return self._qwen_command(text, output, seed=qwen_seed)
-        return self._piper_command(text, output)
+        if self.config.tts.engine == "piper":
+            return self._piper_command(text, output)
+        raise RuntimeError(f"Unbekannte TTS-Engine: {self.config.tts.engine}")
+
+    def _kokoro_command(self, text: str, output: Path) -> list[str]:
+        generator = self.config.tts.kokoro_generator
+        if not generator.is_file() or not os.access(generator, os.X_OK):
+            raise RuntimeError(f"Kokoro-Thorsten ist nicht installiert: {generator}")
+        directory = self.config.tts.kokoro_model_directory
+        if not all((directory / name).is_file() for name in MODEL_FILES):
+            raise RuntimeError(f"Lokales Kokoro-Thorsten-Modell fehlt: {directory}")
+        return [
+            str(generator), "--text", text, "--output", str(output),
+            "--model-dir", str(directory), "--speed", str(self.config.tts.kokoro_speed),
+        ]
 
     def _qwen_command(
         self, text: str, output: Path, *, seed: int | None = None

@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Webinterface in die Hauptversion integriert und Bestandsupdate vereinheitlicht.
 # - 2.3.2: Sofortige AI-Medienbridge fuer das Backend-Greeting freigegeben.
 # - 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
@@ -36,7 +37,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.4.0"
+VERSION="2.4.1"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -136,12 +137,12 @@ qwen_generator_knows_worker(){
 }
 
 collect_tts_configuration(){
-  local current_engine="piper" current_piper="de_DE-thorsten-high" current_qwen="ryan"
+  local current_engine="kokoro" current_piper="de_DE-thorsten-high" current_qwen="ryan"
   local current_length="1.3" current_silence="0.8" install_prompt=""
   local qwen_planned="n" engine_choice="" voice_choice="" default_engine="1"
 
   if [[ -r "$CONFIG_FILE" ]]; then
-    current_engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","piper"))' "$CONFIG_FILE")"
+    current_engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","kokoro"))' "$CONFIG_FILE")"
     current_piper="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("stimme","de_DE-thorsten-high"))' "$CONFIG_FILE")"
     current_qwen="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("qwen_stimme","ryan"))' "$CONFIG_FILE")"
     current_length="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("length_scale",1.3))' "$CONFIG_FILE")"
@@ -159,24 +160,29 @@ collect_tts_configuration(){
     qwen_planned="y"
   fi
 
-  [[ "$current_engine" == "qwen" ]] && default_engine="2"
+  [[ "$current_engine" == "qwen" ]] && default_engine="3"
+  if [[ "$current_engine" == "piper" ]]; then
+    printf "Bisherige Engine: Piper. Standard ab 2.4.1 ist Kokoro-Thorsten; Piper bleibt ueber Auswahl 2 erhalten.\n"
+  fi
   printf '\nErzeugungsmodell fuer automatische Ansagen:\n'
-  printf '  1) Piper (schnell, CPU)\n'
+  printf '  1) Kokoro-Thorsten (Standard, Deutsch, CPU)\n'
+  printf '  2) Piper (CPU)\n'
   if [[ "$qwen_planned" == "y" ]]; then
-    printf '  2) Qwen3-TTS 0.6B CustomVoice (hochwertig, Einmalgenerierung)\n'
+    printf '  3) Qwen3-TTS 0.6B CustomVoice (hochwertig, Einmalgenerierung)\n'
   else
-    printf '  2) Qwen3-TTS 0.6B CustomVoice (nicht installiert)\n'
+    printf '  3) Qwen3-TTS 0.6B CustomVoice (nicht installiert)\n'
     default_engine="1"
   fi
   while true; do
-    ask_value engine_choice "Auswahl des Erzeugungsmodells (1 oder 2)" "$default_engine"
+    ask_value engine_choice "Auswahl des Erzeugungsmodells (1 bis 3)" "$default_engine"
     case "$engine_choice" in
-      1) KZF_TTS_ENGINE="piper"; break ;;
-      2)
+      1) KZF_TTS_ENGINE="kokoro"; break ;;
+      2) KZF_TTS_ENGINE="piper"; break ;;
+      3)
         [[ "$qwen_planned" == "y" ]] \
           || { printf 'Qwen3-TTS muss zuerst installiert werden.\n'; continue; }
         KZF_TTS_ENGINE="qwen"; break ;;
-      *) printf 'Bitte 1 oder 2 eingeben.\n' ;;
+      *) printf 'Bitte 1, 2 oder 3 eingeben.\n' ;;
     esac
   done
 
@@ -194,7 +200,7 @@ collect_tts_configuration(){
       KZF_QWEN_VOICE="$(qwen_voice_from_choice "$voice_choice")" && break
       printf 'Bitte eine Zahl von 1 bis 9 eingeben.\n'
     done
-  else
+  elif [[ "$KZF_TTS_ENGINE" == "piper" ]]; then
     ask_value KZF_TTS_VOICE "Piper-Stimme" "$current_piper"
     ask_value KZF_TTS_LENGTH_SCALE "Piper length_scale (groesser=langsamer)" "$current_length"
     [[ "$KZF_TTS_LENGTH_SCALE" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] \
@@ -1612,11 +1618,19 @@ EOF
     || die "Admission-Listener konnte auf ${bind_ip}:${bind_port} nicht gestartet werden."
 }
 
+install_kokoro_tts(){
+  local engine
+  engine="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","kokoro"))' "$CONFIG_FILE")"
+  [[ "$engine" == "kokoro" ]] || return 0
+  apt-get install -y git espeak-ng libsndfile1
+  "${VENV}/bin/python" "${SOURCE_TARGET}/scripts/kokoro/install.py" --config "$CONFIG_FILE"
+}
+
 install_models_and_prompts(){
   local voice voices engine prompt_arguments
   voice="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"]["stimme"])' "$CONFIG_FILE")"
   voices="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"]["stimmenverzeichnis"])' "$CONFIG_FILE")"
-  engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","piper"))' "$CONFIG_FILE")"
+  engine="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","kokoro"))' "$CONFIG_FILE")"
 #  runuser -u asterisk -- "${VENV}/bin/python" -m piper.download_voices \
 #    --data-dir "$voices" "$voice"
 #  runuser -u asterisk -- "${VENV}/bin/kienzlefon-modell-laden" --config "$CONFIG_FILE"
@@ -1746,6 +1760,8 @@ main(){
   install_admission_listener_unit
   sep "Optionale Qwen3-TTS-Installation"
   install_qwen_tts
+  sep "Kokoro-Thorsten vorbereiten"
+  install_kokoro_tts
   sep "Modelle und Ansagen"
   install_models_and_prompts
   sep "Asterisk integrieren"
@@ -1754,7 +1770,7 @@ main(){
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.4.0 ist installiert"
+  sep "Kienzlefon 2.4.1 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

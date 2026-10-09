@@ -125,7 +125,7 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
         "opening_hours_prefix",
         "opening_hours_closed",
     ]
-    assert state["tts"]["engine"] == "piper"
+    assert state["tts"]["engine"] == "kokoro"
     assert state["tts"]["qwen_voice"] == "ryan"
     assert state["tts"]["qwen_available"] is False
     assert set(state["schedules"]) == {
@@ -136,7 +136,7 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     }
     assert state["product"] == {
         "name": "kienzlefon.de",
-        "version": "2.4.0",
+        "version": "2.4.1",
         "author": "Dr. Thomas Kienzle",
         "url": "https://kienzlefon.de",
     }
@@ -233,7 +233,7 @@ def test_web_worker_requests_new_qwen_variant_for_only_selected_prompt(
 ) -> None:
     text = app_config.source.read_text(encoding="utf-8")
     app_config.source.write_text(
-        text.replace('engine = "piper"', 'engine = "qwen"', 1),
+        text.replace('engine = "kokoro"', 'engine = "qwen"', 1),
         encoding="utf-8",
     )
     worker = _worker(app_config, tmp_path)
@@ -752,7 +752,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="2.4.0"' in installer
+    assert 'VERSION="2.4.1"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -820,8 +820,9 @@ def test_web_installer_restores_volatile_state_on_every_boot() -> None:
     )
 
 
+@pytest.mark.parametrize("tts_engine", ["kokoro", "piper", "qwen"])
 def test_php_renders_passwordless_dashboard_only_on_configured_address(
-    tmp_path: Path,
+    tmp_path: Path, tts_engine: str,
 ) -> None:
     php = shutil.which("php")
     if not php:
@@ -834,7 +835,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
         "practice": "Praxis Test",
         "product": {
             "name": "kienzlefon.de",
-            "version": "2.4.0",
+            "version": "2.4.1",
             "author": "Dr. Thomas Kienzle",
             "url": "https://kienzlefon.de",
         },
@@ -876,11 +877,12 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
             }
         ],
         "tts": {
-            "engine": "qwen",
+            "engine": tts_engine,
+            "kokoro_available": True,
             "qwen_voice": "serena",
             "qwen_available": True,
             "qwen_voices": ["ryan", "serena"],
-            "defaults": {"engine": "piper", "qwen_voice": "ryan"},
+            "defaults": {"engine": "kokoro", "qwen_voice": "ryan"},
         },
         "schedules": {},
         "schedule_defaults": {},
@@ -980,7 +982,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert "Anrufsbaum" in result.stdout
     assert "Taste 0" in result.stdout
     assert "Keine Taste" in result.stdout
-    assert "Kienzlefon 2.4.0" in result.stdout
+    assert "Kienzlefon 2.4.1" in result.stdout
     assert "kienzlefon.de" in result.stdout
     assert "Dr. Thomas Kienzle" in result.stdout
     assert "Genau diese Ansage aufnehmen" in result.stdout
@@ -1018,7 +1020,10 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     )
     assert audio.stdout == b"browser-audio"
     assert "Auf TTS umschalten" in result.stdout
-    assert "Noch einmal neu generieren" in result.stdout
+    assert ("Noch einmal neu generieren" in result.stdout) is (tts_engine == "qwen")
+    assert re.search(rf'<option value="{tts_engine}" selected', result.stdout)
+    assert 'data-default="kokoro"' in result.stdout
+    assert "Kokoro · Thorsten (Standard)" in result.stdout
     node = shutil.which("node")
     if node:
         match = re.search(r'<script nonce="[^"]+">\n(.*?)\n</script>', result.stdout, re.S)

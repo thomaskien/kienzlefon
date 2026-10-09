@@ -1,0 +1,23 @@
+{
+  "repo": "Thorsten-Voice/Kokoro",
+  "revision": "734e593d320a3d876bede7020f773dfd481a0cc7",
+  "epoch": 5,
+  "files": {
+    "config.json": {
+      "bytes": 2351,
+      "sha256": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f"
+    },
+    "model.pth": {
+      "bytes": 327231582,
+      "sha256": "36dde15c4a800cfd1ab540ccb4476dbab604fe03ff7c937d976ebbf3b49e59ce"
+    },
+    "voices/thorsten.pt": {
+      "bytes": 523450,
+      "sha256": "9d98b775ebce1cfc369e8f9a3ee8ee260cd612dffb477cba85749112362306d7"
+    },
+    "README.md": {
+      "bytes": 8032,
+      "sha256": "a2ffa2aca2c321d4bb49ef552e23e8e9f3cff8c03f918f77fcfc6fc4bd2a275b"
+    }
+  }
+}

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.0
+Version: 2.4.1
 Changelog:
+- 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Integriertes Webinterface und gemeinsame TTS-Erzeugungslogik dokumentiert.
 - 1.9.3: Worker-Abschluss ohne Telepraxis-Datei fuer vollstaendig leere Anrufe dokumentiert.
 - 1.9.2: Erfolgreichen Nicht-Demo-Zweig der Updatekonfiguration dokumentiert.
@@ -57,6 +58,15 @@ Asterisk-Formate. CLI und integriertes Webinterface verwenden dieselbe
 Erzeugungslogik. Eine gleichnamige menschliche WAV-Datei im konfigurierten
 Upload-Verzeichnis hat Vorrang vor der automatischen TTS-Ansage.
 
+Standard ist Kokoro-Thorsten auf CPU. Der Installer richtet eine separate,
+nach Inhalt versionierte Python-Umgebung ein und aktiviert den Generator erst
+nach einer erfolgreichen lokalen Testansage. Modellrevision und SHA-256-Werte
+stehen in `scripts/kokoro/model_manifest.json`, die Abhaengigkeiten in der
+benachbarten CPU-Lockdatei. Der Download wird nur beim Einrichten benoetigt;
+der Generator arbeitet offline. Er liefert 24-kHz-Mono-PCM, anschliessend
+entstehen wie bisher normalisierte 16-kHz-Master und Telefonieformate.
+Kokoro-Fehler brechen den Generierungslauf ab; Piper ist eine explizite Auswahl.
+
 `length_scale` und `sentence_silence` werden an Piper uebergeben. Marker wie
 `{pause:800}` werden vor der Synthese strukturiert zerlegt und als exakte
 PCM-Stille zwischen gleichformatigen WAV-Segmenten eingefuegt.
@@ -76,7 +86,7 @@ als `wav16` erfasst. Dadurch bleibt ein ausgehandelter G.722-Sprachkanal bis
 zur 16-kHz-PCM-Datei breitbandig. Vor Vorschau und Aktivierung misst FFmpeg die
 integrierte Lautheit und normalisiert in einem zweiten Durchlauf standardmaessig
 auf `-19 LUFS` bei hoechstens `-2 dB` True Peak. Dieselbe Masterung wird auf
-Piper-Quellen angewandt. Erst danach entstehen G.722, A-law und mu-law.
+Kokoro-, Piper- und Qwen-Quellen angewandt. Erst danach entstehen G.722, A-law und mu-law.
 
 Alte manuelle `.wav`-Dateien bleiben als Eingabe kompatibel. `wav16` hat bei
 gleichnamigen Quellen Vorrang. Aktivierung und Rueckschaltung sichern beide

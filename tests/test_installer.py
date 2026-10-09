@@ -1,5 +1,5 @@
 # kienzlefon tests
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
 # - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
 # - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
@@ -214,7 +214,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.4.0" in result.stdout
+    assert "Version: 2.4.1" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 

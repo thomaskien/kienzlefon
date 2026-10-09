@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Abspielmodi fuer Begruessungen, Notfallhinweis und weitere Ansagen ergaenzt.
 # - 2.3.2: Nicht mehr verwendete Hauptserver-Assistentenansage entfernt.
 # - 2.3: Ansage fuer die Uebergabe an den digitalen Telefonassistenten ergaenzt.
@@ -87,7 +88,11 @@ anrufernummern_anonymisieren = false
 public_key = "/etc/kienzlefon/telepraxis-public.pem"
 
 [tts]
-engine = "piper"
+engine = "kokoro"
+# Lokales Kokoro-Thorsten (Deutsch, CPU); Piper/Qwen bleiben alternativ waehlbar.
+kokoro_generator = "/usr/local/bin/kienzlefon-kokoro-tts-generate"
+kokoro_modellverzeichnis = "/var/lib/kienzlefon/kokoro-thorsten"
+kokoro_speed = 1.0
 stimme = "de_DE-thorsten-high"
 qwen_stimme = "ryan"
 qwen_sprache = "German"

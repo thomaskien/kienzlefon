@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.0
+Version: 2.4.1
 Changelog:
+- 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Explizite Abspielmodi und sichere Behandlung leerer Texte dokumentiert.
 - 1.5: Signaltonhinweis des telefonischen Aufnahmebausteins aktualisiert.
 - 1.4: PIN-Bausteine entfernt und Administrationsnummern klar neu belegt.
@@ -9,6 +10,12 @@ Changelog:
 -->
 
 # Ansagen
+
+Ab 2.4.1 erzeugt standardmaessig Kokoro-Thorsten die deutschen Ansagen lokal
+auf CPU. Piper und Qwen bleiben im Installer und Webinterface waehlbar.
+`[tts].kokoro_speed` steuert die Kokoro-Sprechgeschwindigkeit (Standard 1.0).
+Manuelle Aufnahmen und Pausenmarker bleiben erhalten. Installation und
+Konfigurationsbeispiele stehen in der [README](../README.md).
 
 Die Nummern sind verbindlich und werden in spaeteren Versionen nicht
 verschoben. Neue Bausteine werden ausschliesslich am Ende angehaengt. Die

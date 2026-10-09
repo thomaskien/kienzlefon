@@ -148,7 +148,7 @@ def test_removed_prompt_outputs_are_cleaned(app_config, monkeypatch) -> None:
 
 
 def test_piper_receives_configured_length_scale(app_config, tmp_path: Path) -> None:
-    generator = PromptGenerator(app_config)
+    generator = PromptGenerator(replace(app_config, tts=replace(app_config.tts, engine="piper")))
     commands: list[list[str]] = []
 
     def capture_first_command(command: list[str], _message: str) -> None:

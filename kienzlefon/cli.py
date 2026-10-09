@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.0
+# Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Migrationsausgabe auf die gemeinsame Hauptversion aktualisiert.
 # - 2.3: Getrennte AGI-Phasen fuer Eingangsansagen und Hauptmenue ergaenzt.
 # - 2.2: Versionsausgaben auf den AI-Admission-Release 2.2 aktualisiert.
@@ -396,7 +397,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.3 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.4.1 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -404,7 +405,7 @@ def migrate_main() -> None:
     parser.add_argument("--name-model")
     parser.add_argument("--medication-model")
     parser.add_argument("--demo-anonymize", choices=("true", "false"))
-    parser.add_argument("--tts-engine", choices=("piper", "qwen"))
+    parser.add_argument("--tts-engine", choices=("kokoro", "piper", "qwen"))
     parser.add_argument("--piper-voice")
     parser.add_argument("--qwen-voice")
     arguments = parser.parse_args()
@@ -429,4 +430,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.4.0 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.4.1 ergaenzt: {target}")

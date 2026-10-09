@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.0
+Version: 2.4.1
 Changelog:
+- 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
 - 2.3.2: AI-Medienbridge fuer ein hoerbares Backend-Greeting sofort gestartet.
 - 2.3.1: Eingangs- und Menuephase ohne DTMF-Eingabe korrigiert.
@@ -33,6 +34,21 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.4.1
+
+- Kokoro-Thorsten als Standard fuer lokale, vorberechnete Ansagen; Piper und
+  Qwen bleiben im Installer und Webinterface waehlbar.
+- Eigenstaendige CPU-Umgebung mit den fixierten Kokoro-/Misaki-Staenden und
+  dem Thorsten-Modell aus Kienzlefon-AI 2.6. Drei Modelldateien werden per
+  SHA-256 geprueft; der Generator wird erst nach erfolgreicher Testansage aktiviert.
+- Neuinstallation und Piper-Update bieten Kokoro als Vorauswahl an.
+  Reine TOML-Migration ergaenzt fehlende Felder und behaelt explizite Engines.
+- Engine, Modellrevision, Geschwindigkeit und Generatorstand werden im
+  Ansagencache beruecksichtigt; manuelle Aufnahmen bleiben erhalten.
+- Lange Texte werden vor der Synthese geteilt, ohne sie am Phonemlimit
+  still abzuschneiden. Synthese nutzt ausschliesslich lokale Dateien.
+- Hauptprogramm und Webinterface tragen gemeinsam Version 2.4.1.
 
 ## 2.4.0
 

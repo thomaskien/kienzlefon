@@ -38,6 +38,8 @@ def app_config(tmp_path: Path, private_key: rsa.RSAPrivateKey) -> AppConfig:
         "/var/lib/kienzlefon/models": str(tmp_path / "models"),
         "/srv/telepraxis/dahl/inbox": str(tmp_path / "inbox"),
         "/etc/kienzlefon/telepraxis-public.pem": str(public_key),
+        "/usr/local/bin/kienzlefon-kokoro-tts-generate": str(tmp_path / "kokoro-generate"),
+        "/var/lib/kienzlefon/kokoro-thorsten": str(tmp_path / "kokoro-model"),
         "/var/lib/kienzlefon/piper-voices": str(tmp_path / "voices"),
         "/var/lib/kienzlefon/ansagen-upload": str(tmp_path / "uploads"),
         "CHANGE_ME_RED_PHONE_SECRET": "test-red-secret",

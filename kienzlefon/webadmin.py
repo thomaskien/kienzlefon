@@ -58,7 +58,7 @@ EDITABLE_SCHEDULES = (
     "fachstellenzeiten",
 )
 SOURCE_VALUES = frozenset({"tts", "manuell"})
-TTS_ENGINE_VALUES = frozenset({"piper", "qwen"})
+TTS_ENGINE_VALUES = frozenset({"kokoro", "piper", "qwen"})
 RECORD_SESSION_SECONDS = 1500
 JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 PROMPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -385,6 +385,16 @@ def _web_settings(path: Path) -> dict[str, Any]:
     }
 
 
+def _kokoro_generator_available(config: AppConfig) -> bool:
+    from .kokoro import MODEL_FILES
+
+    generator = config.tts.kokoro_generator
+    return (
+        generator.is_file() and os.access(generator, os.X_OK)
+        and all((config.tts.kokoro_model_directory / name).is_file() for name in MODEL_FILES)
+    )
+
+
 def _qwen_generator_available(config: AppConfig) -> bool:
     generator = config.tts.qwen_generator
     if not generator.is_file() or not os.access(generator, os.X_OK):
@@ -605,11 +615,12 @@ def export_state(
         "sources": sources,
         "tts": {
             "engine": config.tts.engine,
+            "kokoro_available": _kokoro_generator_available(config),
             "qwen_voice": config.tts.qwen_voice,
             "qwen_available": _qwen_generator_available(config),
             "qwen_voices": list(QWEN_SPEAKERS),
             "defaults": {
-                "engine": str(default_tts.get("engine", "piper")),
+                "engine": str(default_tts.get("engine", "kokoro")),
                 "qwen_voice": str(default_tts.get("qwen_stimme", "ryan")),
             },
         },
@@ -849,6 +860,8 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         engine = str(tts_payload["engine"])
         if engine not in TTS_ENGINE_VALUES:
             raise WebAdminError("Ungültiges TTS-Erzeugungsmodell")
+        if engine == "kokoro" and not _kokoro_generator_available(config):
+            raise WebAdminError("Kokoro-Thorsten ist nicht vollständig lokal installiert")
         if engine == "qwen" and not _qwen_generator_available(config):
             raise WebAdminError(
                 "Qwen3-TTS ist nicht vollständig oder nicht sicher für Kienzlefon installiert"

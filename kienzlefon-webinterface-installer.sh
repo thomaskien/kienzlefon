@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.4.0
+# Kienzlefon-Version: 2.4.1
 # Changelog:
+# - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Versionsfuehrung mit der Kienzlefon-Hauptversion vereinheitlicht.
 # - 1.1.2: Laufzeitstatus wird nach jedem Systemstart vor den Webservern neu exportiert.
 # - 1.1.1: Bestaetigte Aufrufe aus dem Kienzlefon-Hauptinstaller werden unterstuetzt.
@@ -28,7 +29,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.4.0"
+VERSION="2.4.1"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"

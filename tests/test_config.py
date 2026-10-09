@@ -80,7 +80,7 @@ def test_override_blocks_phone_hours(app_config) -> None:
     assert app_config.tts.target_loudness_lufs == -19.0
     assert app_config.tts.max_true_peak_db == -2.0
     assert app_config.tts.sentence_silence == 0.8
-    assert app_config.tts.engine == "piper"
+    assert app_config.tts.engine == "kokoro"
     assert app_config.tts.qwen_voice == "ryan"
     assert app_config.tts.qwen_language == "German"
     assert app_config.tts.qwen_seed == 42
@@ -272,7 +272,7 @@ def test_productive_mode_requires_public_key(tmp_path: Path) -> None:
 
 def test_qwen_tts_accepts_only_allowlisted_speakers(tmp_path: Path) -> None:
     source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
-    source = source.replace('engine = "piper"', 'engine = "qwen"')
+    source = source.replace('engine = "kokoro"', 'engine = "qwen"')
     source = source.replace('qwen_stimme = "ryan"', 'qwen_stimme = "serena"')
     config_path = tmp_path / "qwen.toml"
     config_path.write_text(source, encoding="utf-8")
