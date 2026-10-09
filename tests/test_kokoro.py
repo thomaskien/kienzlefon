@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
+import tarfile
 import tomllib
 import wave
 from contextlib import nullcontext
@@ -191,6 +192,135 @@ def installer_module():
     return module
 
 
+def test_python_selection_reuses_supported_system_python(installer_module, monkeypatch):
+    module = installer_module
+    monkeypatch.setattr(module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(module, "python_usable", lambda path: path.endswith("python3.11"))
+    monkeypatch.setattr(module, "prepare_python", lambda _: pytest.fail("Kein Download erwartet"))
+    assert module.choose_python() == "/usr/bin/python3.11"
+
+
+def test_python_selection_bootstraps_when_only_debian_13_python_exists(installer_module, monkeypatch):
+    module = installer_module
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/python3" if name == "python3" else None)
+    monkeypatch.setattr(module, "python_usable", lambda _: False)
+    prepared = []
+
+    def prepare(manifest):
+        prepared.append(manifest)
+        return "/opt/kienzlefon/kokoro/python/managed/bin/python3.12"
+
+    monkeypatch.setattr(module, "prepare_python", prepare)
+    assert module.choose_python().endswith("/managed/bin/python3.12")
+    assert prepared[0]["version"] == "3.12.15"
+    assert len(prepared[0]["sha256"]) == 64
+
+
+@pytest.mark.parametrize("version, usable", [("3.11.10", True), ("3.12.15", True), ("3.13.5", False)])
+def test_python_probe_checks_supported_versions_and_venv(installer_module, monkeypatch, version, usable):
+    original_run = subprocess.run
+
+    def probe(command, **kwargs):
+        # Execute the real probe using the local interpreter, simulating the
+        # candidate's version while keeping ssl/venv/ensurepip imports real.
+        prefix = "import ssl, venv, ensurepip, sys; "
+        prefix += f"sys.version_info = {tuple(map(int, version.split('.')))!r}; "
+        prefix += f"sys.version = {version!r}; "
+        return original_run([sys.executable, "-I", "-c", prefix + command[3], command[4]], **kwargs)
+
+    monkeypatch.setattr(installer_module.subprocess, "run", probe)
+    assert installer_module.python_usable("candidate") is usable
+    assert not installer_module.python_usable("candidate", "0.0.0")
+
+
+def python_archive(name="python/bin/python3.12", *, link=None):
+    output = io.BytesIO()
+    with tarfile.open(fileobj=output, mode="w:gz") as bundle:
+        member = tarfile.TarInfo(name)
+        member.mode = 0o755
+        if link:
+            member.type = tarfile.SYMTYPE
+            member.linkname = link
+            bundle.addfile(member)
+        else:
+            content = b"synthetic interpreter"
+            member.size = len(content)
+            bundle.addfile(member, io.BytesIO(content))
+    return output.getvalue()
+
+
+def python_manifest(content):
+    return {"version": "3.12.15", "url": "https://example.invalid/python.tar.gz",
+            "sha256": hashlib.sha256(content).hexdigest()}
+
+
+def test_managed_python_is_atomic_reusable_and_accessible(installer_module, monkeypatch, tmp_path):
+    module = installer_module
+    monkeypatch.setattr(module, "INSTALL_ROOT", tmp_path / "kokoro")
+    monkeypatch.setattr(module, "python_usable", lambda path, version: (
+        path.read_bytes() == b"synthetic interpreter" and version == "3.12.15"
+    ))
+    content = python_archive()
+    manifest = python_manifest(content)
+    old_umask = os.umask(0o077)
+    try:
+        executable = Path(module.prepare_python(manifest, lambda *_a, **_k: io.BytesIO(content)))
+    finally:
+        os.umask(old_umask)
+    assert executable.stat().st_mode & 0o777 == 0o755
+    for parent in (executable.parent, executable.parent.parent, executable.parent.parent.parent,
+                   module.INSTALL_ROOT):
+        assert parent.stat().st_mode & 0o777 == 0o755
+    assert module.prepare_python(manifest, lambda *_a, **_k: pytest.fail("Erneuter Download")) == str(executable)
+    assert not list((module.INSTALL_ROOT / "python").glob(".python-*"))
+
+
+@pytest.mark.parametrize("failure", ["checksum", "runtime", "download"])
+def test_managed_python_failure_is_retryable(installer_module, monkeypatch, tmp_path, failure):
+    module = installer_module
+    monkeypatch.setattr(module, "INSTALL_ROOT", tmp_path / "kokoro")
+    monkeypatch.setattr(module, "python_usable", lambda *_: failure != "runtime")
+    content = python_archive()
+    manifest = python_manifest(content)
+
+    def download(*_args, **_kwargs):
+        if failure == "download":
+            raise OSError("Download unterbrochen")
+        return io.BytesIO(b"bad" if failure == "checksum" else content)
+
+    with pytest.raises((RuntimeError, OSError)):
+        module.prepare_python(manifest, download)
+    assert not list((module.INSTALL_ROOT / "python").iterdir())
+    monkeypatch.setattr(module, "python_usable", lambda *_: True)
+    assert Path(module.prepare_python(manifest, lambda *_a, **_k: io.BytesIO(content))).is_file()
+
+
+@pytest.mark.parametrize("name, link", [
+    ("../outside", None), ("python/../../outside", None),
+    ("python/bin/python3.12", "../../../outside"),
+])
+def test_managed_python_rejects_escaping_archives(installer_module, monkeypatch, tmp_path, name, link):
+    module = installer_module
+    monkeypatch.setattr(module, "INSTALL_ROOT", tmp_path / "kokoro")
+    monkeypatch.setattr(module, "python_usable", lambda *_: pytest.fail("Archiv darf nicht starten"))
+    content = python_archive(name, link=link)
+    with pytest.raises((RuntimeError, tarfile.FilterError)):
+        module.prepare_python(python_manifest(content), lambda *_a, **_k: io.BytesIO(content))
+    assert not list((module.INSTALL_ROOT / "python").iterdir())
+
+
+def test_managed_python_rejects_symlink_destination(installer_module, monkeypatch, tmp_path):
+    module = installer_module
+    monkeypatch.setattr(module, "INSTALL_ROOT", tmp_path / "kokoro")
+    manifest = python_manifest(python_archive())
+    root = module.INSTALL_ROOT / "python"
+    root.mkdir(parents=True)
+    destination = root / f"cpython-{manifest['version']}-{manifest['sha256'][:16]}"
+    destination.symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeError, match="Unsicheres"):
+        module.prepare_python(manifest, lambda *_a, **_k: pytest.fail("Kein Download erwartet"))
+
+
 def model_manifest():
     return {"repo": "Thorsten-Voice/Kokoro", "revision": MODEL_REVISION, "files": {
         name: {"sha256": hashlib.sha256(name.encode()).hexdigest()} for name in MODEL_FILES
@@ -302,7 +432,7 @@ def test_interactive_installer_tts_choices(tmp_path, existing, choice, expected)
 def test_release_versions_agree():
     from kienzlefon import __version__
 
-    assert __version__ == "2.4.2"
+    assert __version__ == "2.4.3"
     assert tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"] == __version__
 
 

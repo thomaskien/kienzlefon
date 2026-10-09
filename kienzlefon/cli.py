@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.2
+# Version: 2.4.3
 # Changelog:
+# - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
 # - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Migrationsausgabe auf die gemeinsame Hauptversion aktualisiert.
@@ -398,7 +399,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.4.2 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.4.3 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -431,4 +432,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.4.2 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.4.3 ergaenzt: {target}")

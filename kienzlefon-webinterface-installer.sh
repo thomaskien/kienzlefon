@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.4.2
+# Kienzlefon-Version: 2.4.3
 # Changelog:
+# - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
 # - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Versionsfuehrung mit der Kienzlefon-Hauptversion vereinheitlicht.
@@ -30,7 +31,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.4.2"
+VERSION="2.4.3"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"

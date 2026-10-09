@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import tomllib
 import urllib.request
@@ -67,12 +68,69 @@ def prepare_models(directory, manifest, download=urllib.request.urlopen):
 def choose_python():
     for candidate in ("python3.12", "python3.11", "python3"):
         executable = shutil.which(candidate)
-        if executable and subprocess.run(
-            [executable, "-c", "import sys; sys.exit(not ((3,11) <= sys.version_info[:2] < (3,13)))"],
-            check=False,
-        ).returncode == 0:
+        if executable and python_usable(executable):
             return executable
-    raise RuntimeError("Kokoro benoetigt Python 3.11 oder 3.12 samt venv-Paket")
+    print("Kein geeignetes System-Python: separate Python-3.12-Laufzeit fuer Kokoro vorbereiten.",
+          flush=True)
+    manifest = json.loads((SOURCE / "python_manifest.json").read_text())
+    return prepare_python(manifest)
+
+
+def python_usable(executable, version=None):
+    try:
+        result = subprocess.run(
+            [str(executable), "-I", "-c",
+             "import sys, ssl, venv, ensurepip; "
+             "ensurepip.version(); "
+             "sys.exit(not ((3,11) <= sys.version_info[:2] < (3,13) "
+             "and (not sys.argv[1] or sys.version.split()[0] == sys.argv[1])))",
+             version or ""],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except OSError:
+        return False
+
+
+def prepare_python(manifest, download=urllib.request.urlopen):
+    """Install a pinned relocatable CPython without modifying system Python."""
+    safe_directory(INSTALL_ROOT)
+    root = INSTALL_ROOT / "python"
+    safe_directory(root)
+    expected = manifest["sha256"]
+    version = manifest["version"]
+    destination = root / f"cpython-{version}-{expected[:16]}"
+    executable = destination / "bin/python3.12"
+    if destination.exists() or destination.is_symlink():
+        safe_directory(destination)
+        if not python_usable(executable, version):
+            raise RuntimeError(f"Vorhandene Kokoro-Python-Laufzeit ist unvollstaendig: {destination}")
+        return str(executable)
+    if not hasattr(tarfile, "data_filter"):
+        raise RuntimeError("System-Python zuerst aktualisieren: sichere Archivfilter fehlen")
+    with tempfile.TemporaryDirectory(prefix=".python-", dir=root) as temporary:
+        staging = Path(temporary)
+        archive = staging / "python.tar.gz"
+        print(f"Lade geprueftes CPython {version} fuer Kokoro herunter.", flush=True)
+        with archive.open("wb") as output, download(manifest["url"], timeout=120) as response:
+            shutil.copyfileobj(response, output)
+        if checksum(archive) != expected:
+            raise RuntimeError("Kokoro-Python-Download hat falsche Pruefsumme")
+        with tarfile.open(archive, "r:gz") as bundle:
+            for member in bundle.getmembers():
+                if not member.name.startswith("python/") and member.name != "python":
+                    raise RuntimeError("Unerwarteter Pfad im Kokoro-Python-Archiv")
+            bundle.extractall(staging, filter="data")
+        extracted = staging / "python"
+        if not python_usable(extracted / "bin/python3.12", version):
+            raise RuntimeError("Heruntergeladenes Kokoro-Python besteht den Laufzeittest nicht")
+        # Asterisk also needs read/execute access when root uses umask 0077.
+        for path in [extracted, *extracted.rglob("*")]:
+            if not path.is_symlink():
+                path.chmod(0o755 if path.is_dir() or path.stat().st_mode & 0o111 else 0o644)
+        os.replace(extracted, destination)
+    print(f"Kokoro-Python {version} bereit: {executable}", flush=True)
+    return str(executable)
 
 
 def install(config_path):
@@ -95,6 +153,7 @@ def install(config_path):
     ).hexdigest()[:16]
     # Content-specific paths keep an earlier working environment intact on failure.
     destination = INSTALL_ROOT / f"2.4.1-{identity}"
+    safe_directory(INSTALL_ROOT)
     safe_directory(destination)
     environment = destination / "venv"
     if environment.is_symlink():
@@ -138,7 +197,7 @@ def install(config_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Kokoro-Thorsten fuer Kienzlefon 2.4.1 installieren")
+    parser = argparse.ArgumentParser(description="Kokoro-Thorsten fuer Kienzlefon 2.4.3 installieren")
     parser.add_argument("--config", required=True, type=Path)
     arguments = parser.parse_args()
     install(arguments.config)

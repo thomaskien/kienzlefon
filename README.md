@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.2
+Version: 2.4.3
 
+- 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
 - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Integriertes Webinterface, Anrufsbaum, Ansagenmodi und Notfall-Handoff freigegeben.
@@ -47,7 +48,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.4.2**
+Version: **2.4.3**
 
 ## Eigenschaften
 
@@ -249,7 +250,11 @@ bleiben Audioquelle. Die bearbeitbaren Texte und Pausenmarker bleiben erhalten.
 
 Der Hauptinstaller richtet bei Auswahl 1 die aus Kienzlefon-AI uebernommenen,
 fixierten Kokoro-/Misaki-Versionen und das deutsche Thorsten-Modell ein.
-Voraussetzung ist Linux x86_64 mit Python 3.11 oder 3.12 samt venv-Paket.
+Voraussetzung ist Linux x86_64. Ab 2.4.3 richtet der Installer bei fehlendem
+Python 3.11/3.12 mit venv-Unterstuetzung automatisch eine separate,
+pruefsummengepruefte Python-3.12-Laufzeit unter `/opt/kienzlefon/kokoro/python/`
+ein, auch auf Debian 13 mit System-Python 3.13. System-Python und andere
+Python-Umgebungen werden dabei nicht ersetzt.
 Die Synthese laeuft auf CPU, ohne dauerhaft geladenen TTS-Dienst und nach dem
 Modelldownload offline. Die bestehende Normalisierung und die Telefonieformate
 bleiben erhalten; bei einem Fehler wird nicht automatisch auf Piper gewechselt.

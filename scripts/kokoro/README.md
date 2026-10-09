@@ -1,14 +1,28 @@
 # Kokoro-Thorsten fuer Kienzlefon ab 2.4.1
 
-Kienzlefon 2.4.2 verwendet dieselbe Kokoro-Runtime und Modellversion. Das
+Kienzlefon 2.4.2 und 2.4.3 verwenden dieselbe Kokoro-Runtime und Modellversion. Das
 Ausschreiben von Zahlen und Uhrzeiten erfolgt davor im gemeinsamen
 Ansagengenerator; dafuer ist keine neue Kokoro-Python-Umgebung erforderlich.
 
 Der Hauptinstaller ruft `install.py --config /etc/kienzlefon/kienzlefon.toml`
-auf, wenn Kokoro ausgewaehlt ist. Ziel: Linux x86_64, Python 3.11 oder 3.12
-mit passendem venv-Paket, `git`, `espeak-ng`, `libsndfile1` und `libgomp1`.
+auf, wenn Kokoro ausgewaehlt ist. Ziel: Linux x86_64 mit `git`, `espeak-ng`,
+`libsndfile1` und `libgomp1`. Eine vorhandene Python-Version 3.11 oder 3.12
+wird nach Pruefung von SSL, venv und ensurepip weiterverwendet.
 Piper bleibt in der Hauptumgebung installiert. Keine Dienste oder CUDA-Pakete
 aus Kienzlefon-AI werden veraendert.
+
+Ab 2.4.3 wird bei fehlendem geeigneten Python automatisch die in
+`python_manifest.json` fixierte CPython-Version 3.12.15 (Build 20261009) aus
+[Astral python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases/tag/20261009)
+geladen. Die SHA-256-Pruefsumme stammt aus den dort verlinkten offiziellen
+uv-Downloadmetadaten. Das Archiv wird vor dem Entpacken verifiziert und mit
+sicheren Archivfiltern in ein temporaeres Verzeichnis entpackt. Erst nach
+erfolgreichem Python-/venv-/SSL-Test wird die Laufzeit atomar unter
+`/opt/kienzlefon/kokoro/python/cpython-3.12.15-<Pruefsummenpraefix>/` bereitgestellt.
+Dies behebt den Abbruch auf Debian 13 mit System-Python 3.13. System-Python,
+PATH und bestehende fremde Umgebungen werden nicht veraendert. Ein erneuter
+Aufruf verwendet die fertig installierte Laufzeit wieder; fehlgeschlagene
+Downloads oder Tests hinterlassen keine aktive Teilinstallation.
 
 Modellmanifest und CPU-Lockdatei stammen unveraendert aus
 `kienzlefon-ai/installer/kokoro-v2.6/`. Die eigenstaendige Ansagenruntime
