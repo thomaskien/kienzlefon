@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.0
+# Version: 2.4.4
 # Changelog:
+# - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
 # - 2.3.2: AI-Medienbridge sofort gestartet und Taste 0 als direkter AI-Shortcut belegt.
 # - 2.3: AI-Handoff, Menue-Admission, Assistentenansage und DTMF-Rueckkehr integriert.
@@ -133,8 +134,9 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.3
+; Version: 2.4.4
 ; Changelog:
+; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
 ; - 2.2: AI-Slotendpunkte mit Busy-on-Busy und deaktiviertem direct_media ergaenzt.
 ; - 1.8: Versionsstand fuer Kienzlefon 1.8 aktualisiert.
@@ -224,7 +226,9 @@ type=endpoint
 transport={transport}
 context=kienzlefon-ai-endpoint-in
 disallow=all
-allow=alaw,ulaw
+allow=g722
+incoming_call_offer_pref=local_first
+outgoing_call_offer_pref=local_first
 auth={extension}-auth
 aors={extension}
 callerid=Kienzlefon AI {extension} <{extension}>

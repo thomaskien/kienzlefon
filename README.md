@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.3
+Version: 2.4.4
 
+- 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
 - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
@@ -48,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.4.3**
+Version: **2.4.4**
 
 ## Eigenschaften
 
@@ -131,6 +132,14 @@ KI-Maschine ab. Ohne aktuelle, einmalig verbrauchbare Lease wird kein Anruf an
 eine KI-Nebenstelle geleitet. Die Schnittstelle besitzt auf ausdrueckliche
 Vorgabe keine Anwendungsauthentifizierung und darf nur in einem geschuetzten
 Netz betrieben werden.
+
+Ab 2.4.4 erzeugt `_ai_endpoint()` die KI-Endpunkte (bei drei Slots `8810` bis
+`8812`) dauerhaft mit `disallow=all`, `allow=g722` sowie
+`incoming_call_offer_pref=local_first` und `outgoing_call_offer_pref=local_first`.
+Dies gilt bei Installation, Update und erneutem Aufruf von `kienzlefon-asterisk`.
+Provider und normale Telefone behalten ihre G.711-Codecs `alaw`/`ulaw`.
+Der Codec-Fix aendert keine Kokoro-/CUDA-Einstellungen oder vorhandenen
+Sprechpausen; insbesondere bleiben konfigurierte 1000 ms erhalten.
 
 Der verbindliche Laufzeitvertrag fuer Kapazitaet, Call-Policy und Handoff ist
 in `SPEZIFIKATION-KIENZLEFON-AI-RUNTIME-SCHNITTSTELLE-v1.1.md` dokumentiert.
