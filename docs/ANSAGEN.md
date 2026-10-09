@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.1
+Version: 2.4.2
 Changelog:
+- 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Explizite Abspielmodi und sichere Behandlung leerer Texte dokumentiert.
 - 1.5: Signaltonhinweis des telefonischen Aufnahmebausteins aktualisiert.
@@ -16,6 +17,23 @@ auf CPU. Piper und Qwen bleiben im Installer und Webinterface waehlbar.
 `[tts].kokoro_speed` steuert die Kokoro-Sprechgeschwindigkeit (Standard 1.0).
 Manuelle Aufnahmen und Pausenmarker bleiben erhalten. Installation und
 Konfigurationsbeispiele stehen in der [README](../README.md).
+
+Seit 2.4.2 schreibt der gemeinsame Generator Zahlen und Uhrzeiten vor der
+Spracherzeugung deutsch aus. Dies gilt fuer Kokoro, Piper und Qwen, auch fuer
+Vorschauen und Sonderansagen. Beispiele:
+
+- `Für unsere Öffnungszeiten drücken Sie 6.` → `Für unsere Öffnungszeiten drücken Sie sechs.`
+- `08:30 Uhr` oder `08.30 Uhr` → `acht Uhr dreißig`
+- `8 Uhr 05` oder `08:05` → `acht Uhr fünf`
+- `14 Uhr` → `vierzehn Uhr`; `1 Uhr` → `ein Uhr`
+
+Auch dynamische Oeffnungs- und Telefonzeiten durchlaufen diese Umwandlung.
+Konfiguration und bearbeitbare Texte im Webinterface behalten ihre Eingabeform;
+Pausenmarker wie `{pause:700}` bleiben Zeitsteuerung. Beim normalen Update
+werden betroffene automatisch erzeugte Ansagen anhand des gesprochenen Texts
+neu erzeugt; `--all` ist dafuer nicht erforderlich. Gespeicherte TTS-Fassungen
+geplanter Sonderansagen werden ebenfalls aktualisiert. Manuelle Aufnahmen
+werden weiterhin als Audioquelle verwendet.
 
 Die Nummern sind verbindlich und werden in spaeteren Versionen nicht
 verschoben. Neue Bausteine werden ausschliesslich am Ende angehaengt. Die

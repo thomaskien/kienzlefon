@@ -1,4 +1,8 @@
-# Kokoro-Thorsten fuer Kienzlefon 2.4.1
+# Kokoro-Thorsten fuer Kienzlefon ab 2.4.1
+
+Kienzlefon 2.4.2 verwendet dieselbe Kokoro-Runtime und Modellversion. Das
+Ausschreiben von Zahlen und Uhrzeiten erfolgt davor im gemeinsamen
+Ansagengenerator; dafuer ist keine neue Kokoro-Python-Umgebung erforderlich.
 
 Der Hauptinstaller ruft `install.py --config /etc/kienzlefon/kienzlefon.toml`
 auf, wenn Kokoro ausgewaehlt ist. Ziel: Linux x86_64, Python 3.11 oder 3.12

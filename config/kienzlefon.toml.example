@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.1
+# Version: 2.4.2
 # Changelog:
+# - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Abspielmodi fuer Begruessungen, Notfallhinweis und weitere Ansagen ergaenzt.
 # - 2.3.2: Nicht mehr verwendete Hauptserver-Assistentenansage entfernt.

@@ -1,7 +1,8 @@
 <!--
 kienzlefon
-Version: 2.4.1
+Version: 2.4.2
 
+- 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Integriertes Webinterface, Anrufsbaum, Ansagenmodi und Notfall-Handoff freigegeben.
 - 2.3.2: Sofortige AI-Medienbridge korrigiert und obsolete Hauptserver-Ansage entfernt.
@@ -46,7 +47,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.4.1**
+Version: **2.4.2**
 
 ## Eigenschaften
 
@@ -238,6 +239,14 @@ der anschließende Wiederanlauf des Whisper-Workers, beispielsweise:
 ```
 
 Ab 2.4.1 ist **Kokoro-Thorsten** die Standardstimme fuer lokale Ansagen.
+
+Ab 2.4.2 werden Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausgeschrieben:
+`drücken Sie 6` wird `drücken Sie sechs`, `08:30 Uhr` wird `acht Uhr dreißig`
+und `14 Uhr` wird `vierzehn Uhr`. Dies gilt fuer alle drei TTS-Engines, auch fuer
+automatische Oeffnungs-/Telefonzeiten, Sonderansagen und Vorschauen. Das normale
+Update erzeugt betroffene TTS-Audiodateien neu, ohne `--all`; eigene Aufnahmen
+bleiben Audioquelle. Die bearbeitbaren Texte und Pausenmarker bleiben erhalten.
+
 Der Hauptinstaller richtet bei Auswahl 1 die aus Kienzlefon-AI uebernommenen,
 fixierten Kokoro-/Misaki-Versionen und das deutsche Thorsten-Modell ein.
 Voraussetzung ist Linux x86_64 mit Python 3.11 oder 3.12 samt venv-Paket.

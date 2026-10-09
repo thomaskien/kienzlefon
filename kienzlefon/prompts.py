@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.1
+# Version: 2.4.2
 # Changelog:
+# - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Ansagen bleiben auch deaktiviert fuer Vorschau und spaetere Aktivierung erzeugbar.
 # - 2.3.2: Obsolete Hauptserver-Assistentenansage aus dem Katalog entfernt.
@@ -39,6 +40,7 @@ from typing import Any, Callable
 from .config import AppConfig, TimeWindow, WEEKDAYS, WeeklySchedule
 from .health import worker_is_healthy
 from .kokoro import MODEL_FILES, MODEL_REVISION, RUNTIME_VERSION
+from .speech_text import SPEECH_TEXT_VERSION, normalize_german_speech
 from .spool import write_json_atomic
 
 LOGGER = logging.getLogger(__name__)
@@ -161,7 +163,8 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
     if additional_phone_hours:
         rendered_phone_hours = f"{rendered_phone_hours} {additional_phone_hours}"
     values["phone_hours"] = rendered_phone_hours
-    return {key: value for key, value in values.items() if key in PROMPT_CATALOG}
+    names = set(PROMPT_CATALOG) | {entry.prompt_name for entry in config.scheduled_overrides}
+    return {key: value for key, value in values.items() if key in names}
 
 
 class PromptGenerator:
@@ -244,6 +247,7 @@ class PromptGenerator:
             digest = self._digest(name, prompt_text, qwen_variant=qwen_variant)
             if (
                 not force
+                and name not in scheduled_tts_to_refresh
                 and previous.get("sha256") == digest
                 and self._outputs_exist(name)
             ):
@@ -839,6 +843,8 @@ class PromptGenerator:
         human_digest = ""
         if human_source is not None:
             human_digest = hashlib.sha256(human_source.read_bytes()).hexdigest()
+        else:
+            text = normalize_german_speech(text)
         if self.config.tts.engine == "kokoro":
             parts = (
                 text,
@@ -919,6 +925,7 @@ class PromptGenerator:
             "\0".join(
                 (
                     "kienzlefon-prompts-2.0",
+                    SPEECH_TEXT_VERSION,
                     *parts,
                     str(self.config.tts.target_loudness_lufs),
                     str(self.config.tts.max_true_peak_db),
@@ -1054,6 +1061,7 @@ class PromptGenerator:
     def _tts_command(
         self, text: str, output: Path, *, qwen_seed: int | None = None
     ) -> list[str]:
+        text = normalize_german_speech(text)
         if self.config.tts.engine == "kokoro":
             return self._kokoro_command(text, output)
         if self.config.tts.engine == "qwen":

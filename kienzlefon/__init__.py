@@ -1,6 +1,7 @@
 # kienzlefon
-# Version: 2.4.1
+# Version: 2.4.2
 # Changelog:
+# - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Haupt- und Webinterface-Version auf 2.4.0 vereinheitlicht.
 # - 2.3.2: Releasekennung auf 2.3.2 angehoben.
@@ -33,4 +34,4 @@
 
 """Kienzlefon Kernpaket."""
 
-__version__ = "2.4.1"
+__version__ = "2.4.2"

@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.4.1
+# Version: 2.4.2
 # Changelog:
+# - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 # - 2.4.1: Paketinstallationen warten bis zu 300 Sekunden auf die dpkg-Sperre.
 # - 2.4.1: Kokoro-Thorsten als lokale Standard-TTS integriert.
 # - 2.4.0: Webinterface in die Hauptversion integriert und Bestandsupdate vereinheitlicht.
@@ -38,7 +39,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.4.1"
+VERSION="2.4.2"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -1771,7 +1772,7 @@ main(){
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.4.1 ist installiert"
+  sep "Kienzlefon 2.4.2 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
