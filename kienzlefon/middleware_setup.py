@@ -105,26 +105,34 @@ def configure(path: Path, etc: Path) -> None:
         if users or general.get("enabled", "no") in {"yes", "true", "on", "1"}:
             print("Vorhandener AMI-Listener: " + general.get("bindaddr", "0.0.0.0")
                   + ":" + general.get("port", "5038") + "; bestehende Clients bleiben erhalten.")
-        local = yes("Laeuft die Middleware auf diesem Rechner?", ipaddress.ip_address(
-            values.get("quell_ip", "127.0.0.1")).is_loopback)
+        previous_source = values.get("quell_ip", "127.0.0.1")
+        local = yes("Laeuft die Middleware auf diesem Rechner?", previous_source != "*" and
+                    ipaddress.ip_address(previous_source).is_loopback)
         if local:
             values["quell_ip"] = "127.0.0.1"
             values["server_ip"] = "127.0.0.1"
         else:
-            values["quell_ip"] = ask("Exakte Quell-IP des Middleware-Rechners", old.get("quell_ip", ""))
+            all_sources = yes("Alle ueber das VPN erreichbaren Clients zulassen?",
+                              previous_source == "*")
+            values["quell_ip"] = "*" if all_sources else ask(
+                "Exakte Quell-IP des Middleware-Rechners",
+                "" if previous_source == "*" else old.get("quell_ip", ""),
+            )
             suggestion = old.get("server_ip", "")
             if suggestion in {"", "127.0.0.1"}:
                 suggestion = general.get("bindaddr", "")
                 if suggestion in {"0.0.0.0", "::", "127.0.0.1"}:
                     suggestion = ""
-                if not suggestion:
+                if not suggestion and not all_sources:
                     try:
                         route = subprocess.run(["ip", "-j", "route", "get", values["quell_ip"]],
                                                capture_output=True, text=True, check=True)
                         suggestion = json.loads(route.stdout)[0].get("prefsrc", "")
                     except (OSError, ValueError, subprocess.SubprocessError, IndexError):
                         pass
-            values["server_ip"] = ask("Erreichbare IP dieser Telefonanlage", suggestion)
+            target_prompt = ("VPN-IP dieser Telefonanlage (AMI lauscht nur auf dieser Adresse)"
+                             if all_sources else "Erreichbare IP dieser Telefonanlage")
+            values["server_ip"] = ask(target_prompt, suggestion)
         values["transport"] = ask("Transport (tcp oder vorhandenes tls)", old.get("transport", "tcp"))
         default_port = general.get("port", "5038") if values["transport"] == "tcp" else "5039"
         values["port"] = int(ask("AMI-Port", str(old.get("port", default_port))))
@@ -183,8 +191,9 @@ def update_firewall(config, previous: dict | None) -> None:
     current = config.middleware
     old_rule = previous.get("ufw_rule") if previous else None
     new_rule = None
-    if current.enabled and not ipaddress.ip_address(current.source_ip).is_loopback:
-        new_rule = ["allow", "proto", "tcp", "from", current.source_ip, "to", current.server_ip,
+    if current.enabled and (current.all_sources or not ipaddress.ip_address(current.source_ip).is_loopback):
+        source = "any" if current.all_sources else current.source_ip
+        new_rule = ["allow", "proto", "tcp", "from", source, "to", current.server_ip,
                     "port", str(current.port), "comment", "kienzlefon-middleware"]
         subprocess.run(["ufw", *new_rule], check=True, capture_output=True, timeout=30)
     if old_rule and old_rule != new_rule:
@@ -278,7 +287,12 @@ def install(path: Path, etc: Path, rotate: bool = False) -> None:
         print(f"Middleware AMI: {config.middleware.server_ip}:{config.middleware.port} "
               f"({config.middleware.transport}), Benutzer {config.middleware.username}")
         print(f"Geschuetzte Uebergabedatei (root, 0600): {export}")
-        print("Bei anderer Firewall TCP-Port gezielt fuer die konfigurierte Middleware-Quell-IP freigeben.")
+        if config.middleware.all_sources:
+            print("Zugriff: alle Clients, die die konfigurierte VPN-Zieladresse erreichen; "
+                  "Benutzername und Secret bleiben erforderlich.")
+            print("Bei anderer Firewall nur diese Zieladresse und den AMI-Port freigeben.")
+        else:
+            print("Bei anderer Firewall TCP-Port gezielt fuer die konfigurierte Middleware-Quell-IP freigeben.")
         if config.middleware.lookup and not config.middleware.lookup_available:
             print("Namenslookup bleibt deaktiviert: benoetigte Asterisk-Anwendung fehlt.")
     else:

@@ -1,4 +1,4 @@
-"""Version 2.5.1: optional AMI access and its public configuration contract.
+"""Version 2.5.2: optional AMI access and its public configuration contract.
 
 AMI grants action categories, not per-variable/per-context capabilities. The
 middleware is a trusted server; browser/workstation credentials must never be
@@ -44,6 +44,10 @@ class MiddlewareConfig:
     extensions: tuple[str, ...] = ()
     ring_timeout_ms: int = 20000
 
+    @property
+    def all_sources(self) -> bool:
+        return self.source_ip == "*"
+
     @classmethod
     def parse(cls, raw: Mapping) -> MiddlewareConfig:
         if not isinstance(raw, dict):
@@ -72,11 +76,16 @@ class MiddlewareConfig:
             extensions=tuple(values),
             ring_timeout_ms=int(raw.get("klingel_timeout_ms", 20000)),
         )
-        for name, value in (("quell_ip", result.source_ip), ("server_ip", result.server_ip)):
+        addresses = [("server_ip", result.server_ip)]
+        if not result.all_sources:
+            addresses.append(("quell_ip", result.source_ip))
+        for name, value in addresses:
             address = ipaddress.ip_address(value)
-            if address.is_unspecified or address.is_multicast:
+            if address.is_unspecified or address.is_multicast or str(address) == "255.255.255.255":
                 raise ValueError(f"[middleware].{name}: konkrete Unicast-IP erforderlich")
-        if ipaddress.ip_address(result.source_ip).version != ipaddress.ip_address(result.server_ip).version:
+        if not result.all_sources and (
+            ipaddress.ip_address(result.source_ip).version != ipaddress.ip_address(result.server_ip).version
+        ):
             raise ValueError("Middleware-Quelle und AMI-Ziel muessen dieselbe IP-Familie verwenden")
         if not 1 <= result.port <= 65535 or not 1000 <= result.ring_timeout_ms <= 120000:
             raise ValueError("Middleware-Port oder Klingel-Timeout ausserhalb des erlaubten Bereichs")
@@ -183,6 +192,40 @@ def _bound_to(binding: str, address: str) -> bool:
         return False
 
 
+def _tls_address(binding: str) -> tuple[str, int]:
+    if binding.startswith("["):
+        host, _, port = binding[1:].partition("]:")
+    else:
+        host, _, port = binding.rpartition(":")
+    return host, int(port or 5039)
+
+
+def _check_all_source_bindings(config: MiddlewareConfig, general: Mapping[str, str],
+                               tcp_binding: str) -> None:
+    """The user ACL applies to every AMI transport, including HTTP and TLS."""
+    if not config.all_sources:
+        return
+    truth = {"yes", "true", "on", "1"}
+    if general.get("webenabled", "no").lower() in truth:
+        raise ValueError('quell_ip="*" erfordert deaktiviertes Web-AMI (webenabled=no)')
+    bindings = [tcp_binding]
+    if general.get("tlsenable", "no").lower() in truth:
+        # Asterisk defaults TLS to bindaddr with port 5039.
+        tls_binding = general.get("tlsbindaddr")
+        bindings.append(_tls_address(tls_binding)[0] if tls_binding else tcp_binding)
+    target = ipaddress.ip_address(config.server_ip)
+    for binding in bindings:
+        try:
+            matches = ipaddress.ip_address(binding) == target
+        except ValueError:
+            matches = False
+        if not matches:
+            raise ValueError(
+                'quell_ip="*" erfordert alle AMI-Listener ausschliesslich an server_ip '
+                f'({config.server_ip}); vorhandene Bindadresse {binding} zuerst abstimmen'
+            )
+
+
 def listener_plan(config: MiddlewareConfig, manager: Path) -> str:
     original = manager.read_text(encoding="utf-8") if manager.exists() else "[general]\n"
     general, users = manager_inventory(manager)
@@ -192,15 +235,14 @@ def listener_plan(config: MiddlewareConfig, manager: Path) -> str:
     enabled = general.get("enabled", "no").lower() in truth
     if general.get("disabledevents", "").strip():
         raise ValueError("Globale AMI-disabledevents pruefen: benoetigte Ereignisse duerfen nicht fehlen")
+    tcp_binding = general.get("bindaddr", "0.0.0.0") if enabled or users else config.server_ip
+    _check_all_source_bindings(config, general, tcp_binding)
     if config.transport == "tls":
         if not enabled or general.get("tlsenable", "no").lower() not in truth:
             raise ValueError("AMI-TLS muss bereits mit gueltigem Zertifikat eingerichtet sein")
-        binding = general.get("tlsbindaddr", "0.0.0.0:5039")
-        if binding.startswith("["):
-            host, _, port = binding[1:].partition("]:")
-        else:
-            host, _, port = binding.rpartition(":")
-        if not _bound_to(host, config.server_ip) or int(port or 5039) != config.port:
+        binding = general.get("tlsbindaddr")
+        host, port = _tls_address(binding) if binding else (tcp_binding, 5039)
+        if not _bound_to(host, config.server_ip) or port != config.port:
             raise ValueError("AMI-Ziel passt nicht zum vorhandenen TLS-Listener")
         return original
     if enabled:
@@ -307,8 +349,12 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
     secret = saved_secret if saved_secret and not rotate else secrets.token_urlsafe(32)
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", secret):
         raise ValueError("Ungueltiges gespeichertes Middleware-Secret; ausdruecklich erneuern")
-    source = ipaddress.ip_address(options.source_ip)
-    acl = f"{source}/{source.max_prefixlen}"
+    if options.all_sources:
+        # Keep the other address family denied; the listener is bound to one exact IP.
+        acl = "0.0.0.0/0" if ipaddress.ip_address(options.server_ip).version == 4 else "::/0"
+    else:
+        source = ipaddress.ip_address(options.source_ip)
+        acl = f"{source}/{source.max_prefixlen}"
     content = (
         "; Verwaltet von Kienzlefon; Zugangsdaten nicht protokollieren.\n"
         f"[{options.username}]\nsecret={secret}\n"

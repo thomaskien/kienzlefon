@@ -474,7 +474,7 @@ $modeLabels = [
     'deaktiviert' => 'Deaktiviert',
 ];
 $productName = (string)($state['product']['name'] ?? 'kienzlefon.de');
-$productVersion = (string)($state['product']['version'] ?? '2.5.1');
+$productVersion = (string)($state['product']['version'] ?? '2.5.2');
 $productAuthor = (string)($state['product']['author'] ?? 'Dr. Thomas Kienzle');
 $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 ?>

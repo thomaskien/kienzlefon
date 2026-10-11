@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.1
+# Version: 2.5.2
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -36,4 +36,4 @@
 
 """Kienzlefon Kernpaket."""
 
-__version__ = "2.5.1"
+__version__ = "2.5.2"

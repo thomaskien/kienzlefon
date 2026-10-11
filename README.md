@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.1
+Version: 2.5.2
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.1**
+Version: **2.5.2**
 
 ## Eigenschaften
 
@@ -100,6 +100,29 @@ Version: **2.5.1**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.5.2
+
+Der AMI-Installer bietet fuer externe Middleware **Alle ueber das VPN erreichbaren
+Clients zulassen** an. Die bisherige Einzel-IP bleibt beim Update vorausgewaehlt,
+bis die neue Auswahl ausdruecklich aktiviert wird. In der Konfiguration entspricht
+das beispielsweise:
+
+```toml
+[middleware]
+aktiv = true
+quell_ip = "*"
+server_ip = "10.88.0.1"
+port = 5038
+```
+
+Dies ist ein Ausschnitt: vorhandene Benutzer-, Funktions- und Nebenstellenangaben
+beibehalten. Benutzername und Secret bleiben erforderlich. AMI und die verwaltete
+Firewallfreigabe bleiben auf die konkrete Zieladresse begrenzt. Im Stern-Modus
+werden bestehende Listener auf anderen Adressen und aktives Web-AMI abgelehnt.
+Die Erreichbarkeit dieser Adresse muss durch das VPN/Netz abgesichert sein;
+der Stern erkennt nicht selbst, auf welchem Netzwerkweg ein Client ankommt.
+Details und Umstellung stehen in [AMI-Middleware](docs/MIDDLEWARE.md).
 
 ## Neu in 2.5.1
 

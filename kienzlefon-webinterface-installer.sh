@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.5.1
+# Kienzlefon-Version: 2.5.2
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -32,7 +32,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.5.1"
+VERSION="2.5.2"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"

@@ -1,4 +1,4 @@
-# AMI-Middleware ab Kienzlefon 2.5.1
+# AMI-Middleware ab Kienzlefon 2.5.2
 
 Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
 Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die
@@ -14,19 +14,21 @@ KI-Telefone nicht. Jede Nummer wird einzeln abgefragt; vorhandene Entscheidungen
 bleiben bei Updates die Vorgabe. Faxnummern, Provider und Funktionsnummern sind
 keine auswaehlbaren Telefone.
 
-Lokal verwendet die Einrichtung 127.0.0.1. Bei einem separaten Rechner werden
-seine exakte Quell-IP und eine auf der Telefonanlage vorhandene Ziel-IP
-abgefragt. IPv4 und IPv6 werden unterstuetzt, beide Seiten muessen dieselbe
-Adressfamilie verwenden. TCP ist der Standard, bereits eingerichtetes AMI-TLS
-kann verwendet werden. Zertifikate und vorhandene Listener werden nicht ersetzt.
+Lokal verwendet die Einrichtung 127.0.0.1. Bei einem separaten Rechner wird
+zwischen einer exakten Quell-IP und **Alle ueber das VPN erreichbaren Clients
+zulassen** gewaehlt. Danach wird eine auf der Telefonanlage vorhandene Ziel-IP
+abgefragt. IPv4 und IPv6 werden unterstuetzt; bei einer einzelnen Quell-IP
+muessen beide Seiten dieselbe Adressfamilie verwenden. TCP ist der Standard;
+bereits eingerichtetes AMI-TLS kann verwendet werden. Zertifikate und vorhandene
+Listener werden nicht ersetzt.
 Bei TCP muss der Uebertragungsweg vertrauenswuerdig sein, etwa ein Praxisnetz
 oder WireGuard. AMI-Zugangsdaten bleiben ausschliesslich auf dem Middleware-Server.
 
 Die eigene Datei `/etc/asterisk/manager_kienzlefon_middleware.conf` erlaubt
-nur die Quell-IP. Rechte: `read=system,call,agent,user,dialplan` und
-`write=call,originate,reporting`. Fremde Benutzer, Web-AMI und TLS-Konfiguration
-bleiben bestehen. Listener-Konflikte oder globale Ereignissperren werden vor
-Aenderungen abgelehnt. Ein aktives UFW erhaelt eine eigene markierte Quell-IP-Regel;
+die ausgewaehlten Quellen. Rechte: `read=system,call,agent,user,dialplan` und
+`write=call,originate,reporting`. Fremde Benutzer und Listener-Konfigurationen
+werden nicht ersetzt. Listener-Konflikte oder globale Ereignissperren werden vor
+Aenderungen abgelehnt. Ein aktives UFW erhaelt eine eigene markierte Regel;
 andere Firewalls muessen entsprechend konfiguriert sein. Eine deaktivierte
 Firewall wird nicht automatisch aktiviert.
 
@@ -35,6 +37,48 @@ Secret-Wechsel, Benutzer-/Quell-IP-Aenderung oder Deaktivierung werden die
 zugehoerigen alten Sitzungen getrennt. Falls in der Asterisk-CLI gekuerzte
 Benutzernamen nicht eindeutig sind, fordert die Einrichtung zur manuellen
 Trennung auf, statt fremde Sitzungen zu beenden.
+
+## Alle Clients an der VPN-Adresse zulassen
+
+Ab 2.5.2 bedeutet `quell_ip = "*"`: keine Einschraenkung auf eine einzelne
+Quelladresse. Die Freigabe gilt fuer die Adressfamilie der konkreten `server_ip`.
+Fuer eine bereits eingerichtete Anlage mit VPN-Adresse 10.88.0.1 im vorhandenen
+`[middleware]`-Abschnitt nur diese Angabe aendern:
+
+```toml
+quell_ip = "*"
+server_ip = "10.88.0.1"
+```
+
+Nach dem Software-Update die geaenderte Konfiguration anwenden:
+
+```bash
+sudo /opt/kienzlefon/venv/bin/kienzlefon-middleware install
+```
+
+Alternativ die neue Auswahl im Hauptinstaller verwenden. Bestehende Einzel-IP-
+Angaben werden nicht automatisch erweitert; der Installer uebernimmt die letzte
+Auswahl als Vorgabe. Zur Einschraenkung wieder eine konkrete Quell-IP eintragen
+und anwenden. Benutzername und Secret bleiben bei beiden Wechseln erhalten.
+
+Im Stern-Modus muessen der TCP-Listener und ein eventuell aktiver TLS-Listener
+exakt an `server_ip` gebunden sein. Wildcard-Bindungen wie `0.0.0.0`/`::`, andere
+Listener-Adressen und aktiviertes Web-AMI (`webenabled=yes`) werden abgelehnt,
+bevor AMI-Dateien veraendert werden: dieselbe Benutzerfreigabe gilt sonst auch
+fuer diese weiteren Zugangswege. Fremde Listener werden nicht automatisch
+umgestellt. Bei Einzel-IP-Freigaben bleibt das bisherige Verhalten erhalten.
+
+Bei aktivem UFW lautet die eigene Regel beispielsweise
+`allow proto tcp from any to 10.88.0.1 port 5038 comment kienzlefon-middleware`.
+Sie oeffnet nicht pauschal Port 5038 auf allen Server-Adressen. Die alte eigene
+Regel wird beim Wechsel entfernt; andere Regeln bleiben bestehen. Bei inaktivem
+oder fehlendem UFW bleibt die Regelzuordnung fuer einen spaeteren Lauf erhalten.
+
+Die Bindadresse ist keine Pruefung des eingehenden VPN-Interfaces. Zugelassen
+sind alle Clients, die diese Zieladresse ueber das vorhandene Routing und die
+Firewall erreichen koennen. Fuer den vorgesehenen VPN-Betrieb muss diese
+Erreichbarkeit durch die Netzkonfiguration auf die gewuenschten Clients begrenzt
+sein. AMI-Benutzername und Secret bleiben unabhaengig davon erforderlich.
 
 ## Geschuetzte Uebergabedatei
 
@@ -71,6 +115,12 @@ Firewallregel und wird von der Middleware ignoriert. Ebenso muessen zukuenftige
 unbekannte optionale Felder ignoriert werden. Bei `enabled=false` keine Verbindung
 herstellen. Die komplette TOML-Datei darf nicht protokolliert werden.
 
+Ab 2.5.2 kann `allowed_source_ip` den Wert `"*"` enthalten. Er beschreibt die
+Quellfreigabe, nicht das Verbindungsziel: Die Middleware verbindet sich weiterhin
+mit `ami.host` und `ami.port`. `schema_version = 1` und die uebrigen Felder bleiben
+unveraendert. Ein eigener Leser darf `allowed_source_ip` daher nicht mehr
+zwingend als einzelne IP-Adresse parsen.
+
 Beim Update von 2.5.0 liest der Installer den alten `middleware-connection.json`-
 Export ein, erhaelt Secret und eigene Firewallregel und schreibt die TOML-Datei
 atomar mit Modus 0600. Anschliessend wird die alte JSON-Datei als
@@ -89,7 +139,8 @@ sudo /opt/kienzlefon/venv/bin/kienzlefon-middleware rotate-secret
 
 Die Anzeige schreibt unmittelbar nach `/dev/tty`, nicht in die normale
 Installer-Ausgabe. Nach einer Rotation die geschuetzte Uebergabedatei erneut an
-die Middleware uebernehmen. Kein Secret in TOML, Webinterface, SMB oder Browsercode.
+die Middleware uebernehmen. Kein Secret in der Hauptkonfiguration
+`kienzlefon.toml`, im Webinterface, auf SMB-Freigaben oder im Browsercode ablegen.
 
 ## Lookup-Vertrag
 

@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.1
+Version: 2.5.2
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,21 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.2
+
+- AMI kann mit `quell_ip = "*"` alle Clients zulassen, die die konfigurierte
+  VPN-Zieladresse erreichen. Benutzername, Secret und AMI-Rechte bleiben erhalten.
+- Der Installer bietet die Auswahl bei externer Middleware an und erhaelt die
+  bisherige Einzel-IP oder Stern-Auswahl bei wiederholten Laeufen als Vorgabe.
+- Im Stern-Modus muessen saemtliche AMI-TCP-/TLS-Listener exakt an `server_ip`
+  gebunden und Web-AMI deaktiviert sein. Konflikte werden vor Aenderungen an
+  AMI-Dateien abgelehnt; fremde Integrationen werden nicht umkonfiguriert.
+- UFW-Freigaben bleiben auf Zieladresse und Port begrenzt. Wechsel der
+  Quellfreigabe und Deaktivierung entfernen die bisher verwaltete Regel;
+  bestehende eigene AMI-Sitzungen werden bei einer Aenderung getrennt.
+- Der TOML-Verbindungs-Export kennzeichnet die Freigabe mit
+  `allowed_source_ip = "*"`. Vorhandene Einzel-IP-Konfigurationen bleiben kompatibel.
 
 ## 2.5.1
 
