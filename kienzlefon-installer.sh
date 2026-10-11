@@ -2,7 +2,7 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.5.0
+# Version: 2.5.1
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -41,7 +41,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.5.0"
+VERSION="2.5.1"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -382,18 +382,18 @@ configure_demo_anonymization(){
 }
 
 configure_hold_music(){
-  local current_installed="n" current_mode="klingelzeichen"
+  local current_installed="y" current_mode="musik"
   local install_music="" mode_choice="1" default_install="n" default_mode="1"
   mapfile -t hold_current < <("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:
     section = tomllib.load(handle).get("wartemusik", {})
-print("y" if section.get("installiert", False) else "n")
-print(section.get("modus", "klingelzeichen"))
+print("y" if section.get("installiert", True) else "n")
+print(section.get("modus", "musik" if section.get("installiert", True) else "klingelzeichen"))
 PY
   )
-  current_installed="${hold_current[0]:-n}"
-  current_mode="${hold_current[1]:-klingelzeichen}"
+  current_installed="${hold_current[0]:-y}"
+  current_mode="${hold_current[1]:-musik}"
   [[ "$current_installed" == "y" ]] && default_install="j"
   [[ "$current_mode" == "musik" ]] && default_mode="2"
   ask_yes_no install_music "Optionale Wartemusik von Johannes Plachetka installieren?" "$default_install"
@@ -1872,7 +1872,7 @@ main(){
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.5.0 ist installiert"
+  sep "Kienzlefon 2.5.1 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import stat
+import tomllib
 from dataclasses import replace
 
 import pytest
@@ -31,7 +31,7 @@ def test_first_install_repeat_disable_and_reenable_preserve_secret_and_other_use
     (etc / "manager.conf").write_text(original)
     config = enabled(app_config)
     export = provision(config, etc)
-    first = json.loads(export.read_text())
+    first = tomllib.loads(export.read_text())
     manager = (etc / "manager.conf").read_text()
     assert original.rstrip() in manager
     assert "write=call,originate,reporting" in (etc / "manager_kienzlefon_middleware.conf").read_text()
@@ -42,16 +42,16 @@ def test_first_install_repeat_disable_and_reenable_preserve_secret_and_other_use
     assert stat.S_IMODE((export.parent / "middleware-secret").stat().st_mode) == 0o600
     provision(config, etc)
     assert manager == (etc / "manager.conf").read_text()
-    assert json.loads(export.read_text())["ami"]["secret"] == first["ami"]["secret"]
+    assert tomllib.loads(export.read_text())["ami"]["secret"] == first["ami"]["secret"]
     disabled = replace(config, middleware=replace(config.middleware, enabled=False))
     provision(disabled, etc)
     assert "secret=" not in (etc / "manager_kienzlefon_middleware.conf").read_text()
     assert "[existing]" in (etc / "manager.conf").read_text()
-    assert not json.loads(export.read_text())["enabled"]
+    assert not tomllib.loads(export.read_text())["enabled"]
     provision(config, etc)
-    assert json.loads(export.read_text())["ami"]["secret"] == first["ami"]["secret"]
+    assert tomllib.loads(export.read_text())["ami"]["secret"] == first["ami"]["secret"]
     provision(config, etc, rotate=True)
-    assert json.loads(export.read_text())["ami"]["secret"] != first["ami"]["secret"]
+    assert tomllib.loads(export.read_text())["ami"]["secret"] != first["ami"]["secret"]
 
 
 def test_new_listener_uses_exact_interface(app_config, tmp_path):
@@ -212,8 +212,8 @@ def test_firewall_changes_only_own_rule_and_retains_tracking_when_inactive(app_c
 
     from kienzlefon import middleware_setup as setup
     config = enabled(app_config)
-    export = config.source.parent / "middleware-connection.json"
-    export.write_text('{"enabled": true}')
+    export = config.source.parent / "middleware-connection.toml"
+    export.write_text('enabled = true\n')
     old = ["allow", "proto", "tcp", "from", "192.168.10.8", "to", "192.168.10.2",
            "port", "5038", "comment", "kienzlefon-middleware"]
     calls = []
@@ -224,14 +224,14 @@ def test_firewall_changes_only_own_rule_and_retains_tracking_when_inactive(app_c
         return SimpleNamespace(returncode=0, stdout="Status: active\n" if active else "Status: inactive\n")
     monkeypatch.setattr(setup.subprocess, "run", run)
     setup.update_firewall(config, {"ufw_rule": old})
-    assert json.loads(export.read_text())["ufw_rule"] == old
+    assert tomllib.loads(export.read_text())["ufw_rule"] == old
     assert calls == [["ufw", "status"]]
     active = True
     calls.clear()
     setup.update_firewall(config, {"ufw_rule": old})
     assert calls[-1] == ["ufw", "--force", "delete", *old]
     assert calls[1][5] == "192.168.10.9"
-    assert json.loads(export.read_text())["ufw_rule"][4] == "192.168.10.9"
+    assert tomllib.loads(export.read_text())["ufw_rule"][4] == "192.168.10.9"
 
 
 def test_configure_asks_each_phone_once_with_ai_default_no(app_config, tmp_path, monkeypatch):
@@ -257,3 +257,51 @@ def test_configure_asks_each_phone_once_with_ai_default_no(app_config, tmp_path,
     assert phones == [('201', True), ('299', True), ('300', True), ('8810', False), ('8811', False)]
     assert tomllib.loads(app_config.source.read_text())['middleware']['nebenstellen'] == ['201', '299', '300']
     assert load_config(app_config.source).middleware.lookup_available
+
+
+@pytest.mark.parametrize('enabled_state', [True, False])
+def test_legacy_json_export_migrates_secret_and_firewall_without_stale_copy(app_config, tmp_path, enabled_state):
+    import json
+
+    from kienzlefon.middleware import read_connection, write_connection
+    config = enabled(app_config)
+    etc = tmp_path / 'asterisk'
+    export = provision(config, etc)
+    old = tomllib.loads(export.read_text())
+    old['ufw_rule'] = ['allow', 'proto', 'tcp', 'from', '192.168.10.9', 'to', '192.168.10.2',
+                       'port', '5038', 'comment', 'kienzlefon-middleware']
+    export.unlink()
+    legacy = export.with_suffix('.json')
+    legacy.write_text(json.dumps(old))
+    legacy.chmod(0o644)
+    assert read_connection(export.parent) == old
+    result = provision(replace(config, middleware=replace(config.middleware, enabled=enabled_state)), etc)
+    assert result.name == 'middleware-connection.toml'
+    assert not legacy.exists()
+    parsed = tomllib.loads(result.read_text())
+    assert parsed['ami']['secret'] == old['ami']['secret']
+    assert parsed['enabled'] is enabled_state
+    assert parsed['ufw_rule'] == old['ufw_rule']
+    assert stat.S_IMODE(result.stat().st_mode) == 0o600
+    backups = list(export.parent.glob('middleware-connection.json.bak.*'))
+    assert len(backups) == 1 and stat.S_IMODE(backups[0].stat().st_mode) == 0o600
+    before = result.read_text()
+    write_connection(export.parent, parsed)
+    assert result.read_text() == before
+    assert len(list(export.parent.glob('middleware-connection.json.bak.*'))) == 1
+
+
+def test_toml_export_escapes_strings_and_omits_optional_null():
+    from kienzlefon.middleware import render_connection
+    data = {'schema_version': 1, 'enabled': False, 'ufw_rule': None,
+            'ami': {'username': 'x"\\test\nZä', 'port': 5038},
+            'click_to_dial': {'extensions': ['201', '299'], 'enabled': True}}
+    parsed = tomllib.loads(render_connection(data))
+    assert parsed == {key: value for key, value in data.items() if value is not None}
+
+
+def test_toml_export_takes_precedence_over_old_json(tmp_path):
+    from kienzlefon.middleware import read_connection
+    (tmp_path / 'middleware-connection.toml').write_text('enabled = false\n')
+    (tmp_path / 'middleware-connection.json').write_text('{"enabled": true}')
+    assert read_connection(tmp_path) == {'enabled': False}

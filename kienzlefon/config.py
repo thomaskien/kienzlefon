@@ -276,6 +276,11 @@ class AIIntegrationConfig:
     lease_ttl_ms: int
     publisher_timeout_ms: int
     sip_passwords: tuple[str, ...]
+    assistant_enabled: bool = True
+
+    @property
+    def admission_enabled(self) -> bool:
+        return self.enabled and self.assistant_enabled
 
     @property
     def slot_ids(self) -> tuple[str, ...]:
@@ -810,6 +815,9 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     ai_enabled_value = ai_integration.get("aktiv", False)
     if not isinstance(ai_enabled_value, bool):
         raise ConfigError("[ki_integration].aktiv muss true oder false sein")
+    ai_assistant_value = ai_integration.get("assistent_aktiv", True)
+    if not isinstance(ai_assistant_value, bool):
+        raise ConfigError("[ki_integration].assistent_aktiv muss true oder false sein")
     ai_password_values = ai_integration.get("sip_passwoerter", [])
     if not isinstance(ai_password_values, list):
         raise ConfigError("[ki_integration].sip_passwoerter muss eine Liste sein")
@@ -969,6 +977,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         ),
         ai_integration=AIIntegrationConfig(
             enabled=ai_enabled_value,
+            assistant_enabled=ai_assistant_value,
             listener_mode=str(ai_integration.get("listener_bindung", "local")).strip(),
             listener_ip=str(ai_integration.get("listener_ip", "127.0.0.1")).strip(),
             listener_port=int(ai_integration.get("listener_port", 8190)),

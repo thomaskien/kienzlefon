@@ -30,6 +30,10 @@ def app_config(tmp_path: Path, private_key: rsa.RSAPrivateKey) -> AppConfig:
         )
     )
     source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    # The shared fixture represents an existing 2.5.0 installation with music
+    # explicitly disabled. New installation defaults are tested separately.
+    source = source.replace('installiert = true\nmodus = "musik"',
+                            'installiert = false\nmodus = "klingelzeichen"', 1)
     replacements = {
         "/var/spool/asterisk/kienzlefon": str(tmp_path / "spool"),
         "/run/kienzlefon": str(tmp_path / "run"),

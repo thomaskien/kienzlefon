@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface in Kienzlefon 2.5.0
+# Kienzlefon-Webinterface in Kienzlefon 2.5.1
 
 Das Webinterface gehoert zur Kienzlefon-Hauptversion und besitzt keine eigene
 Produktversion mehr. Der Hauptinstaller aktualisiert eine vorhandene
@@ -99,3 +99,20 @@ Unter **Ansagen → Automatische Spracherzeugung** ist Kokoro · Thorsten der
 Standard. Piper und Qwen bleiben auswählbar; Kokoro und Qwen setzen ihre lokale
 Installation voraus. Die Auswahl erzeugt betroffene TTS-Ansagen neu und erhält
 manuelle Aufnahmen. Kokoro wird mit dem Hauptinstaller eingerichtet.
+
+## KI-Assistent ab 2.5.1
+
+In der **Uebersicht** zeigt die Karte **KI-Assistent** den Zustand Ein, Aus oder
+Nicht eingerichtet. Bei eingerichteter KI-Anbindung den Schalter setzen und
+**KI-Assistent speichern** waehlen. Die Auswahl steht dauerhaft als
+`[ki_integration].assistent_aktiv` in der TOML-Datei. Die technische Aktivierung,
+Nebenstellen und Passwoerter bleiben unveraendert.
+
+Ausgeschaltet werden neue Anrufe nach den bisherigen Regeln im klassischen
+IVR verarbeitet. Laufende Gespraeche werden nicht abgebrochen. Fuer die reine
+Umschaltung werden keine Ansagen erzeugt und weder Asterisk noch der
+Admission-Listener neu gestartet. Ohne eingerichtete Anbindung zeigt die Karte
+einen Hinweis auf die Einrichtung im Hauptinstaller.
+
+Wartemusik ist bei neuer Einrichtung als Melodie vorausgewaehlt; eine bereits
+gespeicherte Auswahl wird durch ein Update nicht ueberschrieben.

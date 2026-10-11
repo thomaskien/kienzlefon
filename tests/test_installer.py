@@ -1,5 +1,5 @@
 # kienzlefon tests
-# Version: 2.5.0
+# Version: 2.5.1
 # Changelog:
 # - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
 # - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
@@ -275,7 +275,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.5.0" in result.stdout
+    assert "Version: 2.5.1" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -663,3 +663,30 @@ def test_additional_extension_updater_preserves_following_toml_sections(tmp_path
     assert len(result["zusaetzliche_nebenstellen"]["passwoerter"]) == 2
     assert result["sonderqueue"]["name"] == "kienzlefon-sonder"
     assert result["wahlregeln"]["landesvorwahl"] == "49"
+
+
+@pytest.mark.parametrize('installed,mode,expected_prompts', [
+    (True, 'musik', ['install:j', 'mode:2']),
+    (True, 'klingelzeichen', ['install:j', 'mode:1']),
+    (False, 'klingelzeichen', ['install:n']),
+])
+def test_music_installer_defaults_and_existing_choices(tmp_path, installed, mode, expected_prompts):
+    source = Path('kienzlefon-installer.sh').read_text()
+    start = source.index('configure_hold_music(){')
+    end = source.index('\ninstall_hold_music(){', start)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    (bin_dir / 'python').symlink_to(os.sys.executable)
+    config = tmp_path / 'config.toml'
+    config.write_text('[wartemusik]\ninstalliert = ' + str(installed).lower() + '\nmodus = "' + mode + '"\n')
+    script = ('set -euo pipefail\n'
+              'ask_yes_no(){ printf "install:%s\\n" "$3"; if [[ "$3" == j ]]; then printf -v "$1" y; else printf -v "$1" n; fi; }\n'
+              'ask_value(){ printf "mode:%s\\n" "$3"; printf -v "$1" "%s" "$3"; }\n'
+              + source[start:end] + '\nconfigure_hold_music\n')
+    env = {**os.environ, 'VENV': str(tmp_path), 'CONFIG_FILE': str(config)}
+    for _ in range(2):
+        result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        prompts = [line for line in result.stdout.splitlines() if line.startswith(('install:', 'mode:'))]
+        assert prompts == expected_prompts
+        assert tomllib.loads(config.read_text())['wartemusik'] == {'installiert': installed, 'modus': mode}

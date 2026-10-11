@@ -103,7 +103,7 @@ def test_override_blocks_phone_hours(app_config) -> None:
 
 def test_ai_integration_derives_slots_and_extensions(tmp_path: Path) -> None:
     source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
-    source = source.replace("aktiv = false\nlistener_bindung", "aktiv = true\nlistener_bindung", 1)
+    source = source.replace("[ki_integration]\naktiv = false", "[ki_integration]\naktiv = true", 1)
     source = source.replace('listener_bindung = "local"', 'listener_bindung = "lan"')
     source = source.replace('listener_ip = "127.0.0.1"', 'listener_ip = "192.168.10.20"')
     source = source.replace("anzahl_nebenstellen = 0", "anzahl_nebenstellen = 3")
@@ -134,7 +134,7 @@ def test_ai_listener_rejects_wildcard_bind(tmp_path: Path) -> None:
 
 def test_ai_enabled_requires_toml_boolean(tmp_path: Path) -> None:
     source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
-    source = source.replace("aktiv = false\nlistener_bindung", 'aktiv = "false"\nlistener_bindung', 1)
+    source = source.replace('[ki_integration]\naktiv = false', '[ki_integration]\naktiv = "false"', 1)
     target = tmp_path / "invalid-ai-enabled.toml"
     target.write_text(source, encoding="utf-8")
 

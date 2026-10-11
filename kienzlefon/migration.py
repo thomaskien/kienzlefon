@@ -106,6 +106,10 @@ def migrate_config(target: Path, template: Path) -> bool:
         existing_keys = set(re.findall(r"^([A-Za-z0-9_]+)\s*=", current_match["body"], re.M))
         missing = [line for line in body.splitlines() if _key(line) not in existing_keys]
         missing = [line for line in missing if _key(line) is not None]
+        if section == "wartemusik" and tomllib.loads(updated).get(section, {}).get("installiert") is False:
+            # A partial older configuration must not become musik + installiert=false.
+            missing = ['modus = "klingelzeichen"' if _key(line) == "modus" else line
+                       for line in missing]
         if missing:
             insertion = current_match.end("body")
             updated = updated[:insertion].rstrip() + "\n" + "\n".join(missing) + "\n\n" + updated[insertion:].lstrip("\n")

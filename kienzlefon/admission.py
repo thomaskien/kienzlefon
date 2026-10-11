@@ -974,6 +974,15 @@ def admission_agi_main() -> None:
             return
         request_id = str(uuid.uuid4())
     try:
+        # Read from the current TOML on every AGI invocation. Do not restart the
+        # listener or tear down leases/results of calls already in progress.
+        if arguments.selection in {"any", "specific"} and not app_config.ai_integration.admission_enabled:
+            channel.set_variable("KZF_AI_ACCEPTED", "0")
+            channel.set_variable("KZF_AI_REQUEST_ID", request_id)
+            channel.set_variable("KZF_AI_REASON", "assistant_disabled")
+            for name in ("KZF_AI_SLOT_ID", "KZF_AI_EXTENSION", "KZF_AI_LEASE_ID"):
+                channel.set_variable(name, "")
+            return
         if arguments.selection == "call-result":
             channel.set_variable("KZF_AI_HANDOFF_ALLOWED", "0")
             channel.set_variable("KZF_AI_HANDOFF_TARGET", "")

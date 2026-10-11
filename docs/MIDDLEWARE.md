@@ -1,4 +1,4 @@
-# AMI-Middleware ab Kienzlefon 2.5.0
+# AMI-Middleware ab Kienzlefon 2.5.1
 
 Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
 Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die
@@ -38,37 +38,47 @@ Trennung auf, statt fremde Sitzungen zu beenden.
 
 ## Geschuetzte Uebergabedatei
 
-`/etc/kienzlefon/middleware-connection.json` und `middleware-secret` besitzen
+`/etc/kienzlefon/middleware-connection.toml` und `middleware-secret` besitzen
 Modus 0600. Das Secret wird bei normalen Updates wiederverwendet. Beispiel mit
 Platzhalter, kein nutzbares Secret:
 
-```json
-{
-  "schema_version": 1,
-  "enabled": true,
-  "ami": {
-    "host": "192.168.10.2",
-    "port": 5038,
-    "transport": "tcp",
-    "username": "kienzlefon-middleware",
-    "secret": "<zufaelliges-Secret>",
-    "events": "on"
-  },
-  "allowed_source_ip": "192.168.10.9",
-  "lookup": {"enabled": true, "budget_ms": 1000},
-  "click_to_dial": {
-    "enabled": true,
-    "context": "kienzlefon-click-to-dial",
-    "extensions": ["201", "299"],
-    "ring_timeout_ms": 20000
-  }
-}
+```toml
+schema_version = 1
+enabled = true
+allowed_source_ip = "192.168.10.9"
+
+[ami]
+host = "192.168.10.2"
+port = 5038
+transport = "tcp"
+username = "kienzlefon-middleware"
+secret = "<zufaelliges-Secret>"
+events = "on"
+
+[lookup]
+enabled = true
+budget_ms = 1000
+
+[click_to_dial]
+enabled = true
+context = "kienzlefon-click-to-dial"
+extensions = ["201", "299"]
+ring_timeout_ms = 20000
 ```
 
 Ein optionales `ufw_rule`-Feld dient ausschliesslich der Verwaltung der eigenen
 Firewallregel und wird von der Middleware ignoriert. Ebenso muessen zukuenftige
 unbekannte optionale Felder ignoriert werden. Bei `enabled=false` keine Verbindung
-herstellen. Die komplette JSON-Datei darf nicht protokolliert werden.
+herstellen. Die komplette TOML-Datei darf nicht protokolliert werden.
+
+Beim Update von 2.5.0 liest der Installer den alten `middleware-connection.json`-
+Export ein, erhaelt Secret und eigene Firewallregel und schreibt die TOML-Datei
+atomar mit Modus 0600. Anschliessend wird die alte JSON-Datei als
+`middleware-connection.json.bak.<Zeitstempel>` ebenfalls mit Modus 0600 gesichert
+und aus dem bisherigen aktiven Pfad entfernt. Eine bereits vorhandene TOML-Datei
+hat Vorrang. Die Middleware muss ab 2.5.1 TOML lesen (zum Beispiel mit Pythons
+`tomllib`); Feldnamen und `schema_version = 1` bleiben unveraendert. AMI-Nachrichten
+und die separate Middleware-API aendern dadurch ihr Format nicht.
 
 Secret direkt am Terminal anzeigen oder bewusst erneuern:
 

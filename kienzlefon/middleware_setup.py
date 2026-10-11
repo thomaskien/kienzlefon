@@ -14,7 +14,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import load_config
-from .middleware import MiddlewareConfig, listener_plan, manager_inventory, private_write, provision
+from .middleware import (
+    CONNECTION_FILENAME,
+    MiddlewareConfig,
+    listener_plan,
+    manager_inventory,
+    private_write,
+    provision,
+    read_connection,
+    write_connection,
+)
 
 FIELDS = {
     "enabled": "aktiv", "source_ip": "quell_ip", "server_ip": "server_ip", "port": "port",
@@ -159,12 +168,12 @@ def configure(path: Path, etc: Path) -> None:
 
 def update_firewall(config, previous: dict | None) -> None:
     """Manage only rules labelled for this integration on an already active UFW."""
-    export = config.source.parent / "middleware-connection.json"
+    export = config.source.parent / CONNECTION_FILENAME
     # Retain ownership of our old rule even while UFW is unavailable/inactive.
     if previous and previous.get("ufw_rule") and export.exists():
-        data = json.loads(export.read_text())
+        data = read_connection(config.source.parent)
         data["ufw_rule"] = previous["ufw_rule"]
-        private_write(export, json.dumps(data, indent=2) + "\n")
+        write_connection(config.source.parent, data)
     if not shutil.which("ufw"):
         return
     result = subprocess.run(["ufw", "status"], capture_output=True, text=True, timeout=15,
@@ -185,11 +194,11 @@ def update_firewall(config, previous: dict | None) -> None:
                 and old_rule[-2:] == ["comment", "kienzlefon-middleware"]):
             subprocess.run(["ufw", "--force", "delete", *old_rule], check=True,
                            capture_output=True, timeout=30)
-    export = config.source.parent / "middleware-connection.json"
+    export = config.source.parent / CONNECTION_FILENAME
     if export.exists():
-        data = json.loads(export.read_text())
+        data = read_connection(config.source.parent)
         data["ufw_rule"] = new_rule
-        private_write(export, json.dumps(data, indent=2) + "\n")
+        write_connection(config.source.parent, data)
 
 
 def session_fds(output: str, username: str, configured_users: set[str]) -> list[int]:
@@ -239,8 +248,7 @@ def verify_listener(options: MiddlewareConfig) -> None:
 
 def install(path: Path, etc: Path, rotate: bool = False) -> None:
     config = load_config(path)
-    export = path.parent / "middleware-connection.json"
-    previous = json.loads(export.read_text()) if export.exists() else None
+    previous = read_connection(path.parent)
     # A prerequisite can have changed since an earlier installer run.
     if config.middleware.enabled:
         from dataclasses import replace

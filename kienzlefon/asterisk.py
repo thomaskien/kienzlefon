@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.0
+# Version: 2.5.1
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -137,7 +137,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.5.0
+; Version: 2.5.1
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -363,7 +363,7 @@ def render_extensions(config: AppConfig) -> str:
             config.ai_integration.slot_ids, config.ai_integration.extensions, strict=True
         )
     )
-    ai_enabled = "1" if config.ai_integration.enabled else "0"
+    ai_enabled = "1" if config.ai_integration.admission_enabled else "0"
     ai_dtmf_features = "#".join(name for name, _activation, _digit in AI_DTMF_FEATURES)
     queue_failure_checks = "\n".join(
         f' same => n,GotoIf($["${{QUEUESTATUS}}"="{status}"]?fallback)'

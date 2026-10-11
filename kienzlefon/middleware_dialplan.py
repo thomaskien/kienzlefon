@@ -75,7 +75,7 @@ exten => _.,1,Set(KF_C2D_ALLOWED=0)
  same => n(approved),UserEvent(KienzlefonClickToDialProgress,SchemaVersion: 1,RequestId: ${KF_C2D_ID},Phase: dialing_target,SourceUniqueid: ${UNIQUEID})
  same => n,Goto(kienzlefon-outbound,${KF_C2D_NUMBER},1)
 '''
-    return "\n; Kienzlefon Middleware v1 / 2.5.0\n" + r'''[kienzlefon-middleware-in]
+    return "\n; Kienzlefon Middleware v1 / 2.5.1\n" + r'''[kienzlefon-middleware-in]
 exten => s,1,AGI(/opt/kienzlefon/venv/bin/kienzlefon-callerid,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,Gosub(kienzlefon-lookup,s,1)
  same => n,Goto(kienzlefon-entry,s,1)

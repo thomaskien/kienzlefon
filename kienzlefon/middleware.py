@@ -1,4 +1,4 @@
-"""Version 2.5.0: optional AMI access and its public configuration contract.
+"""Version 2.5.1: optional AMI access and its public configuration contract.
 
 AMI grants action categories, not per-variable/per-context capabilities. The
 middleware is a trusted server; browser/workstation credentials must never be
@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import tempfile
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,6 +21,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .config import AppConfig
+
+CONNECTION_FILENAME = "middleware-connection.toml"
+LEGACY_CONNECTION_FILENAME = "middleware-connection.json"
 
 MANAGED = "manager_kienzlefon_middleware.conf"
 START = "; kienzlefon middleware listener begin"
@@ -221,10 +225,70 @@ def listener_plan(config: MiddlewareConfig, manager: Path) -> str:
     return clean + "\n\n" + block + "\n"
 
 
+def read_connection(directory: Path) -> dict | None:
+    """Read TOML preferentially; accept the 2.5.0 JSON only for migration."""
+    target = directory / CONNECTION_FILENAME
+    legacy = directory / LEGACY_CONNECTION_FILENAME
+    if target.exists():
+        data = tomllib.loads(target.read_text(encoding="utf-8"))
+    elif legacy.exists():
+        data = json.loads(legacy.read_text(encoding="utf-8"))
+    else:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError("Middleware-Uebergabedatei muss eine Konfigurationstabelle enthalten")
+    return data
+
+
+def render_connection(data: Mapping) -> str:
+    """Serialize the small versioned export schema without a new runtime dependency."""
+    def literal(value):
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, list):
+            return "[" + ", ".join(literal(item) for item in value) + "]"
+        raise ValueError("Nicht unterstuetzter Datentyp im Middleware-Export")
+
+    def key(value):
+        return value if re.fullmatch(r"[A-Za-z0-9_-]+", value) else literal(value)
+
+    lines = ["# Kienzlefon AMI-Konfiguration; enthaelt geheime Zugangsdaten."]
+    def table(values, prefix=()):
+        for name, value in values.items():
+            # TOML has no null; missing optional ufw_rule has the same meaning.
+            if not isinstance(value, Mapping) and value is not None:
+                lines.append(f"{key(name)} = {literal(value)}")
+        for name, value in values.items():
+            if isinstance(value, Mapping):
+                path = (*prefix, name)
+                lines.extend(("", "[" + ".".join(key(part) for part in path) + "]"))
+                table(value, path)
+    table(data)
+    result = "\n".join(lines) + "\n"
+    tomllib.loads(result)
+    return result
+
+
+def write_connection(directory: Path, data: Mapping) -> Path:
+    target = directory / CONNECTION_FILENAME
+    private_write(target, render_connection(data))
+    legacy = directory / LEGACY_CONNECTION_FILENAME
+    if legacy.exists():
+        # Retain a root-only recovery copy; never leave an active, stale JSON export.
+        backup(legacy)
+        legacy.unlink()
+    return target
+
+
 def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: bool = False) -> Path:
     options = config.middleware
     config_dir = config.source.parent
-    export = config_dir / "middleware-connection.json"
+    export = config_dir / CONNECTION_FILENAME
+    previous = read_connection(config_dir)
     secret_path = config_dir / "middleware-secret"
     manager = etc / "manager.conf"
     managed = etc / MANAGED
@@ -232,13 +296,15 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
     if not options.enabled:
         if managed.exists():
             private_write(managed, "; Kienzlefon-Middleware deaktiviert.\n", 0o640)
-        if export.exists():
-            previous = json.loads(export.read_text(encoding="utf-8"))
+        if previous is not None:
             previous["enabled"] = False
-            private_write(export, json.dumps(previous, indent=2) + "\n")
+            write_connection(config_dir, previous)
         return export
     planned = listener_plan(options, manager)  # Validate BEFORE writing secrets or changing listener.
-    secret = secret_path.read_text().strip() if secret_path.exists() and not rotate else secrets.token_urlsafe(32)
+    saved_secret = (previous or {}).get("ami", {}).get("secret")
+    if secret_path.exists():
+        saved_secret = secret_path.read_text().strip()
+    secret = saved_secret if saved_secret and not rotate else secrets.token_urlsafe(32)
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", secret):
         raise ValueError("Ungueltiges gespeichertes Middleware-Secret; ausdruecklich erneuern")
     source = ipaddress.ip_address(options.source_ip)
@@ -283,5 +349,7 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
                           "context": "kienzlefon-click-to-dial", "extensions": list(options.extensions),
                           "ring_timeout_ms": options.ring_timeout_ms},
     }
-    private_write(export, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    if previous and previous.get("ufw_rule"):
+        data["ufw_rule"] = previous["ufw_rule"]
+    write_connection(config_dir, data)
     return export

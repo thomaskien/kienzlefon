@@ -118,3 +118,32 @@ def test_queue_patch_is_repeatable_and_restores_original_options(
     assert "; kienzlefon queue option begin" not in phone
     assert "musicclass=fremd" in queues
     assert f"musicclass={MUSIC_CLASS}" not in queues
+
+
+@pytest.mark.parametrize('section,expected', [
+    ('', {'installiert': True, 'modus': 'musik'}),
+    ('[wartemusik]\ninstalliert = false\nmodus = "klingelzeichen"\n',
+     {'installiert': False, 'modus': 'klingelzeichen'}),
+    ('[wartemusik]\ninstalliert = true\nmodus = "klingelzeichen"\n',
+     {'installiert': True, 'modus': 'klingelzeichen'}),
+    ('[wartemusik]\ninstalliert = false\n',
+     {'installiert': False, 'modus': 'klingelzeichen'}),
+])
+def test_music_migration_uses_new_defaults_only_for_missing_decisions(tmp_path, section, expected):
+    import tomllib
+
+    from kienzlefon.migration import migrate_config
+    template = Path('config/kienzlefon.toml.example')
+    assert tomllib.loads(template.read_text())['wartemusik'] == {'installiert': True, 'modus': 'musik'}
+    source = template.read_text()
+    start, end = source.index('[wartemusik]'), source.index('[wahlregeln]')
+    source = source[:start] + section + '\n' + source[end:]
+    # The new assistant switch must also retain an explicit off preference.
+    source = source.replace('assistent_aktiv = true', 'assistent_aktiv = false')
+    target = tmp_path / 'config.toml'
+    target.write_text(source)
+    migrate_config(target, template)
+    values = tomllib.loads(target.read_text())
+    assert values['wartemusik'] == expected
+    assert values['ki_integration']['assistent_aktiv'] is False
+    assert not migrate_config(target, template)

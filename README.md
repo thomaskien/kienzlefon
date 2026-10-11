@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.0
+Version: 2.5.1
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.0**
+Version: **2.5.1**
 
 ## Eigenschaften
 
@@ -101,6 +101,25 @@ Version: **2.5.0**
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
 
+## Neu in 2.5.1
+
+- Wartemelodie als Vorgabe bei neuer Einrichtung; vorhandene Entscheidungen
+  bleiben erhalten. Klingelzeichen ist weiterhin im Installer und Webinterface waehlbar.
+- AMI-Verbindungsdatei als TOML: `/etc/kienzlefon/middleware-connection.toml`.
+  Der Installer uebernimmt einen vorhandenen JSON-Export samt Secret und sichert
+  die Altdatei mit Modus 0600, bevor sie aus dem aktiven Pfad entfernt wird.
+- KI-Assistent im Webinterface ein-/ausschaltbar, mit sichtbarem Status.
+  Bei ausgeschalteter KI gehen neue Anrufe ueber den klassischen IVR, inklusive
+  der bisherigen Zeit- und Ansagenregeln. Auch Taste 0 und direkte interne
+  KI-Anwahl erhalten keine neue KI-Zulassung. Bereits laufende Gespraeche und
+  ihre Rueckgaben werden weiter verarbeitet; Nebenstellen und Zugangsdaten bleiben
+  erhalten. Der Schalter startet weder Asterisk noch den Admission-Listener neu.
+
+Die technische KI-Anbindung wird weiterhin im Installer eingerichtet.
+Der Betriebsschalter ist `[ki_integration].assistent_aktiv` in `kienzlefon.toml`;
+`aktiv` beschreibt weiterhin die technische Einrichtung. Ohne eingerichtete
+KI-Anbindung laesst sich der Assistent im Webinterface nicht einschalten.
+
 ## Neu in 2.5.0
 
 - Optionale AMI-Schnittstelle fuer die separat entwickelte Middleware: Callmonitor,
@@ -119,7 +138,7 @@ Version: **2.5.0**
 ### Wartemusik vor der Umstellung anhoeren
 
 Im Installer **Wartemusik einrichten: ja** waehlen, den Wartemodus zunaechst auf
-**Klingelzeichen** belassen. Anschliessend von einem internen Telefon **8805**
+**Klingelzeichen** auswaehlen (bei neuer Einrichtung ist Melodie vorausgewaehlt). Anschliessend von einem internen Telefon **8805**
 waehlen. Diese Hoerprobe spielt nur die Melodie ab und ruft keine Telefone an.
 Alternativ im internen Webinterface unter **Wartemusik** die Vorschau abspielen.
 Erst danach bei Bedarf auf **Melodie** umstellen und speichern. Der Installer
@@ -160,7 +179,7 @@ Die Grundeinstellungen stehen in `[middleware]` der Kienzlefon-TOML.
 
 Das zufaellig erzeugte Secret bleibt bei Updates erhalten. Am Installerende
 kann es direkt am Terminal angezeigt werden. Die Uebergabe an das separate
-Middleware-Modul erfolgt ueber `/etc/kienzlefon/middleware-connection.json`
+Middleware-Modul erfolgt ueber `/etc/kienzlefon/middleware-connection.toml`
 (nur root, Modus 0600). Diese Datei enthaelt Zugangsdaten und gehoert auf den
 Middleware-Server, nicht auf Arbeitsplatzrechner oder eine Freigabe.
 Bestehende AMI-Nutzer und Listener werden erhalten; ein widerspruechlicher

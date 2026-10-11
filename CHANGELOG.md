@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.0
+Version: 2.5.1
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,21 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.1
+
+- Wartemelodie ist bei neuer Einrichtung vorausgewaehlt. Installer,
+  Konfigurationsvorlage und Webinterface verwenden dieselbe Vorgabe;
+  Klingelzeichen und bereits gespeicherte Entscheidungen bleiben erhalten.
+- AMI-Verbindungs-Export auf `middleware-connection.toml` umgestellt.
+  JSON-Altdateien werden unter Erhalt von Secret und Firewallregel migriert
+  und mit Modus 0600 gesichert. Leser und Dokumentation sind angepasst.
+- KI-Assistent ueber die Webinterface-Uebersicht dauerhaft ein-/ausschaltbar.
+  Der Betriebsschalter laesst technische Anbindung, SIP-Zugaenge und laufende
+  Gespraeche bestehen. Neue KI-Zulassungen werden auch bei interner Direktwahl
+  oder veraltetem Dialplan blockiert; bestehende Rueckgaben bleiben moeglich.
+- Reine KI-Schalterauftraege erzeugen keine Ansagen neu und benoetigen nur
+  einen Dialplan-Reload. Kombinierte Auftraege melden Erfolg erst nach Reload.
 
 ## 2.5.0
 

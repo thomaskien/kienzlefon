@@ -74,6 +74,7 @@ LOCAL_DATETIME = re.compile(
 STATUS_LABELS = {
     "konfiguration_wird_geprueft": "Konfiguration wird geprüft",
     "einstellungen_gespeichert": "Einstellungen gespeichert",
+    "einstellungen_aktuell": "Einstellungen aktuell",
     "ansagen_werden_aktualisiert": "Ansagen werden aktualisiert",
     "ansagen_aktuell": "Ansagen aktuell",
     "ansagenerzeugung_fehlgeschlagen": "Ansagenerzeugung fehlgeschlagen",
@@ -631,6 +632,10 @@ def export_state(
         "auth_required": auth_required,
         "auth_ready": auth_ready,
         "network": web,
+        "assistant": {
+            "configured": config.ai_integration.enabled,
+            "enabled": config.ai_integration.admission_enabled,
+        },
         "schedules": schedules,
         "schedule_defaults": default_schedules,
         "prompts": prompt_fields,
@@ -650,7 +655,7 @@ def export_state(
             "installed": config.hold_music.installed,
             "mode": config.hold_music.mode,
             "preview": hold_music_preview,
-            "default_mode": str(default_hold_music.get("modus", "klingelzeichen")),
+            "default_mode": str(default_hold_music.get("modus", "musik")),
             "preview_extension": "8805" if config.hold_music.installed else "",
         },
         "override": {
@@ -753,6 +758,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "sources",
         "tts",
         "hold_music",
+        "assistant",
     }
     if set(job) - allowed_top:
         raise WebAdminError("Auftrag enthält nicht freigegebene Felder")
@@ -915,6 +921,18 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
             raise WebAdminError("Wartemusik ist nicht installiert")
         hold_music["mode"] = mode
 
+    assistant: dict[str, bool] = {}
+    if "assistant" in job:
+        assistant_payload = job["assistant"]
+        if not isinstance(assistant_payload, Mapping) or set(assistant_payload) != {"enabled"}:
+            raise WebAdminError("Nicht freigegebene KI-Assistent-Einstellung")
+        enabled = assistant_payload["enabled"]
+        if not isinstance(enabled, bool):
+            raise WebAdminError("KI-Assistent aktiv muss boolesch sein")
+        if enabled and not config.ai_integration.enabled:
+            raise WebAdminError("KI-Assistent kann ohne eingerichtete KI-Anbindung nicht aktiviert werden")
+        assistant["enabled"] = enabled
+
     return {
         "config_hash": config_hash,
         "schedules": schedules,
@@ -924,6 +942,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "sources": sources,
         "tts": tts,
         "hold_music": hold_music,
+        "assistant": assistant,
     }
 
 
@@ -956,6 +975,13 @@ def _render_updated_config(text: str, values: Mapping[str, Any]) -> str:
             updated = _set_toml_value(updated, "tts", toml_key, values["tts"][source_key])
     if "mode" in values["hold_music"]:
         updated = _set_toml_value(updated, "wartemusik", "modus", values["hold_music"]["mode"])
+    if "enabled" in values["assistant"]:
+        updated = _set_toml_value(
+            updated,
+            "ki_integration",
+            "assistent_aktiv",
+            values["assistant"]["enabled"],
+        )
     return updated
 
 
@@ -1239,7 +1265,11 @@ class WebAdminWorker:
             os.close(directory_fd)
 
     def _generate_prompts(
-        self, job_id: str, *, arguments: tuple[str, ...] = ()
+        self,
+        job_id: str,
+        *,
+        arguments: tuple[str, ...] = (),
+        final_status: bool = True,
     ) -> None:
         self._status(job_id, "ansagen_werden_aktualisiert")
         try:
@@ -1258,7 +1288,8 @@ class WebAdminWorker:
                 job_id, "ansagenerzeugung_fehlgeschlagen", detail=_command_error(result)
             )
             raise WebAdminError("Ansagenerzeugung fehlgeschlagen")
-        self._status(job_id, "ansagen_aktuell")
+        if final_status:
+            self._status(job_id, "ansagen_aktuell")
 
     def _run_prompts_with_progress(
         self,
@@ -1464,21 +1495,56 @@ class WebAdminWorker:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
         self._status(job_id, "einstellungen_gespeichert")
+        assistant_changed = bool(values["assistant"])
+        has_other_changes = any(
+            values[key]
+            for key in (
+                "schedules",
+                "prompts",
+                "prompt_modes",
+                "override",
+                "sources",
+                "tts",
+                "hold_music",
+            )
+        )
+        assistant_only = assistant_changed and not has_other_changes
         try:
-            self._generate_prompts(job_id)
+            if not assistant_only:
+                self._generate_prompts(
+                    job_id,
+                    final_status=not (assistant_changed or values["hold_music"]),
+                )
             if values["hold_music"]:
                 self._update_asterisk()
+            elif assistant_changed:
+                self._update_dialplan()
         finally:
             self.export()
+        # Publish completion only after the refreshed status is readable by PHP.
+        if assistant_only:
+            self._status(job_id, "einstellungen_aktuell")
+        elif assistant_changed or values["hold_music"]:
+            self._status(job_id, "ansagen_aktuell")
 
-    def _update_asterisk(self) -> None:
+    def _update_dialplan(self) -> None:
         result = _run_command(
             [self.asterisk_config_command, "--config", str(self.config_path)],
             timeout=60,
         )
         if result.returncode != 0:
             raise WebAdminError("Asterisk-Konfiguration fehlgeschlagen: " + _command_error(result))
-        for command in ("dialplan reload", "moh reload", "module reload app_queue.so"):
+        result = _run_command(
+            [self.asterisk_command, "-rx", "dialplan reload"], timeout=30
+        )
+        if result.returncode != 0:
+            raise WebAdminError(
+                "Asterisk dialplan reload fehlgeschlagen: " + _command_error(result)
+            )
+
+    def _update_asterisk(self) -> None:
+        self._update_dialplan()
+        for command in ("moh reload", "module reload app_queue.so"):
             result = _run_command([self.asterisk_command, "-rx", command], timeout=30)
             if result.returncode != 0:
                 raise WebAdminError(f"Asterisk {command} fehlgeschlagen: " + _command_error(result))

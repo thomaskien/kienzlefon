@@ -474,7 +474,7 @@ $modeLabels = [
     'deaktiviert' => 'Deaktiviert',
 ];
 $productName = (string)($state['product']['name'] ?? 'kienzlefon.de');
-$productVersion = (string)($state['product']['version'] ?? '2.5.0');
+$productVersion = (string)($state['product']['version'] ?? '2.5.1');
 $productAuthor = (string)($state['product']['author'] ?? 'Dr. Thomas Kienzle');
 $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 ?>
@@ -639,11 +639,22 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
             </div>
             <div class="card mt18"><h3>Temporäre Sonderansage</h3><p><?= $currentOverrideName !== '' ? 'Derzeit wird „' . h($currentOverrideName) . '“ verwendet.' : 'Derzeit ist keine Sonderansage gültig.' ?></p><button class="button secondary" type="button" data-go="override">Sonderansagen öffnen</button></div>
             <div class="card mt18">
+                <h3>KI-Assistent</h3>
+                <?php if (!empty($state['assistant']['configured'])): ?>
+                <p>Status: <strong><?= !empty($state['assistant']['enabled']) ? 'Ein' : 'Aus' ?></strong></p>
+                <div class="field"><label class="checkbox"><input id="assistant-enabled" type="checkbox" <?= !empty($state['assistant']['enabled']) ? 'checked' : '' ?>>KI-Assistent für neue Anrufe aktiv</label><span class="hint">Die technische Anbindung und laufende Gespräche bleiben beim Ausschalten erhalten.</span></div>
+                <button class="button" type="button" id="save-assistant">KI-Assistent speichern</button>
+                <?php else: ?>
+                <p>Status: <strong>Nicht eingerichtet</strong></p>
+                <p class="muted">Der KI-Assistent kann erst eingeschaltet werden, nachdem die technische KI-Anbindung eingerichtet wurde.</p>
+                <?php endif; ?>
+            </div>
+            <div class="card mt18">
                 <h3>Wartemusik</h3>
                 <p class="muted">Installationsstatus: <strong><?= !empty($state['hold_music']['installed']) ? 'installiert' : 'nicht installiert' ?></strong><?= !empty($state['hold_music']['preview_extension']) ? ' · interne Hörprobe ' . h($state['hold_music']['preview_extension']) : '' ?></p>
                 <?php if (!empty($state['hold_music']['installed'])): ?>
                 <div class="planning-grid">
-                    <div class="field"><label for="hold-music-mode">Wiedergabe in Warteschlangen</label><select id="hold-music-mode" data-default="<?= h($state['hold_music']['default_mode'] ?? 'klingelzeichen') ?>"><option value="klingelzeichen" <?= ($state['hold_music']['mode'] ?? '') === 'klingelzeichen' ? 'selected' : '' ?>>Klingelzeichen</option><option value="musik" <?= ($state['hold_music']['mode'] ?? '') === 'musik' ? 'selected' : '' ?>>Melodie</option></select></div>
+                    <div class="field"><label for="hold-music-mode">Wiedergabe in Warteschlangen</label><select id="hold-music-mode" data-default="<?= h($state['hold_music']['default_mode'] ?? 'musik') ?>"><option value="klingelzeichen" <?= ($state['hold_music']['mode'] ?? '') === 'klingelzeichen' ? 'selected' : '' ?>>Klingelzeichen</option><option value="musik" <?= ($state['hold_music']['mode'] ?? '') === 'musik' ? 'selected' : '' ?>>Melodie</option></select></div>
                     <?php if (!empty($state['hold_music']['preview'])): ?><div class="audio-item"><label>Melodie anhören</label><audio controls preload="none" src="?api=audio&amp;kind=hold_music"></audio></div><?php endif; ?>
                 </div>
                 <button class="button" type="button" id="save-hold-music">Wartemusik speichern</button>
@@ -859,7 +870,7 @@ const configHash = <?= json_encode($state['config_hash'] ?? '', JSON_HEX_TAG | J
 const overridePresets = <?= json_encode($state['override_presets'] ?? [], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const initialTtsEngine = <?= json_encode($state['tts']['engine'] ?? 'kokoro', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 const initialQwenVoice = <?= json_encode($state['tts']['qwen_voice'] ?? 'ryan', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
-const terminalCodes = new Set(['ansagen_aktuell','ansagenerzeugung_fehlgeschlagen','aufnahme_gespeichert','aufnahme_verworfen','nebenstelle_nicht_erreichbar','vorlage_gespeichert','vorlage_geloescht','auftrag_abgelehnt']);
+const terminalCodes = new Set(['einstellungen_aktuell','ansagen_aktuell','ansagenerzeugung_fehlgeschlagen','aufnahme_gespeichert','aufnahme_verworfen','nebenstelle_nicht_erreichbar','vorlage_gespeichert','vorlage_geloescht','auftrag_abgelehnt']);
 let selectedManualPreset = '';
 let editingPresetId = '';
 const flash = document.getElementById('flash');
@@ -875,7 +886,7 @@ document.querySelectorAll('.reset-textarea').forEach(button => button.addEventLi
 document.querySelectorAll('.reset-select').forEach(button => button.addEventListener('click', () => { const input = button.parentElement.querySelector('select'); input.value = input.dataset.default || ''; }));
 function splitRanges(value) { return value.split(',').map(item => item.trim()).filter(Boolean); }
 async function queue(payload) { const response = await fetch('?api=job', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(payload)}); const value = await response.json(); if (!response.ok || !value.ok) throw new Error(value.error || 'Auftrag konnte nicht gestartet werden.'); showFlash('Auftrag angenommen', 'Der sichere Dienst verarbeitet die Änderung.'); await poll(value.job_id, payload.action); }
-async function poll(job, action) { for (;;) { await new Promise(resolve => setTimeout(resolve, 900)); const response = await fetch('?api=status&job=' + encodeURIComponent(job), {cache:'no-store'}); const value = await response.json(); if (!value.status) continue; const status = value.status; showFlash(status.label || status.code, status.detail || '', ['ansagenerzeugung_fehlgeschlagen','aufnahme_verworfen','nebenstelle_nicht_erreichbar','auftrag_abgelehnt'].includes(status.code)); if (action === 'record_override_preset' && ['ansagen_aktuell','aufnahme_gespeichert'].includes(status.code)) continue; if (terminalCodes.has(status.code)) { if (['ansagen_aktuell','aufnahme_gespeichert','vorlage_gespeichert','vorlage_geloescht'].includes(status.code)) setTimeout(() => location.reload(), 700); return; } } }
+async function poll(job, action) { for (;;) { await new Promise(resolve => setTimeout(resolve, 900)); const response = await fetch('?api=status&job=' + encodeURIComponent(job), {cache:'no-store'}); const value = await response.json(); if (!value.status) continue; const status = value.status; showFlash(status.label || status.code, status.detail || '', ['ansagenerzeugung_fehlgeschlagen','aufnahme_verworfen','nebenstelle_nicht_erreichbar','auftrag_abgelehnt'].includes(status.code)); if (action === 'record_override_preset' && ['ansagen_aktuell','aufnahme_gespeichert'].includes(status.code)) continue; if (terminalCodes.has(status.code)) { if (['einstellungen_aktuell','ansagen_aktuell','aufnahme_gespeichert','vorlage_gespeichert','vorlage_geloescht'].includes(status.code)) setTimeout(() => location.reload(), 700); return; } } }
 async function safely(task) { try { await task(); } catch (error) { showFlash('Vorgang nicht möglich', error instanceof Error ? error.message : String(error), true); } }
 function promptValues() { const prompts = {}; document.querySelectorAll('textarea[data-prompt]').forEach(input => prompts[input.dataset.prompt] = input.value); return prompts; }
 function promptModeValues() { const modes = {}; document.querySelectorAll('[data-prompt-mode]').forEach(input => modes[input.dataset.promptMode] = input.value); document.querySelectorAll('[data-prompt-enabled]').forEach(input => modes[input.dataset.promptEnabled] = input.checked ? 'immer' : 'deaktiviert'); return modes; }
@@ -884,6 +895,7 @@ function ttsValues() { return {engine:document.getElementById('tts-engine').valu
 function validatePromptTexts(prompts) { for (const [name, value] of Object.entries(prompts)) { if (name !== 'phone_hours' && !value.trim()) throw new Error('Ansagetexte dürfen nicht leer gespeichert werden. Deaktivieren Sie die Ansage ausdrücklich im Anrufsbaum.'); } }
 async function savePrompts() { const prompts = promptValues(); validatePromptTexts(prompts); const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts, sources:sourceValues(), tts}); }
 async function saveCalltree() { await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues()}); }
+async function saveAssistant() { await queue({action:'save', config_hash:configHash, assistant:{enabled:document.getElementById('assistant-enabled').checked}}); }
 async function saveHoldMusic() { await queue({action:'save', config_hash:configHash, hold_music:{mode:document.getElementById('hold-music-mode').value}}); }
 function overridePresetValues() { const priority = Number(document.getElementById('override-preset-priority').value); if (!Number.isInteger(priority)) throw new Error('Bitte geben Sie eine ganzzahlige Priorität ein.'); return {preset_id:editingPresetId, name:document.getElementById('override-preset-name').value, announcement:document.getElementById('override-text').value, active:document.getElementById('override-preset-active').checked, priority, valid_from:document.getElementById('override-preset-valid-from').value, expires_at:document.getElementById('override-preset-expiry').value, block_phone_hours:document.getElementById('override-preset-block').checked, position:document.getElementById('override-preset-position').value, source:document.getElementById('override-preset-source').value}; }
 async function saveOverride() { const source = document.getElementById('override-source').value; const override = {active:document.getElementById('override-active').checked, announcement:document.getElementById('override-text').value, expires_at:document.getElementById('override-expiry').value, block_phone_hours:document.getElementById('override-block').checked, position:document.getElementById('override-position').value}; if (source === 'manuell' && selectedManualPreset) override.manual_preset_id = selectedManualPreset; await queue({action:'save', config_hash:configHash, override, sources:{override:source}}); }
@@ -894,6 +906,7 @@ async function recordOverridePreset(values = overridePresetValues()) { const ext
 document.getElementById('save-times').addEventListener('click', () => safely(async () => { const schedules = {}; document.querySelectorAll('[data-schedule]').forEach(input => { schedules[input.dataset.schedule] ??= {}; schedules[input.dataset.schedule][input.dataset.day] = splitRanges(input.value); }); await queue({action:'save', config_hash:configHash, schedules}); }));
 document.getElementById('save-calltree').addEventListener('click', () => safely(saveCalltree));
 document.getElementById('save-prompts').addEventListener('click', () => safely(savePrompts));
+const saveAssistantButton = document.getElementById('save-assistant'); if (saveAssistantButton) saveAssistantButton.addEventListener('click', () => safely(saveAssistant));
 const saveHoldMusicButton = document.getElementById('save-hold-music'); if (saveHoldMusicButton) saveHoldMusicButton.addEventListener('click', () => safely(saveHoldMusic));
 document.getElementById('save-override').addEventListener('click', () => safely(saveOverride));
 document.getElementById('save-override-preset').addEventListener('click', () => safely(saveOverridePreset));

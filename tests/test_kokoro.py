@@ -432,7 +432,7 @@ def test_interactive_installer_tts_choices(tmp_path, existing, choice, expected)
 def test_release_versions_agree():
     from kienzlefon import __version__
 
-    assert __version__ == "2.5.0"
+    assert __version__ == "2.5.1"
     assert tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"] == __version__
 
 
