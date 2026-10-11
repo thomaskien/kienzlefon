@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.4.1
+Version: 2.5.0
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,18 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.0
+
+- Optionale AMI-Middleware mit geschuetztem Verbindungs-Export, stabilen Secrets,
+  IP-ACL, erhaltener Fremdkonfiguration und separater Telefonfreigabe.
+- Einmaliger eingehender Namenslookup mit maximal einer Sekunde Wartebudget
+  und Click-to-Dial ueber die vorhandenen Wahlregeln und Providerwege.
+- Optionale Wartemusik von Johannes Plachetka, native G.722-/16-kHz-Formate,
+  interne Hoerprobe 8805 und Umschaltung Melodie/Klingelzeichen im Webinterface.
+- Warteschlangenansagen samt deutschen Zahlenfragmenten aus der ausgewaehlten
+  TTS-Stimme oder eigener Aufnahme; eigener Sprachordner ohne Systemdatei-Ersatz.
+- Interne Funktionsnummern dokumentiert, MIT-Lizenz und Musik-Urheberhinweis ergaenzt.
 
 ## 2.4.1
 

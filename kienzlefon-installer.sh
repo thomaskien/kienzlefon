@@ -2,7 +2,7 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.4.4
+# Version: 2.5.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -41,7 +41,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.4.4"
+VERSION="2.5.0"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -381,6 +381,84 @@ configure_demo_anonymization(){
     --demo-anonymize "$value"
 }
 
+configure_hold_music(){
+  local current_installed="n" current_mode="klingelzeichen"
+  local install_music="" mode_choice="1" default_install="n" default_mode="1"
+  mapfile -t hold_current < <("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    section = tomllib.load(handle).get("wartemusik", {})
+print("y" if section.get("installiert", False) else "n")
+print(section.get("modus", "klingelzeichen"))
+PY
+  )
+  current_installed="${hold_current[0]:-n}"
+  current_mode="${hold_current[1]:-klingelzeichen}"
+  [[ "$current_installed" == "y" ]] && default_install="j"
+  [[ "$current_mode" == "musik" ]] && default_mode="2"
+  ask_yes_no install_music "Optionale Wartemusik von Johannes Plachetka installieren?" "$default_install"
+  if [[ "$install_music" == "y" ]]; then
+    printf '\nWiedergabe in Praxis-, Apotheken- und Sonderqueue:\n'
+    printf '  1) Klingelzeichen (Musik bleibt ueber 8805 hoerbar)\n'
+    printf '  2) Melodie\n'
+    while true; do
+      ask_value mode_choice "Wiedergabe (1 oder 2)" "$default_mode"
+      case "$mode_choice" in
+        1) current_mode="klingelzeichen"; break ;;
+        2) current_mode="musik"; break ;;
+        *) printf 'Bitte 1 oder 2 eingeben.\n' ;;
+      esac
+    done
+  else
+    current_mode="klingelzeichen"
+  fi
+  export CONFIG_FILE KZF_HOLD_INSTALLED="$install_music" KZF_HOLD_MODE="$current_mode"
+  "${VENV}/bin/python" - <<'PY'
+import json, os, re, tomllib
+from pathlib import Path
+
+target = Path(os.environ["CONFIG_FILE"])
+text = target.read_text(encoding="utf-8")
+values = {
+    "installiert": os.environ["KZF_HOLD_INSTALLED"] == "y",
+    "modus": os.environ["KZF_HOLD_MODE"],
+}
+for key, value in values.items():
+    literal = ("true" if value else "false") if isinstance(value, bool) else json.dumps(value)
+    pattern = re.compile(
+        rf"(^\[wartemusik\]\n(?:(?!^\[).)*?^{key}\s*=\s*)[^\n]*$", re.M | re.S
+    )
+    text, count = pattern.subn(rf"\g<1>{literal}", text, count=1)
+    if count != 1:
+        raise SystemExit(f"ERROR: [wartemusik].{key} fehlt nach der Migration")
+tomllib.loads(text)
+temporary = target.with_name(f".{target.name}.wartemusik.{os.getpid()}")
+temporary.write_text(text, encoding="utf-8")
+os.chmod(temporary, target.stat().st_mode & 0o777)
+os.replace(temporary, target)
+PY
+}
+
+install_hold_music(){
+  local installed source formats
+  installed="$(${VENV}/bin/python -c \
+    'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["wartemusik"]["installiert"] else "n")' \
+    "$CONFIG_FILE")"
+  [[ "$installed" == "y" ]] || return 0
+  source="${SOURCE_TARGET}/johannes-plachetka-warteschlange.wav"
+  [[ -s "$source" ]] || die "Freigegebene Wartemusik-Quelldatei fehlt: ${source}"
+  formats="$(asterisk -rx "core show file formats")" \
+    || die "Asterisk-Dateiformate konnten nicht geprueft werden."
+  for format in g722 sln16 alaw ulaw; do
+    [[ "$formats" =~ (^|[[:space:]])${format}([[:space:]]|$) ]] \
+      || die "Asterisk unterstuetzt das erforderliche Audioformat ${format} nicht."
+  done
+  asterisk_supports_music_on_hold \
+    || die "Die Asterisk-Anwendung MusicOnHold ist nicht verfuegbar."
+  "${VENV}/bin/python" -m kienzlefon.hold_music \
+    --config "$CONFIG_FILE" --source "$source"
+}
+
 ask_secret(){
   local __var="$1" prompt="$2" value=""
   read -r -s -p "${prompt}: " value
@@ -407,6 +485,12 @@ asterisk_supports_format(){
   local format="$1" formats=""
   formats="$(asterisk -rx "core show file formats")" || return 1
   [[ "$formats" =~ (^|[[:space:]])${format}([[:space:]]|$) ]]
+}
+
+asterisk_supports_music_on_hold(){
+  local application=""
+  application="$(asterisk -rx "core show application MusicOnHold" 2>&1)" || return 1
+  [[ "$application" != *"No application"* && "$application" == *"MusicOnHold("* ]]
 }
 
 ensure_kienzlefax(){
@@ -1368,7 +1452,7 @@ PY
 
 
 prepare_directories() {
-  local output channel spool models voices uploads masters prompts
+  local output channel spool models voices uploads masters prompts queue_digits
   local asterisk_user asterisk_group
   local state
 
@@ -1433,6 +1517,7 @@ prepare_directories() {
       'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["pfade"]["ansagen"])' \
       "$CONFIG_FILE"
   )"
+  queue_digits="${prompts%/*}/de_kienzlefon/digits"
 
   install -d \
     -o "$asterisk_user" \
@@ -1475,7 +1560,8 @@ prepare_directories() {
     -g "$asterisk_group" \
     -m 0755 \
     "$masters" \
-    "$prompts"
+    "$prompts" \
+    "$queue_digits"
 
   if [[ ! -d "$output" ]]; then
     install -d \
@@ -1662,11 +1748,12 @@ collect_regeneration_choice(){
 }
 
 configure_asterisk(){
-  local red_enabled red_extension special_queue ai_enabled ai_count
+  local red_enabled red_extension special_queue ai_enabled ai_count hold_installed
   "${VENV}/bin/kienzlefon-asterisk" --config "$CONFIG_FILE"
   asterisk -rx "pjsip reload"
   asterisk -rx "dialplan reload"
   asterisk -rx "features reload"
+  asterisk -rx "moh reload"
   asterisk -rx "module reload app_queue.so" || true
   asterisk_supports_format wav16 \
     || die "Asterisk stellt das erforderliche Aufnahmeformat wav16 nicht bereit."
@@ -1684,6 +1771,11 @@ configure_asterisk(){
   fi
   asterisk -rx "queue show praxis"
   asterisk -rx "queue show ${special_queue}"
+  hold_installed="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["wartemusik"]["installiert"] else "n")' "$CONFIG_FILE")"
+  if [[ "$hold_installed" == "y" ]]; then
+    asterisk -rx "dialplan show 8805@kienzlefon-internal-targets"
+    asterisk -rx "moh show classes"
+  fi
 }
 
 start_and_verify(){
@@ -1747,6 +1839,9 @@ main(){
   copy_and_install_project
   sep "Konfiguration erfassen"
   collect_configuration
+  sep "Optionale Middleware-Anbindung"
+  "${VENV}/bin/kienzlefon-middleware" configure --config "$CONFIG_FILE"
+  configure_hold_music
   collect_regeneration_choice
   "${VENV}/bin/kienzlefon-config" --config "$CONFIG_FILE"
   demo_mode="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' "$CONFIG_FILE")"
@@ -1768,13 +1863,16 @@ main(){
   install_kokoro_tts
   sep "Modelle und Ansagen"
   install_models_and_prompts
+  sep "Optionale Wartemusik"
+  install_hold_music
   sep "Asterisk integrieren"
+  "${VENV}/bin/kienzlefon-middleware" install --config "$CONFIG_FILE"
   configure_asterisk
   start_and_verify
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.4.4 ist installiert"
+  sep "Kienzlefon 2.5.0 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
@@ -1789,7 +1887,23 @@ else:
     print("Rotes Telefon: nicht verwendet; Taste 9 fuehrt direkt zur Sonderqueue")
 print(f'Sonderqueue: {values["sonderqueue"]["name"]}')
 PY
+  if [[ -r "${CONFIG_DIR}/middleware-secret" ]]; then
+    local show_middleware_secret=""
+    ask_yes_no show_middleware_secret "AMI-Secret jetzt direkt am Terminal anzeigen?" "n"
+    if [[ "$show_middleware_secret" == "y" ]]; then
+      "${VENV}/bin/kienzlefon-middleware" show-secret --config "$CONFIG_FILE"
+    fi
+  fi
   printf 'Internes Ansagen-IVR: 777\n'
+  "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    music = tomllib.load(handle)["wartemusik"]
+if music["installiert"]:
+    print(f'Wartemusik: installiert, Queue-Modus {music["modus"]}; interne Hoerprobe 8805')
+else:
+    print('Wartemusik: nicht installiert; Queue-Modus klingelzeichen')
+PY
   "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:

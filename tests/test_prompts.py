@@ -109,7 +109,9 @@ def test_prompt_catalog_keeps_released_numbers(app_config) -> None:
     assert PROMPT_CATALOG[35] == "whisper_failure"
     assert PROMPT_CATALOG[36] == "blocked_destination"
     assert PROMPT_CATALOG[37] == "admin_main"
-    assert PROMPT_CATALOG[-1] == "webadmin_record_discarded"
+    assert PROMPT_CATALOG[57] == "webadmin_record_discarded"
+    assert PROMPT_CATALOG[61] == "queue_callswaiting"
+    assert PROMPT_CATALOG[-1] == "queue_digit_milliards"
     assert "ai_assistant_intro" not in PROMPT_CATALOG
     assert "admin_pin" not in PROMPT_CATALOG
     assert "Override" not in rendered_prompts(app_config)["admin_special_menu"]

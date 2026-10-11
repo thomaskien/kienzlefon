@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.4.4
+# Version: 2.5.0
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -27,6 +27,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import AppConfig, SipLineConfig
+from .hold_music import MUSIC_CLASS
+from .middleware_dialplan import render_middleware
+from .queue_prompts import ASTERISK_QUEUE_LANGUAGE
 
 
 class AsteriskConfigError(RuntimeError):
@@ -134,7 +137,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.4.4
+; Version: 2.5.0
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -272,6 +275,12 @@ exten => _X.,1,AGI(/opt/kienzlefon/venv/bin/kienzlefon-wahlpruefung,--config,/et
 """
 
 
+def _queue_options(config: AppConfig, options: str = "r") -> str:
+    if config.hold_music.mode == "musik":
+        return options.replace("r", "").replace("R", "")
+    return options
+
+
 def render_extensions(config: AppConfig) -> str:
     red = config.ivr.red_extension
     specialist_description = (
@@ -280,18 +289,22 @@ def render_extensions(config: AppConfig) -> str:
         else "Kienzlefon Fachstelle direkt in priorisierte Sonderqueue"
     )
     specialist_dial = f"Dial(PJSIP/{red},{config.ivr.red_ring_seconds})"
-    specialist_queue = f"Queue({config.special_queue.name},r)"
+    queue_options = _queue_options(config)
+    specialist_queue = f"Queue({config.special_queue.name},{queue_options})"
     if config.ivr.specialist_announcement:
         specialist_dial = (
             f"Dial(PJSIP/{red},{config.ivr.red_ring_seconds},U(kienzlefon-specialist-agent))"
         )
-        specialist_queue = f"Queue({config.special_queue.name},r,,kienzlefon/specialist_agent)"
+        specialist_queue = (
+            f"Queue({config.special_queue.name},{queue_options},,kienzlefon/specialist_agent)"
+        )
     red_attempt = ""
     if config.ivr.red_enabled:
         red_attempt = f""" same => n,{specialist_dial}
  same => n,GotoIf($[\"${{DIALSTATUS}}\"=\"ANSWER\"]?done)
 """
     specialist_route = f"""{red_attempt} same => n,Set(QUEUE_PRIO={config.ivr.red_fallback_priority})
+ same => n,Set(CHANNEL(language)={ASTERISK_QUEUE_LANGUAGE})
  same => n,{specialist_queue}
  same => n,Gosub(kienzlefon-ai-queue-fallback,s,1)
  same => n(done),Hangup()
@@ -326,6 +339,8 @@ def render_extensions(config: AppConfig) -> str:
  same => n,Hangup()
 """
     internal_targets = [str(value) for value in range(8800, 8805)]
+    if config.hold_music.installed:
+        internal_targets.append("8805")
     internal_targets.extend(config.ai_integration.extensions)
     ai_local_routes = "".join(
         f"exten => {extension},1,Goto(kienzlefon-internal-targets,{extension},1)\n"
@@ -361,6 +376,12 @@ def render_extensions(config: AppConfig) -> str:
             "LEAVEUNAVAIL",
         )
     )
+    preview_route = ""
+    if config.hold_music.installed:
+        preview_route = f"""exten => 8805,1,Answer()
+ same => n,MusicOnHold({MUSIC_CLASS})
+ same => n,Hangup()
+"""
     return f"""; kienzlefon
 ; Version: 2.4.0
 ; Changelog:
@@ -502,6 +523,7 @@ exten => 8801,1,Goto(kienzlefon-in,s,1)
 exten => 8802,1,Goto(kfx-phone-queue,s,1)
 exten => 8803,1,Goto(kienzlefon-pharmacy-queue,s,1)
 exten => 8804,1,Goto(kienzlefon-specialist,s,1)
+{preview_route}
 {ai_specific_routes}
 
 [kienzlefon-ai-endpoint-in]
@@ -511,7 +533,8 @@ exten => _X.,1,Hangup(21)
 exten => s,1,NoOp(Kienzlefon Apotheke in bestehende Praxisqueue)
  same => n,Set(QUEUE_PRIO={config.ivr.pharmacy_priority})
  same => n,Set(QUEUE_RAISE_PENALTY=0)
- same => n,Queue({config.ivr.queue_name},r,,kienzlefon/pharmacy_agent)
+ same => n,Set(CHANNEL(language)={ASTERISK_QUEUE_LANGUAGE})
+ same => n,Queue({config.ivr.queue_name},{queue_options},,kienzlefon/pharmacy_agent)
  same => n,Gosub(kienzlefon-ai-queue-fallback,s,1)
  same => n,Hangup()
 
@@ -528,6 +551,7 @@ exten => _X.,1,Gosub(kfx_external_capacity,primary-phone,1)
  same => n,GotoIf($[\"${{KFX_CAPACITY_OK}}\"=\"1\"]?accepted)
  same => n,Hangup(17)
  same => n(accepted),AGI(/opt/kienzlefon/venv/bin/kienzlefon-callerid,--config,/etc/kienzlefon/kienzlefon.toml)
+ same => n,Gosub(kienzlefon-lookup,s,1)
  same => n,Goto(kfx-phone-queue,s,1)
 exten => s,1,Goto(kienzlefon-direct-queue-in,{config.asterisk.direct_queue.did or "inbound-calls"},1)
 exten => inbound-calls,1,Goto(kienzlefon-direct-queue-in,{config.asterisk.direct_queue.did or "inbound-calls"},1)
@@ -537,6 +561,7 @@ exten => _X.,1,Gosub(kfx_external_capacity,primary-phone,1)
  same => n,GotoIf($[\"${{KFX_CAPACITY_OK}}\"=\"1\"]?accepted)
  same => n,Hangup(17)
  same => n(accepted),AGI(/opt/kienzlefon/venv/bin/kienzlefon-callerid,--config,/etc/kienzlefon/kienzlefon.toml)
+ same => n,Gosub(kienzlefon-lookup,s,1)
  same => n,Answer()
 {specialist_route}
 exten => s,1,Goto(kienzlefon-direct-red-in,{config.asterisk.direct_red.did or "inbound-calls"},1)
@@ -563,6 +588,7 @@ exten => _XXX.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
 exten => _+X.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
  same => n,Set(KZF_OUT_CALLERID={config.asterisk.main_outbound_number})
  same => n,Goto(kienzlefon-outbound,${{EXTEN}},1)
+{render_middleware(config)}
 """
 
 
@@ -577,6 +603,11 @@ def render_queues(config: AppConfig) -> str:
     rendered_members = "\n".join(
         f"member => PJSIP/{extension},0,Telefon {extension},PJSIP/{extension}"
         for extension in dict.fromkeys(members)
+    )
+    music_property = (
+        f"musicclass={MUSIC_CLASS}"
+        if config.hold_music.mode == "musik"
+        else "; Eigene Wartemusik fuer diese Queue ist deaktiviert."
     )
     return f"""; kienzlefon
 ; Version: 1.8
@@ -594,11 +625,14 @@ joinempty=yes
 leavewhenempty=no
 timeout=19
 retry=1
+{music_property}
 {rendered_members}
 """
 
 
 def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")) -> None:
+    from .hold_music import install_config as install_hold_music_config
+
     pjsip_target = etc / "pjsip-kienzlefon.conf"
     extensions_target = etc / "extensions-kienzlefon.conf"
     queues_target = etc / "queues-kienzlefon.conf"
@@ -607,6 +641,7 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
     _atomic_install(extensions_target, render_extensions(config))
     _atomic_install(queues_target, render_queues(config))
     _atomic_install(features_target, render_features())
+    install_hold_music_config(config, etc)
     _ensure_include(etc / "pjsip.conf", '#tryinclude "/etc/asterisk/pjsip-kienzlefon.conf"')
     _ensure_include(
         etc / "extensions.conf", '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"'
@@ -615,9 +650,13 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
     _ensure_include(
         etc / "features.conf", '#include "/etc/asterisk/features-kienzlefon.conf"'
     )
-    _patch_kienzlefax_ivr_route(etc / "extensions-kfx-telefonie.conf")
+    _patch_kienzlefax_ivr_route(etc / "extensions-kfx-telefonie.conf", config.middleware.enabled)
+    _patch_middleware_overflow(etc / "extensions-kfx-telefonie.conf", config.middleware.enabled)
     _patch_kienzlefax_queue_callerid(etc / "extensions-kfx-telefonie.conf")
+    _patch_kienzlefax_queue_language(etc / "extensions-kfx-telefonie.conf")
     _patch_kienzlefax_queue_handoff_fallback(etc / "extensions-kfx-telefonie.conf")
+    _patch_kienzlefax_queue_audio(config, etc / "extensions-kfx-telefonie.conf")
+    _patch_kienzlefax_queue_properties(config, etc / "queues-kfx.conf")
     _patch_internal_routes(config, etc / "extensions-kfx-telefonie.conf")
     _patch_direct_did_routes(config, etc / "extensions-kfx-telefonie.conf", "kfx-phone-in")
     _patch_direct_did_routes(config, etc / "extensions.conf", "kfx-provider-in")
@@ -644,21 +683,29 @@ def _ensure_include(path: Path, line: str) -> None:
     _atomic_install(path, text.rstrip() + "\n\n" + line + "\n")
 
 
-def _patch_kienzlefax_ivr_route(path: Path) -> None:
+def _patch_kienzlefax_ivr_route(path: Path, middleware: bool = False) -> None:
     if not path.is_file():
         raise AsteriskConfigError(f"Kienzlefax-Telefoniedialplan fehlt: {path}")
     originals = (
         "same => n(accepted),Goto(kfx-phone-queue,s,1)",
         "same => n(accepted),Goto(kienzlefon-in,s,1)",
+        "same => n(accepted),Goto(kienzlefon-entry,s,1)",
+        "same => n(accepted),Goto(kienzlefon-middleware-in,s,1)",
     )
-    replacement = "same => n(accepted),Goto(kienzlefon-entry,s,1)"
+    destination = "kienzlefon-middleware-in" if middleware else "kienzlefon-entry"
+    replacement = f"same => n(accepted),Goto({destination},s,1)"
     text = path.read_text(encoding="utf-8")
-    if replacement in text:
+    context = re.search(r"^\[kfx-phone-in\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if context is None:
+        raise AsteriskConfigError("Kienzlefax-Eingangskontext wurde nicht gefunden")
+    body = context["body"]
+    if replacement in body:
         return
-    matches = [original for original in originals if original in text]
-    if len(matches) != 1:
+    matches = [original for original in originals if original in body]
+    if len(matches) != 1 or body.count(matches[0]) != 1:
         raise AsteriskConfigError("Kienzlefax-IVR-Uebergabepunkt wurde nicht eindeutig gefunden")
-    _atomic_install(path, text.replace(matches[0], replacement, 1))
+    body = body.replace(matches[0], replacement, 1)
+    _atomic_install(path, text[:context.start("body")] + body + text[context.end("body"):])
 
 
 def _patch_kienzlefax_queue_callerid(path: Path) -> None:
@@ -692,6 +739,108 @@ def _patch_kienzlefax_queue_handoff_fallback(path: Path) -> None:
     _atomic_install(path, text[:insertion] + "\n" + marker + text[insertion:])
 
 
+def _patch_kienzlefax_queue_language(path: Path) -> None:
+    """Setzt nur beim Eintritt in die bestehende Praxisqueue die eigene Sprache."""
+    text = path.read_text(encoding="utf-8")
+    marker = f" same => n,Set(CHANNEL(language)={ASTERISK_QUEUE_LANGUAGE})"
+    context = re.search(
+        r"^\[kfx-phone-queue\]\n(?P<body>.*?)(?=^\[|\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if context is None:
+        raise AsteriskConfigError("Kienzlefax-Praxisqueue wurde nicht gefunden")
+    if marker in context["body"]:
+        return
+    queue = re.search(
+        r"^[ \t]*same => n,Queue\([^\n]+\)$", context["body"], re.MULTILINE
+    )
+    if queue is None:
+        raise AsteriskConfigError("Queue-Aufruf der Kienzlefax-Praxisqueue wurde nicht gefunden")
+    insertion = context.start("body") + queue.start()
+    _atomic_install(path, text[:insertion] + marker + "\n" + text[insertion:])
+
+
+def _patch_kienzlefax_queue_audio(config: AppConfig, path: Path) -> None:
+    """Entfernt im Musikmodus nur r/R und kann die Originalzeile exakt wiederherstellen."""
+    text = path.read_text(encoding="utf-8")
+    managed = re.compile(
+        r"; kienzlefon queue option begin\n"
+        r"; original: (?P<original>[^\n]+)\n"
+        r"[^\n]+\n"
+        r"; kienzlefon queue option end",
+    )
+    existing = managed.search(text)
+    if existing is not None:
+        text = text[: existing.start()] + existing["original"] + text[existing.end() :]
+    if config.hold_music.mode != "musik":
+        if existing is not None:
+            _atomic_install(path, text)
+        return
+
+    context = re.search(r"^\[kfx-phone-queue\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if context is None:
+        raise AsteriskConfigError("Kienzlefax-Praxisqueue wurde nicht gefunden")
+    queue_matches = list(
+        re.finditer(r"^[ \t]*same => n,Queue\([^\n]+\)$", context["body"], re.M)
+    )
+    if len(queue_matches) != 1:
+        raise AsteriskConfigError(
+            "Queue-Aufruf der Kienzlefax-Praxisqueue wurde nicht eindeutig gefunden"
+        )
+    relative = queue_matches[0]
+    original = relative.group(0)
+    call = re.match(
+        r"(?P<prefix>.*?Queue\([^,\n]+,)(?P<options>[^,\n)]*)(?P<suffix>.*)",
+        original,
+    )
+    if call is None:
+        raise AsteriskConfigError("Queue-Optionen der Kienzlefax-Praxisqueue sind ungueltig")
+    options = call["options"].replace("r", "").replace("R", "")
+    patched = call["prefix"] + options + call["suffix"]
+    block = (
+        "; kienzlefon queue option begin\n"
+        f"; original: {original}\n"
+        f"{patched}\n"
+        "; kienzlefon queue option end"
+    )
+    start = context.start("body") + relative.start()
+    end = context.start("body") + relative.end()
+    _atomic_install(path, text[:start] + block + text[end:])
+
+
+def _patch_kienzlefax_queue_properties(config: AppConfig, path: Path) -> None:
+    """Ergaenzt nur eigene Queue-Werte; fremde Eigenschaften bleiben unangetastet."""
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    text = re.sub(
+        r"; kienzlefon queue properties begin\n.*?"
+        r"; kienzlefon queue properties end\n?",
+        "",
+        text,
+        flags=re.S,
+    )
+    context = re.search(r"^\[praxis\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if context is None:
+        raise AsteriskConfigError("Kienzlefax-Queue [praxis] wurde nicht gefunden")
+    values = [
+        "; kienzlefon queue properties begin",
+        "queue-thankyou=kienzlefon/queue_thankyou",
+        "queue-youarenext=kienzlefon/queue_youarenext",
+        "queue-thereare=kienzlefon/queue_thereare",
+        "queue-callswaiting=kienzlefon/queue_callswaiting",
+    ]
+    if config.hold_music.mode == "musik":
+        values.append(f"musicclass={MUSIC_CLASS}")
+    values.append("; kienzlefon queue properties end")
+    block = "\n".join(values) + "\n"
+    insertion = context.end("body")
+    body = context["body"].rstrip() + "\n" + block
+    updated = text[: context.start("body")] + body + text[insertion:]
+    _atomic_install(path, updated)
+
+
 def _patch_internal_routes(config: AppConfig, path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     marker = "; kienzlefon internal routes begin"
@@ -703,6 +852,8 @@ def _patch_internal_routes(config: AppConfig, path: Path) -> None:
         for extension in extensions
     )
     internal_targets = [str(value) for value in range(8800, 8805)]
+    if config.hold_music.installed:
+        internal_targets.append("8805")
     internal_targets.extend(config.ai_integration.extensions)
     routes += "".join(
         f"exten => {extension},1,Goto(kienzlefon-internal-targets,{extension},1)\n"
@@ -808,3 +959,18 @@ def _backup(path: Path) -> None:
     if path.exists():
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         shutil.copy2(path, path.with_name(f"{path.name}.old.kienzlefon.{stamp}"))
+
+
+def _patch_middleware_overflow(path: Path, enabled: bool) -> None:
+    text = path.read_text(encoding="utf-8")
+    context = re.search(r"^\[kfx-phone-overflow-in\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if context is None:
+        return
+    target = "kienzlefon-middleware-queue-in" if enabled else "kfx-phone-queue"
+    body, count = re.subn(
+        r"same => n\(accepted\),Goto\((?:kfx-phone-queue|kienzlefon-middleware-queue-in),s,1\)",
+        f"same => n(accepted),Goto({target},s,1)", context["body"], count=1,
+    )
+    if count != 1:
+        raise AsteriskConfigError("Externer Ueberlauf-Eingang fuer Middleware nicht eindeutig gefunden")
+    _atomic_install(path, text[:context.start("body")] + body + text[context.end("body"):])

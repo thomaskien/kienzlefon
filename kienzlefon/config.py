@@ -32,7 +32,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .middleware import MiddlewareConfig, telephone_extensions
 from .models import CallType, FieldName
+from .queue_prompts import QUEUE_NUMBER_PROMPTS
 
 SUPPORTED_WHISPER_MODELS = frozenset({"large-v3-turbo", "large-v3"})
 SUPPORTED_TTS_ENGINES = frozenset({"kokoro", "piper", "qwen"})
@@ -306,6 +308,12 @@ class SpecialQueueConfig:
 
 
 @dataclass(frozen=True)
+class HoldMusicConfig:
+    installed: bool
+    mode: str
+
+
+@dataclass(frozen=True)
 class DialRulesConfig:
     country_code: str
     area_code: str
@@ -350,6 +358,7 @@ class AppConfig:
     announcement_ivr: AnnouncementIVRConfig
     standalone_extensions: tuple[StandaloneExtensionConfig, ...]
     special_queue: SpecialQueueConfig
+    hold_music: HoldMusicConfig
     dial_rules: DialRulesConfig
     prompts: PromptConfig
     prompt_sources: Mapping[str, str]
@@ -358,6 +367,7 @@ class AppConfig:
     phone_hours: WeeklySchedule
     pharmacy_hours: WeeklySchedule
     specialist_hours: WeeklySchedule
+    middleware: MiddlewareConfig = MiddlewareConfig()
 
     @property
     def local_extensions(self) -> tuple[str, ...]:
@@ -371,6 +381,8 @@ class AppConfig:
         values.append(self.announcement_ivr.extension)
         values.extend(entry.extension for entry in self.standalone_extensions)
         values.extend(str(extension) for extension in range(8800, 8805))
+        if self.hold_music.installed:
+            values.append("8805")
         values.extend(self.ai_integration.extensions)
         return tuple(dict.fromkeys(values))
 
@@ -495,7 +507,11 @@ REQUIRED_PROMPTS = frozenset(
         "webadmin_record_actions",
         "webadmin_record_saved",
         "webadmin_record_discarded",
-    }
+        "queue_thankyou",
+        "queue_youarenext",
+        "queue_thereare",
+        "queue_callswaiting",
+    } | QUEUE_NUMBER_PROMPTS.keys()
 )
 
 OPTIONAL_PROMPT_TEXTS = frozenset({"phone_hours"})
@@ -701,6 +717,9 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     announcement_ivr = _section(raw, "ansagen_ivr")
     standalone = _section(raw, "zusaetzliche_nebenstellen")
     special_queue = _section(raw, "sonderqueue")
+    hold_music = raw.get("wartemusik", {})
+    if not isinstance(hold_music, Mapping):
+        raise ConfigError("[wartemusik] muss ein TOML-Abschnitt sein")
     dial_rules = _section(raw, "wahlregeln")
     direct_queue = _section(raw, "sip_direkte_queue")
     direct_red = _section(raw, "sip_rotes_telefon")
@@ -802,6 +821,14 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     demo_value = telepraxis.get("demo", False)
     if not isinstance(demo_value, bool):
         raise ConfigError("[telepraxis].demo muss true oder false sein")
+    hold_music_installed = hold_music.get("installiert", False)
+    if not isinstance(hold_music_installed, bool):
+        raise ConfigError("[wartemusik].installiert muss true oder false sein")
+    hold_music_mode = str(hold_music.get("modus", "klingelzeichen")).strip()
+    if hold_music_mode not in {"klingelzeichen", "musik"}:
+        raise ConfigError("[wartemusik].modus muss klingelzeichen oder musik sein")
+    if hold_music_mode == "musik" and not hold_music_installed:
+        raise ConfigError("[wartemusik].modus musik erfordert installiert=true")
     demo_mode = demo_value
     anonymize_value = telepraxis.get("anrufernummern_anonymisieren", False)
     if not isinstance(anonymize_value, bool):
@@ -837,7 +864,12 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     scheduled_sources = {
         entry.prompt_name: entry.source for entry in scheduled_overrides
     }
+    try:
+        middleware = MiddlewareConfig.parse(raw.get("middleware", {}))
+    except (ValueError, TypeError) as exc:
+        raise ConfigError(str(exc)) from exc
     config = AppConfig(
+        middleware=middleware,
         source=source,
         paths=paths_config,
         practice=PracticeConfig(name=str(_required(practice, "name", "praxis")), timezone=timezone),
@@ -962,6 +994,10 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             weight=int(special_queue.get("gewicht", 100)),
             additional_extensions=tuple(str(value) for value in special_members),
         ),
+        hold_music=HoldMusicConfig(
+            installed=hold_music_installed,
+            mode=hold_music_mode,
+        ),
         dial_rules=DialRulesConfig(
             country_code=str(dial_rules.get("landesvorwahl", "49")),
             area_code=str(_required(dial_rules, "ortsvorwahl", "wahlregeln")),
@@ -1052,6 +1088,17 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         raise ConfigError("Das rote Telefon darf nicht die Ansagen-Nebenstelle 777 verwenden")
     if first <= int(config.announcement_ivr.extension) <= last:
         raise ConfigError("Die Ansagen-Nebenstelle 777 darf nicht Teil der Praxisqueue sein")
+    if config.hold_music.installed:
+        reserved = "8805"
+        collisions = set(config.ai_integration.extensions)
+        collisions.update(entry.extension for entry in config.standalone_extensions)
+        if (
+            first <= int(reserved) <= last
+            or config.ivr.red_extension == reserved
+            or config.announcement_ivr.extension == reserved
+            or reserved in collisions
+        ):
+            raise ConfigError("Die Wartemusik-Hoerprobe 8805 kollidiert mit einer Nebenstelle")
     if config.announcement_ivr.silence_seconds < 1 or config.announcement_ivr.max_seconds < 1:
         raise ConfigError("Aufnahmezeiten des Ansagen-IVR muessen positiv sein")
     if config.ai_integration.listener_mode not in {"wireguard", "lan", "local"}:
@@ -1135,6 +1182,10 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             "Sonderqueue enthaelt unbekannte zusaetzliche Nebenstellen: "
             + ", ".join(sorted(unknown))
         )
+    unknown_middleware = set(config.middleware.extensions) - set(telephone_extensions(config))
+    if unknown_middleware:
+        raise ConfigError("Middleware enthaelt nicht eingerichtete Telefon-Nebenstellen: "
+                          + ", ".join(sorted(unknown_middleware)))
     return config
 
 

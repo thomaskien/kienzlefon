@@ -13,7 +13,6 @@ from kienzlefon.cli import asterisk_main
 from kienzlefon.config import StandaloneExtensionConfig, load_config
 from kienzlefon.migration import migrate_config
 
-
 AI_CODECS = [
     "disallow=all", "allow=g722",
     "incoming_call_offer_pref=local_first", "outgoing_call_offer_pref=local_first",
@@ -61,7 +60,7 @@ def test_install_update_and_regeneration_keep_ai_fix_and_existing_settings(
     ))
     source = source.replace("ansage_pause_ms = 700", "ansage_pause_ms = 1000")
     if existing != "new":
-        source = source.replace("# Version: 2.4.4", "# Version: 2.4.3", 1)
+        source = source.replace("# Version: 2.5.0", "# Version: 2.4.3", 1)
     app_config.source.write_text(source)
     before = load_config(app_config.source)
     migrate_config(app_config.source, Path("config/kienzlefon.toml.example"))

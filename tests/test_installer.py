@@ -1,5 +1,5 @@
 # kienzlefon tests
-# Version: 2.4.4
+# Version: 2.5.0
 # Changelog:
 # - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
 # - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
@@ -275,7 +275,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.4.4" in result.stdout
+    assert "Version: 2.5.0" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -521,6 +521,16 @@ def test_installer_checks_wav16_and_loudnorm_support() -> None:
     assert "Aufnahmeformat wav16" in installer
 
 
+def test_prompt_workers_can_update_private_queue_digit_directory() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    web_installer = Path("kienzlefon-webinterface-installer.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'queue_digits="${prompts%/*}/de_kienzlefon/digits"' in installer
+    assert 'QUEUE_DIGITS_DIR="${PROMPTS_DIR%/*}/de_kienzlefon/digits"' in web_installer
+    assert "${QUEUE_DIGITS_DIR}" in web_installer.split("ReadWritePaths=", 1)[1]
+
+
 def test_asterisk_format_check_is_safe_with_pipefail() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
     start = installer.index("asterisk_supports_format(){")
@@ -538,6 +548,37 @@ asterisk_supports_format wav16
 """
     result = subprocess.run(["bash", "-c", script], check=False)
     assert result.returncode == 0
+
+
+def test_music_on_hold_check_accepts_real_syntax_and_rejects_missing_module() -> None:
+    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
+    start = installer.index("asterisk_supports_music_on_hold(){")
+    end = installer.index("\n}\n", start) + 3
+    function = installer[start:end]
+
+    success = subprocess.run(
+        [
+            "bash", "-c",
+            f"""asterisk() {{ printf '%s\\n' '[Syntax]' 'MusicOnHold(class)'; }}
+{function}
+asterisk_supports_music_on_hold
+""",
+        ],
+        check=False,
+    )
+    missing = subprocess.run(
+        [
+            "bash", "-c",
+            f"""asterisk() {{ printf '%s\\n' 'No application MusicOnHold registered.'; }}
+{function}
+asterisk_supports_music_on_hold
+""",
+        ],
+        check=False,
+    )
+
+    assert success.returncode == 0
+    assert missing.returncode != 0
 
 
 def test_ffmpeg_filter_check_is_safe_with_pipefail() -> None:

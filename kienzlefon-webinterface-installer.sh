@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.4.4
+# Kienzlefon-Version: 2.5.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -32,7 +32,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.4.4"
+VERSION="2.5.0"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"
@@ -165,6 +165,7 @@ PY
   [[ -n "${KZF_PATHS[0]}" && -n "${KZF_PATHS[1]}" && -n "${KZF_PATHS[2]}" ]] \
     || die "Mindestens ein erforderliches Verwaltungsverzeichnis ist leer."
   PROMPTS_DIR="${KZF_PATHS[0]}"
+  QUEUE_DIGITS_DIR="${PROMPTS_DIR%/*}/de_kienzlefon/digits"
   MASTERS_DIR="${KZF_PATHS[1]}"
   UPLOADS_DIR="${KZF_PATHS[2]}"
   return 0
@@ -341,7 +342,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX
-ReadWritePaths=/etc/kienzlefon /run/kienzlefon -/var/lib/kienzlefon/qwen3-tts ${RUNTIME_DIR} ${PROMPTS_DIR} ${MASTERS_DIR} ${UPLOADS_DIR}
+ReadWritePaths=/etc/kienzlefon /etc/asterisk /run/kienzlefon -/var/lib/kienzlefon/qwen3-tts ${RUNTIME_DIR} ${PROMPTS_DIR} ${QUEUE_DIGITS_DIR} ${MASTERS_DIR} ${UPLOADS_DIR}
 TimeoutStartSec=4h
 EOF
 

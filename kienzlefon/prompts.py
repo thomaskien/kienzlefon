@@ -37,9 +37,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import AppConfig, TimeWindow, WEEKDAYS, WeeklySchedule
+from .config import WEEKDAYS, AppConfig, TimeWindow, WeeklySchedule
 from .health import worker_is_healthy
 from .kokoro import MODEL_FILES, MODEL_REVISION, RUNTIME_VERSION
+from .queue_prompts import QUEUE_NUMBER_PROMPTS, digit_output_paths
 from .speech_text import SPEECH_TEXT_VERSION, normalize_german_speech
 from .spool import write_json_atomic
 
@@ -64,6 +65,8 @@ PROMPT_CATALOG = (
     "admin_special_status_keep", "admin_special_status_block",
     "webadmin_record", "webadmin_record_actions", "webadmin_record_saved",
     "webadmin_record_discarded",
+    "queue_thankyou", "queue_youarenext", "queue_thereare", "queue_callswaiting",
+    *QUEUE_NUMBER_PROMPTS,
 )
 
 
@@ -351,6 +354,11 @@ class PromptGenerator:
                             staging / "prompts" / f"{name}.{suffix}",
                             self.config.paths.prompts / f"{name}.{suffix}",
                         )
+                    for alias in digit_output_paths(self.config.paths.prompts, name):
+                        self._replace(
+                            staging / "prompts" / f"{name}{alias.suffix}",
+                            alias,
+                        )
                     LOGGER.info("Ansage erzeugt: %s", name)
                 for entry in self.config.scheduled_overrides:
                     staged_tts = self._scheduled_tts_overrides.get(entry.prompt_name)
@@ -361,6 +369,8 @@ class PromptGenerator:
                     (self.config.paths.prompt_masters / f"{name}.wav").unlink(missing_ok=True)
                     for suffix in ("sln16", "g722", "alaw", "ulaw"):
                         (self.config.paths.prompts / f"{name}.{suffix}").unlink(missing_ok=True)
+                    for alias in digit_output_paths(self.config.paths.prompts, name):
+                        alias.unlink(missing_ok=True)
                     LOGGER.info("Nicht mehr verwendete Ansage entfernt: %s", name)
             if qwen_work:
                 self._progress(total, total, "qwen_restore")
@@ -836,7 +846,8 @@ class PromptGenerator:
             self.config.paths.prompts / f"{name}.{suffix}"
             for suffix in ("sln16", "g722", "alaw", "ulaw")
         ]
-        return master.is_file() and all(path.is_file() for path in outputs)
+        aliases = digit_output_paths(self.config.paths.prompts, name)
+        return master.is_file() and all(path.is_file() for path in (*outputs, *aliases))
 
     def _digest(self, name: str, text: str, *, qwen_variant: int = 0) -> str:
         human_source = self._manual_source(name)

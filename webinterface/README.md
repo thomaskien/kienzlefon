@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface in Kienzlefon 2.4.4
+# Kienzlefon-Webinterface in Kienzlefon 2.5.0
 
 Das Webinterface gehoert zur Kienzlefon-Hauptversion und besitzt keine eigene
 Produktversion mehr. Der Hauptinstaller aktualisiert eine vorhandene

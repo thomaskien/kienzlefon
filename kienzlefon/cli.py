@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.4.4
+# Version: 2.5.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -50,8 +50,8 @@ from .dialing import (
 from .errors import record_system_error
 from .health import worker_is_healthy
 from .ivr import ALL_DIGITS, IVR
-from .models import CallState
 from .migration import migrate_config, set_boolean, set_string
+from .models import CallState
 from .prompts import PROMPT_PROGRESS_PREFIX, PromptGenerator
 from .spool import Spool
 from .worker import Worker
@@ -400,7 +400,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.4.4 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.5.0 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -433,4 +433,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.4.4 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.5.0 ergaenzt: {target}")

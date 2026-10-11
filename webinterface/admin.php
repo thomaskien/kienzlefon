@@ -299,6 +299,8 @@ if (isset($_GET['api'])) {
                 }
                 break;
             }
+        } elseif ($kind === 'hold_music' && !empty($state['hold_music']['preview'])) {
+            $filename = 'hold-music.wav';
         }
         $path = $filename !== '' ? KZF_AUDIO . '/' . $filename : '';
         if ($path === '' || !is_file($path) || is_link($path) || !is_readable($path)) {
@@ -377,6 +379,7 @@ $groupLabels = [
     'zeiten_und_menue' => 'Zeiten und Menüführung',
     'datenerfassung' => 'Datenerfassung',
     'abschluss_und_fehler' => 'Abschluss und Fehlerfälle',
+    'warteschlange' => 'Warteschlangenansagen',
     'interne_verwaltung' => 'Interne Verwaltung',
     'weitere_ansagen' => 'Weitere Ansagen',
 ];
@@ -471,7 +474,7 @@ $modeLabels = [
     'deaktiviert' => 'Deaktiviert',
 ];
 $productName = (string)($state['product']['name'] ?? 'kienzlefon.de');
-$productVersion = (string)($state['product']['version'] ?? '2.4.4');
+$productVersion = (string)($state['product']['version'] ?? '2.5.0');
 $productAuthor = (string)($state['product']['author'] ?? 'Dr. Thomas Kienzle');
 $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 ?>
@@ -635,6 +638,17 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                 <div class="card"><div class="muted">Aufnahmefähige Nebenstellen</div><div class="metric"><?= count($state['extensions'] ?? []) ?></div></div>
             </div>
             <div class="card mt18"><h3>Temporäre Sonderansage</h3><p><?= $currentOverrideName !== '' ? 'Derzeit wird „' . h($currentOverrideName) . '“ verwendet.' : 'Derzeit ist keine Sonderansage gültig.' ?></p><button class="button secondary" type="button" data-go="override">Sonderansagen öffnen</button></div>
+            <div class="card mt18">
+                <h3>Wartemusik</h3>
+                <p class="muted">Installationsstatus: <strong><?= !empty($state['hold_music']['installed']) ? 'installiert' : 'nicht installiert' ?></strong><?= !empty($state['hold_music']['preview_extension']) ? ' · interne Hörprobe ' . h($state['hold_music']['preview_extension']) : '' ?></p>
+                <?php if (!empty($state['hold_music']['installed'])): ?>
+                <div class="planning-grid">
+                    <div class="field"><label for="hold-music-mode">Wiedergabe in Warteschlangen</label><select id="hold-music-mode" data-default="<?= h($state['hold_music']['default_mode'] ?? 'klingelzeichen') ?>"><option value="klingelzeichen" <?= ($state['hold_music']['mode'] ?? '') === 'klingelzeichen' ? 'selected' : '' ?>>Klingelzeichen</option><option value="musik" <?= ($state['hold_music']['mode'] ?? '') === 'musik' ? 'selected' : '' ?>>Melodie</option></select></div>
+                    <?php if (!empty($state['hold_music']['preview'])): ?><div class="audio-item"><label>Melodie anhören</label><audio controls preload="none" src="?api=audio&amp;kind=hold_music"></audio></div><?php endif; ?>
+                </div>
+                <button class="button" type="button" id="save-hold-music">Wartemusik speichern</button>
+                <?php else: ?><p>Die optionale Musik kann bei einer Installer-Aktualisierung eingerichtet werden. Bis dahin bleibt das Klingelzeichen aktiv.</p><?php endif; ?>
+            </div>
         </section>
 
         <section id="page-times" class="page" aria-labelledby="times-title">
@@ -870,6 +884,7 @@ function ttsValues() { return {engine:document.getElementById('tts-engine').valu
 function validatePromptTexts(prompts) { for (const [name, value] of Object.entries(prompts)) { if (name !== 'phone_hours' && !value.trim()) throw new Error('Ansagetexte dürfen nicht leer gespeichert werden. Deaktivieren Sie die Ansage ausdrücklich im Anrufsbaum.'); } }
 async function savePrompts() { const prompts = promptValues(); validatePromptTexts(prompts); const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts, sources:sourceValues(), tts}); }
 async function saveCalltree() { await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues()}); }
+async function saveHoldMusic() { await queue({action:'save', config_hash:configHash, hold_music:{mode:document.getElementById('hold-music-mode').value}}); }
 function overridePresetValues() { const priority = Number(document.getElementById('override-preset-priority').value); if (!Number.isInteger(priority)) throw new Error('Bitte geben Sie eine ganzzahlige Priorität ein.'); return {preset_id:editingPresetId, name:document.getElementById('override-preset-name').value, announcement:document.getElementById('override-text').value, active:document.getElementById('override-preset-active').checked, priority, valid_from:document.getElementById('override-preset-valid-from').value, expires_at:document.getElementById('override-preset-expiry').value, block_phone_hours:document.getElementById('override-preset-block').checked, position:document.getElementById('override-preset-position').value, source:document.getElementById('override-preset-source').value}; }
 async function saveOverride() { const source = document.getElementById('override-source').value; const override = {active:document.getElementById('override-active').checked, announcement:document.getElementById('override-text').value, expires_at:document.getElementById('override-expiry').value, block_phone_hours:document.getElementById('override-block').checked, position:document.getElementById('override-position').value}; if (source === 'manuell' && selectedManualPreset) override.manual_preset_id = selectedManualPreset; await queue({action:'save', config_hash:configHash, override, sources:{override:source}}); }
 function findPreset(id) { return overridePresets.find(item => item.id === id); }
@@ -879,6 +894,7 @@ async function recordOverridePreset(values = overridePresetValues()) { const ext
 document.getElementById('save-times').addEventListener('click', () => safely(async () => { const schedules = {}; document.querySelectorAll('[data-schedule]').forEach(input => { schedules[input.dataset.schedule] ??= {}; schedules[input.dataset.schedule][input.dataset.day] = splitRanges(input.value); }); await queue({action:'save', config_hash:configHash, schedules}); }));
 document.getElementById('save-calltree').addEventListener('click', () => safely(saveCalltree));
 document.getElementById('save-prompts').addEventListener('click', () => safely(savePrompts));
+const saveHoldMusicButton = document.getElementById('save-hold-music'); if (saveHoldMusicButton) saveHoldMusicButton.addEventListener('click', () => safely(saveHoldMusic));
 document.getElementById('save-override').addEventListener('click', () => safely(saveOverride));
 document.getElementById('save-override-preset').addEventListener('click', () => safely(saveOverridePreset));
 document.getElementById('record-new-override-preset').addEventListener('click', () => safely(recordOverridePreset));

@@ -35,12 +35,14 @@ from .config import (
     AppConfig,
     load_config,
 )
+from .hold_music import DEFAULT_BROWSER_WAV
 from .prompts import (
     PROMPT_CATALOG,
     PROMPT_PROGRESS_PREFIX,
     PromptGenerator,
     rendered_prompts,
 )
+from .queue_prompts import QUEUE_NUMBER_PROMPTS
 from .spool import write_json_atomic
 
 DEFAULT_CONFIG = Path("/etc/kienzlefon/kienzlefon.toml")
@@ -51,6 +53,7 @@ DEFAULT_CONFIG_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-config"
 DEFAULT_PROMPTS_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-ansagen"
 DEFAULT_RECORD_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-webaufnahme"
 DEFAULT_ASTERISK_COMMAND = "/usr/sbin/asterisk"
+DEFAULT_ASTERISK_CONFIG_COMMAND = "/opt/kienzlefon/venv/bin/kienzlefon-asterisk"
 EDITABLE_SCHEDULES = (
     "oeffnungszeiten",
     "telefonzeiten",
@@ -129,6 +132,10 @@ PROMPT_LABELS = {
     "webadmin_record_actions": "Auswahl nach der Telefonaufnahme",
     "webadmin_record_saved": "Bestätigung gespeicherte Aufnahme",
     "webadmin_record_discarded": "Bestätigung verworfene Aufnahme",
+    "queue_thankyou": "Queue – Dank für die Geduld",
+    "queue_youarenext": "Queue – als Nächstes an der Reihe",
+    "queue_thereare": "Queue – Einleitung wartende Anrufe",
+    "queue_callswaiting": "Queue – wartende Anrufe",
 }
 
 PRIMARY_PROMPTS = frozenset(
@@ -215,6 +222,10 @@ PROMPT_GROUPS = {
             "webadmin_record_discarded",
         }
     ),
+    "warteschlange": frozenset(
+        {"queue_thankyou", "queue_youarenext", "queue_thereare", "queue_callswaiting"}
+        | QUEUE_NUMBER_PROMPTS.keys()
+    ),
 }
 
 
@@ -266,6 +277,8 @@ def _config_hash(path: Path) -> str:
 
 
 def _prompt_label(name: str) -> str:
+    if name in QUEUE_NUMBER_PROMPTS:
+        return f"Queue – Zahlenfragment {QUEUE_NUMBER_PROMPTS[name]}"
     return PROMPT_LABELS.get(name, name.replace("_", " ").capitalize())
 
 
@@ -491,6 +504,9 @@ def export_state(
     default_modes = defaults.get("ansagen_modus", {})
     if not isinstance(default_modes, Mapping):
         raise WebAdminError("Ansagenmodus-Standardabschnitt ist ungültig")
+    default_hold_music = defaults.get("wartemusik", {})
+    if not isinstance(default_hold_music, Mapping):
+        raise WebAdminError("Wartemusik-Standardabschnitt ist ungültig")
     prompt_fields = [
         {
             "name": str(name),
@@ -594,6 +610,12 @@ def export_state(
         (source for source in sources if source["name"] == "override"), {}
     )
     current_override = config.current_override()
+    hold_music_preview = False
+    if config.hold_music.installed:
+        hold_music_preview = _copy_audio_preview(
+            DEFAULT_BROWSER_WAV,
+            preview_directory / "hold-music.wav",
+        )
     state = {
         "version": 1,
         "generated_at": datetime.now(config.practice.timezone).isoformat(timespec="seconds"),
@@ -623,6 +645,13 @@ def export_state(
                 "engine": str(default_tts.get("engine", "kokoro")),
                 "qwen_voice": str(default_tts.get("qwen_stimme", "ryan")),
             },
+        },
+        "hold_music": {
+            "installed": config.hold_music.installed,
+            "mode": config.hold_music.mode,
+            "preview": hold_music_preview,
+            "default_mode": str(default_hold_music.get("modus", "klingelzeichen")),
+            "preview_extension": "8805" if config.hold_music.installed else "",
         },
         "override": {
             "active": bool(override.get("aktiv", False)),
@@ -723,6 +752,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "override",
         "sources",
         "tts",
+        "hold_music",
     }
     if set(job) - allowed_top:
         raise WebAdminError("Auftrag enthält nicht freigegebene Felder")
@@ -873,6 +903,18 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
             raise WebAdminError("Qwen-Sprecher ist nicht freigegeben")
         tts["qwen_voice"] = qwen_voice
 
+    hold_music_payload = job.get("hold_music", {})
+    if not isinstance(hold_music_payload, Mapping) or set(hold_music_payload) - {"mode"}:
+        raise WebAdminError("Nicht freigegebene Wartemusik-Einstellung")
+    hold_music: dict[str, str] = {}
+    if "mode" in hold_music_payload:
+        mode = str(hold_music_payload["mode"])
+        if mode not in {"klingelzeichen", "musik"}:
+            raise WebAdminError("Ungültiger Wartemusik-Modus")
+        if mode == "musik" and not config.hold_music.installed:
+            raise WebAdminError("Wartemusik ist nicht installiert")
+        hold_music["mode"] = mode
+
     return {
         "config_hash": config_hash,
         "schedules": schedules,
@@ -881,6 +923,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "override": override,
         "sources": sources,
         "tts": tts,
+        "hold_music": hold_music,
     }
 
 
@@ -911,6 +954,8 @@ def _render_updated_config(text: str, values: Mapping[str, Any]) -> str:
     for source_key, toml_key in tts_keys.items():
         if source_key in values["tts"]:
             updated = _set_toml_value(updated, "tts", toml_key, values["tts"][source_key])
+    if "mode" in values["hold_music"]:
+        updated = _set_toml_value(updated, "wartemusik", "modus", values["hold_music"]["mode"])
     return updated
 
 
@@ -1053,6 +1098,7 @@ class WebAdminWorker:
         prompts_command: str = DEFAULT_PROMPTS_COMMAND,
         record_command: str = DEFAULT_RECORD_COMMAND,
         asterisk_command: str = DEFAULT_ASTERISK_COMMAND,
+        asterisk_config_command: str = DEFAULT_ASTERISK_CONFIG_COMMAND,
         php_binary: str = "/usr/bin/php",
     ):
         self.config_path = config_path
@@ -1069,6 +1115,7 @@ class WebAdminWorker:
         self.prompts_command = prompts_command
         self.record_command = record_command
         self.asterisk_command = asterisk_command
+        self.asterisk_config_command = asterisk_config_command
         self.php_binary = php_binary
 
     def export(self) -> dict[str, Any]:
@@ -1419,8 +1466,22 @@ class WebAdminWorker:
         self._status(job_id, "einstellungen_gespeichert")
         try:
             self._generate_prompts(job_id)
+            if values["hold_music"]:
+                self._update_asterisk()
         finally:
             self.export()
+
+    def _update_asterisk(self) -> None:
+        result = _run_command(
+            [self.asterisk_config_command, "--config", str(self.config_path)],
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise WebAdminError("Asterisk-Konfiguration fehlgeschlagen: " + _command_error(result))
+        for command in ("dialplan reload", "moh reload", "module reload app_queue.so"):
+            result = _run_command([self.asterisk_command, "-rx", command], timeout=30)
+            if result.returncode != 0:
+                raise WebAdminError(f"Asterisk {command} fehlgeschlagen: " + _command_error(result))
 
     def _activate_candidate(self, job_id: str, job: Mapping[str, Any]) -> None:
         allowed = {"action", "id", "config_hash", "prompt"}
@@ -1936,6 +1997,7 @@ def _common_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("--prompts-command", default=DEFAULT_PROMPTS_COMMAND)
     parser.add_argument("--record-command", default=DEFAULT_RECORD_COMMAND)
     parser.add_argument("--asterisk-command", default=DEFAULT_ASTERISK_COMMAND)
+    parser.add_argument("--asterisk-config-command", default=DEFAULT_ASTERISK_CONFIG_COMMAND)
     parser.add_argument("--php-binary", default="/usr/bin/php")
     return parser
 
@@ -1951,6 +2013,7 @@ def worker_main() -> None:
         prompts_command=arguments.prompts_command,
         record_command=arguments.record_command,
         asterisk_command=arguments.asterisk_command,
+        asterisk_config_command=arguments.asterisk_config_command,
         php_binary=arguments.php_binary,
     )
     raise SystemExit(0 if worker.run_once() else 0)
@@ -1967,6 +2030,7 @@ def export_main() -> None:
         prompts_command=arguments.prompts_command,
         record_command=arguments.record_command,
         asterisk_command=arguments.asterisk_command,
+        asterisk_config_command=arguments.asterisk_config_command,
         php_binary=arguments.php_binary,
     ).export()
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import kienzlefon.webadmin as webadmin_module
 from kienzlefon.config import load_config
 from kienzlefon.prompts import PromptGenerator
 from kienzlefon.webadmin import WebAdminWorker, export_state
@@ -136,11 +137,18 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     }
     assert state["product"] == {
         "name": "kienzlefon.de",
-        "version": "2.4.4",
+        "version": "2.5.0",
         "author": "Dr. Thomas Kienzle",
         "url": "https://kienzlefon.de",
     }
     assert sources["urgent_help"]["mode"] == "immer"
+    assert state["hold_music"] == {
+        "installed": False,
+        "mode": "klingelzeichen",
+        "preview": False,
+        "default_mode": "klingelzeichen",
+        "preview_extension": "",
+    }
 
     first_hash = (runtime / "password.hash").read_text()
     export_state(
@@ -152,6 +160,68 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
         php_binary=shutil.which("php") or "/usr/bin/php",
     )
     assert (runtime / "password.hash").read_text() == first_hash
+
+
+def test_worker_saves_hold_music_mode_and_only_reloads_asterisk(
+    app_config, tmp_path: Path, monkeypatch
+) -> None:
+    text = app_config.source.read_text(encoding="utf-8").replace(
+        "[wartemusik]\n", "[wartemusik]\ninstalliert = true\n", 1
+    ).replace("installiert = false\n", "", 1)
+    app_config.source.write_text(text, encoding="utf-8")
+    config = load_config(app_config.source)
+    worker = _worker(config, tmp_path)
+    calls: list[list[str]] = []
+
+    def command(arguments: list[str], *, timeout: int) -> subprocess.CompletedProcess[bytes]:
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, b"", b"")
+
+    monkeypatch.setattr(webadmin_module, "_run_command", command)
+    job_id = "3" * 32
+    _queue(
+        worker,
+        job_id,
+        {
+            "action": "save",
+            "config_hash": hashlib.sha256(app_config.source.read_bytes()).hexdigest(),
+            "hold_music": {"mode": "musik"},
+        },
+    )
+
+    assert worker.run_once() is True
+    assert load_config(app_config.source).hold_music.mode == "musik"
+    assert ["/opt/kienzlefon/venv/bin/kienzlefon-asterisk", "--config", str(app_config.source)] in calls
+    reloads = [call[-1] for call in calls if len(call) >= 3 and call[-2] == "-rx"]
+    assert reloads == ["dialplan reload", "moh reload", "module reload app_queue.so"]
+    assert not any("restart" in argument or "stop" in argument for call in calls for argument in call)
+
+
+def test_export_exposes_installed_hold_music_from_fixed_protected_copy(
+    app_config, tmp_path: Path, monkeypatch
+) -> None:
+    text = app_config.source.read_text(encoding="utf-8").replace(
+        "installiert = false", "installiert = true", 1
+    )
+    app_config.source.write_text(text, encoding="utf-8")
+    music = tmp_path / "installed-hold-music.wav16"
+    music.write_bytes(b"RIFF-protected-preview")
+    monkeypatch.setattr(webadmin_module, "DEFAULT_BROWSER_WAV", music)
+    runtime = tmp_path / "music-runtime"
+
+    state = export_state(
+        app_config.source,
+        Path("config/kienzlefon.toml.example"),
+        _web_config(tmp_path),
+        runtime / "state.json",
+        runtime / "password.hash",
+        php_binary=shutil.which("php") or "/usr/bin/php",
+    )
+
+    assert state["hold_music"]["installed"] is True
+    assert state["hold_music"]["preview"] is True
+    assert state["hold_music"]["preview_extension"] == "8805"
+    assert (runtime / "audio" / "hold-music.wav").read_bytes() == music.read_bytes()
 
 
 def test_worker_applies_only_allowed_values_and_runs_generator(app_config, tmp_path: Path) -> None:
@@ -752,7 +822,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="2.4.4"' in installer
+    assert 'VERSION="2.5.0"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -835,7 +905,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
         "practice": "Praxis Test",
         "product": {
             "name": "kienzlefon.de",
-            "version": "2.4.4",
+            "version": "2.5.0",
             "author": "Dr. Thomas Kienzle",
             "url": "https://kienzlefon.de",
         },
@@ -982,7 +1052,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert "Anrufsbaum" in result.stdout
     assert "Taste 0" in result.stdout
     assert "Keine Taste" in result.stdout
-    assert "Kienzlefon 2.4.4" in result.stdout
+    assert "Kienzlefon 2.5.0" in result.stdout
     assert "kienzlefon.de" in result.stdout
     assert "Dr. Thomas Kienzle" in result.stdout
     assert "Genau diese Ansage aufnehmen" in result.stdout

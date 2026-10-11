@@ -1,0 +1,148 @@
+# AMI-Middleware ab Kienzlefon 2.5.0
+
+Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
+Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die
+vollstaendige fachliche Uebergabe steht in
+[AMI-Callmonitor-Uebergabe](../KIENZLEFON_INSTALLER_UEBERGABE_AMI_Callmonitor.md).
+
+## Installation und Update
+
+Im Hauptinstaller die Middleware einschalten und die beiden Funktionen
+Namensaufloesung/Click-to-Dial getrennt waehlen. Bei einer neuen Einrichtung
+sind menschliche Telefon-Nebenstellen fuer Click-to-Dial vorausgewaehlt,
+KI-Telefone nicht. Jede Nummer wird einzeln abgefragt; vorhandene Entscheidungen
+bleiben bei Updates die Vorgabe. Faxnummern, Provider und Funktionsnummern sind
+keine auswaehlbaren Telefone.
+
+Lokal verwendet die Einrichtung 127.0.0.1. Bei einem separaten Rechner werden
+seine exakte Quell-IP und eine auf der Telefonanlage vorhandene Ziel-IP
+abgefragt. IPv4 und IPv6 werden unterstuetzt, beide Seiten muessen dieselbe
+Adressfamilie verwenden. TCP ist der Standard, bereits eingerichtetes AMI-TLS
+kann verwendet werden. Zertifikate und vorhandene Listener werden nicht ersetzt.
+Bei TCP muss der Uebertragungsweg vertrauenswuerdig sein, etwa ein Praxisnetz
+oder WireGuard. AMI-Zugangsdaten bleiben ausschliesslich auf dem Middleware-Server.
+
+Die eigene Datei `/etc/asterisk/manager_kienzlefon_middleware.conf` erlaubt
+nur die Quell-IP. Rechte: `read=system,call,agent,user,dialplan` und
+`write=call,originate,reporting`. Fremde Benutzer, Web-AMI und TLS-Konfiguration
+bleiben bestehen. Listener-Konflikte oder globale Ereignissperren werden vor
+Aenderungen abgelehnt. Ein aktives UFW erhaelt eine eigene markierte Quell-IP-Regel;
+andere Firewalls muessen entsprechend konfiguriert sein. Eine deaktivierte
+Firewall wird nicht automatisch aktiviert.
+
+Nach Aenderungen erfolgt `manager reload`, ohne Asterisk-Neustart. Bei
+Secret-Wechsel, Benutzer-/Quell-IP-Aenderung oder Deaktivierung werden die
+zugehoerigen alten Sitzungen getrennt. Falls in der Asterisk-CLI gekuerzte
+Benutzernamen nicht eindeutig sind, fordert die Einrichtung zur manuellen
+Trennung auf, statt fremde Sitzungen zu beenden.
+
+## Geschuetzte Uebergabedatei
+
+`/etc/kienzlefon/middleware-connection.json` und `middleware-secret` besitzen
+Modus 0600. Das Secret wird bei normalen Updates wiederverwendet. Beispiel mit
+Platzhalter, kein nutzbares Secret:
+
+```json
+{
+  "schema_version": 1,
+  "enabled": true,
+  "ami": {
+    "host": "192.168.10.2",
+    "port": 5038,
+    "transport": "tcp",
+    "username": "kienzlefon-middleware",
+    "secret": "<zufaelliges-Secret>",
+    "events": "on"
+  },
+  "allowed_source_ip": "192.168.10.9",
+  "lookup": {"enabled": true, "budget_ms": 1000},
+  "click_to_dial": {
+    "enabled": true,
+    "context": "kienzlefon-click-to-dial",
+    "extensions": ["201", "299"],
+    "ring_timeout_ms": 20000
+  }
+}
+```
+
+Ein optionales `ufw_rule`-Feld dient ausschliesslich der Verwaltung der eigenen
+Firewallregel und wird von der Middleware ignoriert. Ebenso muessen zukuenftige
+unbekannte optionale Felder ignoriert werden. Bei `enabled=false` keine Verbindung
+herstellen. Die komplette JSON-Datei darf nicht protokolliert werden.
+
+Secret direkt am Terminal anzeigen oder bewusst erneuern:
+
+```bash
+sudo /opt/kienzlefon/venv/bin/kienzlefon-middleware show-secret
+sudo /opt/kienzlefon/venv/bin/kienzlefon-middleware rotate-secret
+```
+
+Die Anzeige schreibt unmittelbar nach `/dev/tty`, nicht in die normale
+Installer-Ausgabe. Nach einer Rotation die geschuetzte Uebergabedatei erneut an
+die Middleware uebernehmen. Kein Secret in TOML, Webinterface, SMB oder Browsercode.
+
+## Lookup-Vertrag
+
+Externe Haupt-, Direkt- und Ueberlaufeingaenge normalisieren die Rufnummer und
+rufen einmal pro Kanal `kienzlefon-lookup` auf. Interne Testziele und Telefonate
+starten keinen Lookup. Es wird kein zusaetzliches Answer ausgefuehrt.
+
+`KienzlefonLookupRequest` liefert SchemaVersion, RequestId, SourceChannel,
+SourceUniqueid, SourceLinkedid, Number und BudgetMs. Die Middleware schreibt
+auf SourceChannel nacheinander `LOOKUP_RESULT_ID`, `LOOKUP_NAME`,
+`LOOKUP_STATUS` und zuletzt `LOOKUP_DONE=1`; jede Setvar-Response muss erfolgreich
+sein. Statuswerte sind resolved, not_found, ambiguous oder error. Namen vorab
+auf hoechstens 80 sichtbare Zeichen begrenzen, Steuerzeichen entfernen und
+keine unbereinigten Fremddaten als AMI-Header verwenden.
+
+Der Dialplan wartet mit WaitForCondition innerhalb eines absoluten Budgets von
+1000 ms, kontrolliert die Deadline erneut und aendert ausschliesslich den Namen.
+Die Rufnummer bleibt unveraendert. Bei Timeout, falscher RequestId, Fehler oder
+leerer Antwort laeuft der bisherige Rufweg weiter. `KienzlefonLookupFinished`
+enthaelt Status und Applied, keinen Patientennamen. Spaete Ergebnisvariablen
+werden auf dem bereits weitergeleiteten Ruf nicht erneut ausgewertet.
+
+Fehlen WaitForCondition oder UserEvent, deaktiviert der Installer nur den
+Lookup-Pfad und exportiert `lookup.enabled=false`. Die uebrige AMI-Anbindung
+bleibt verfuegbar. Nach einem Asterisk-Update den Installer erneut ausfuehren.
+
+AMI-Rechte wirken auf Aktionskategorien, nicht auf einzelne Variablen oder
+Kontexte. Auch `KF_PHONE_*` ist nur eine Protokollkonvention, keine Schreibsperre.
+Der Middleware-Server ist daher eine vertrauenswuerdige Steuerungskomponente;
+Arbeitsplaetze erhalten ausschliesslich dessen eingeschraenkte API.
+
+## Click-to-Dial
+
+Die Middleware originiert zuerst `PJSIP/<freigegebene Nebenstelle>`, dann
+Context `kienzlefon-click-to-dial`, Exten Zielrufnummer, Priority 1, Async true
+und EarlyMedia false. `__KF_C2D_ID` ist eine UUID, `__KF_C2D_CLIENT` die validierte
+Arbeitsplatzkennung, `__KF_C2D_EXTENSION` die freigegebene Telefonnummer.
+Ein vollstaendiges Originate-Beispiel steht in der Uebergabe.
+
+Nach Abheben kontrolliert Kienzlefon diese Werte sowie den tatsaechlichen
+PJSIP-Endpunkt. Externe Zielrufnummern enthalten nur Ziffern und optional ein
+fuehrendes Plus. Die bestehenden Sperren gelten weiter. Der passende Haupt-
+oder Direktprovider und die Praxis-Absenderrufnummer werden gesetzt, dann
+uebernimmt `kienzlefon-outbound`. Eine eigene zweite Provider-Diallogik gibt es
+nicht. `KienzlefonClickToDialProgress` mit Phase dialing_target bestaetigt den
+Beginn des Zielrufes; verbunden ist ein Gespraech erst nach beobachteter
+Zielannahme und passender Bruecke. Bei Verbindungsabbruch nicht automatisch
+noch einmal waehlen.
+
+## Pruefung auf der Telefonanlage
+
+1. Bestehende AMI-Clients verbunden lassen, Installer durchlaufen lassen,
+   Verbindung mit dem neuen Export pruefen und Ereignisse empfangen.
+2. Aus externem Netz anrufen: Treffer, kein Treffer, mehrdeutiger Treffer,
+   nicht erreichbare Middleware sowie Antworten vor/an/nach der Deadline testen.
+   Rufnummer und Routing muessen erhalten bleiben.
+3. Jeden eingerichteten externen Eingang testen; interne Testnummern duerfen
+   keinen Lookup ausloesen. Ohne Middleware maximal das eine Lookup-Budget abwarten.
+4. Click-to-Dial: freigegebenes Telefon, gesperrtes Telefon, falsche Endpunktangabe,
+   ungueltige UUID, gesperrtes Ziel, Besetzt, Nichtannahme und Abbruch pruefen.
+5. Secret erneuern und danach deaktivieren: alte Anmeldung/Sitzung darf nicht
+   weiter verwendbar sein, fremde AMI-Clients muessen weiter funktionieren.
+
+Die lokalen automatisierten Tests pruefen Konfiguration, Rechte, Dateimodi,
+Updateverhalten, Dialplan-Erzeugung und Validierung. Echte AMI-Ereignisse,
+Asterisk-Zeitverhalten und SIP-Gespraeche erfordern diesen Anlagentest.

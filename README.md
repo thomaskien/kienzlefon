@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.4.4
+Version: 2.5.0
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.4.4**
+Version: **2.5.0**
 
 ## Eigenschaften
 
@@ -79,8 +79,8 @@ Version: **2.4.4**
 - optionaler AI-Admission-Listener auf dem Haupt-Kienzlefon
 - KI-Nebenstellen ab `8810`, die nur mit einer aktiven AI-Freimeldungs-Lease
   angerufen werden
-- interne Ziele `8800` bis `8804` fuer Gesamteingang, klassischen IVR und
-  priorisierte Warteschlangen
+- interne Ziele `8800` bis `8805` fuer Gesamteingang, klassischen IVR,
+  priorisierte Warteschlangen und die reine Musikhörprobe
 - aktivierte Begruessungs-, Sonder-, Notfall- und Bereitschaftsansagen liegen
   vor einer moeglichen AI-Uebergabe; die Admission-Pruefung bleibt am
   bisherigen Einstieg ins Hauptmenue
@@ -100,6 +100,73 @@ Version: **2.4.4**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.5.0
+
+- Optionale AMI-Schnittstelle fuer die separat entwickelte Middleware: Callmonitor,
+  Namensaufloesung vor dem Klingeln und Click-to-Dial. Der Installer fragt jede
+  eingerichtete Telefon-Nebenstelle einzeln ab; Fax, Provider und Funktionsziele
+  stehen nicht zur Auswahl. KI-Nebenstellen sind standardmaessig abgewählt.
+- Wartemelodie von **Johannes Plachetka**, optional im Installer eingerichtet,
+  normalisiert als G.722, SLN16 und WAV16 sowie A-law/mu-law fuer schmalbandige
+  Verbindungen. Wahl zwischen Melodie und Klingelzeichen auch im internen Webinterface.
+- Warteschlangenansagen und deutsche Zahlenbausteine werden mit derselben
+  ausgewaehlten TTS-Stimme wie die uebrigen Ansagen erzeugt. Eigene Aufnahmen,
+  Hoerprobe und Rueckkehr zu TTS stehen ebenfalls zur Verfuegung.
+- MIT-Lizenz fuer Projekt und bereitgestellte Wartemusik; siehe [LICENSE](LICENSE)
+  und [Urheber-/Drittanbieterhinweise](THIRD_PARTY_NOTICES.md).
+
+### Wartemusik vor der Umstellung anhoeren
+
+Im Installer **Wartemusik einrichten: ja** waehlen, den Wartemodus zunaechst auf
+**Klingelzeichen** belassen. Anschliessend von einem internen Telefon **8805**
+waehlen. Diese Hoerprobe spielt nur die Melodie ab und ruft keine Telefone an.
+Alternativ im internen Webinterface unter **Wartemusik** die Vorschau abspielen.
+Erst danach bei Bedarf auf **Melodie** umstellen und speichern. Der Installer
+uebernimmt diese Auswahl bei spaeteren Updates als Vorgabe.
+
+Die breitbandigen Dateien liefern G.722-Qualitaet, wenn Telefon und Verbindung
+G.722 aushandeln. Bei einer G.711-Verbindung wird die schmalbandige Variante
+verwendet. Die Hoerprobe aendert den eingestellten Wartemodus nicht.
+Details zu den neuen Ansagen und eigenen Aufnahmen: [Ansagen](docs/ANSAGEN.md).
+
+### Interne Nebenstellen und Testziele
+
+| Nummer | Funktion |
+| --- | --- |
+| **8800** | Gesamter Kienzlefon-Eingang einschliesslich Begruessung, Zeitregeln und gegebenenfalls KI |
+| **8801** | Klassischer IVR-Einstieg |
+| **8802** | Praxiswarteschlange mit normalen Telefonen |
+| **8803** | Praxiswarteschlange mit Apothekenprioritaet |
+| **8804** | Fachstellenweg: gegebenenfalls rotes Telefon, danach priorisierte Sonderqueue |
+| **8805** | Reine Wartemusik-Hoerprobe, sobald die Musik installiert ist |
+| **777** | Ansagenverwaltung: anhoeren, aufnehmen und aktivieren; Nummer konfigurierbar |
+| **201 ff.** | Praxis-/Queue-Telefone; Start und Anzahl laut Konfiguration |
+| **299** | Standardnummer des optionalen roten Telefons; konfigurierbar |
+| **8810 ff.** | Aktivierte KI-Nebenstellen entsprechend der eingerichteten Anzahl |
+| weitere konfigurierte Nummern | Zusaetzliche interne Telefone |
+
+Die Ziele 8800–8805 sind Funktionsnummern ohne eigene SIP-Anmeldung.
+8802–8804 koennen tatsaechlich Telefone klingeln lassen. Die vorhandenen
+Faxnummern gehoeren zur Kienzlefax-Basis und werden hier nicht neu vergeben.
+
+### Middleware einrichten
+
+Der Hauptinstaller fragt die AMI-Aktivierung, Betrieb auf diesem oder einem
+anderen Rechner, Quell-IP der Middleware, erreichbare Server-IP, Port und
+Benutzer ab. Namensaufloesung und Click-to-Dial sind getrennt waehlbar.
+Jedes konfigurierte Telefon wird bei Click-to-Dial einzeln zur Freigabe angeboten.
+Die Grundeinstellungen stehen in `[middleware]` der Kienzlefon-TOML.
+
+Das zufaellig erzeugte Secret bleibt bei Updates erhalten. Am Installerende
+kann es direkt am Terminal angezeigt werden. Die Uebergabe an das separate
+Middleware-Modul erfolgt ueber `/etc/kienzlefon/middleware-connection.json`
+(nur root, Modus 0600). Diese Datei enthaelt Zugangsdaten und gehoert auf den
+Middleware-Server, nicht auf Arbeitsplatzrechner oder eine Freigabe.
+Bestehende AMI-Nutzer und Listener werden erhalten; ein widerspruechlicher
+Listener wird mit einer konkreten Meldung zur manuellen Abstimmung abgelehnt.
+
+Details, Exportformat und Testfaelle: [Middleware-Anbindung](docs/MIDDLEWARE.md).
 
 ## Installation
 

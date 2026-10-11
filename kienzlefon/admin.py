@@ -52,7 +52,7 @@ class AnnouncementAdmin:
             number = self.channel.read_digits(
                 "KZF_PROMPT_NUMBER",
                 self._prompt("admin_prompt_select"),
-                2,
+                3,
                 timeout_seconds=MENU_TIMEOUT_SECONDS,
             )
             if not number:

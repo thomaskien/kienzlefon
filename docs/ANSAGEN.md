@@ -103,3 +103,64 @@ Deaktivierungsweg und wird abgelehnt; nur der zusaetzliche Textbaustein
 52. `admin_special_status_disabled`: Status Sonderansage deaktiviert
 53. `admin_special_status_keep`: Status Sonderansage aktiv, Telefonzeiten gueltig
 54. `admin_special_status_block`: Status Sonderansage aktiv, Telefonzeiten gesperrt
+55. `webadmin_record`: Aufforderung zur Aufnahme ueber ein Telefon
+56. `webadmin_record_actions`: Auswahl nach der Webinterface-Telefonaufnahme
+57. `webadmin_record_saved`: Aufnahme als Kandidat gespeichert
+58. `webadmin_record_discarded`: Aufnahme verworfen
+59. `queue_thankyou`: Dank fuer die Geduld
+60. `queue_youarenext`: Hinweis auf die naechste Warteposition
+61. `queue_thereare`: Einleitung zur Zahl wartender Anrufe
+62. `queue_callswaiting`: Abschluss nach der Zahl wartender Anrufe
+63.–82. `queue_digit_0` bis `queue_digit_19`: eigenstaendige Zahlen Null bis Neunzehn
+83.–91. `queue_digit_1_and` bis `queue_digit_9_and`: Einer mit angehaengtem „und“
+92. `queue_digit_20`: Zwanzig
+93. `queue_digit_30`: Dreissig
+94. `queue_digit_40`: Vierzig
+95. `queue_digit_50`: Fuenfzig
+96. `queue_digit_60`: Sechzig
+97. `queue_digit_70`: Siebzig
+98. `queue_digit_80`: Achtzig
+99. `queue_digit_90`: Neunzig
+100. `queue_digit_one_neuter`: Ein (`digits/1N`)
+101. `queue_digit_one_feminine`: Eine (`digits/1F`)
+102. `queue_digit_hundred`: Hundert
+103. `queue_digit_thousand`: Tausend
+104. `queue_digit_million`: Million
+105. `queue_digit_millions`: Millionen
+106. `queue_digit_milliard`: Milliarde
+107. `queue_digit_milliards`: Milliarden
+
+Die vier Queue-Bausteine ersetzen gezielt die von der vorhandenen
+Kienzlefax-Praxisqueue wirklich verwendeten schmalbandigen Standarddateien.
+Sie werden wie alle anderen Ansagen als G.722, SLN16, A-Law und u-Law erzeugt
+und koennen per TTS, Telefonaufnahme 777 oder Webinterface verwaltet werden.
+Dasselbe gilt fuer die angehaengten Zahlenfragmente 63 bis 107. Der Generator
+kopiert deren vier Asterisk-Formate zusaetzlich unter den von
+`ast_say_number_full_de` verlangten Dateinamen nach
+`/var/lib/asterisk/sounds/de_kienzlefon/digits/`. Neugenerierung und manuelle
+Aktivierung aktualisieren diese Kopien atomar mit; System-Sprachpakete unter
+`de/digits` bleiben unveraendert.
+
+Beim Eintritt in jede von Kienzlefon verwendete Queue wird die Kanalsprache
+auf `de_kienzlefon` gesetzt. Asterisks Sprachwahl verwendet wegen des
+Praefixes `de` weiterhin die deutsche Zahlensyntax und kann fuer nicht
+ueberschriebene Dateien auf die allgemeineren Sprach-/Sounds-Pfade
+zurueckfallen. Dadurch bleiben die Ansagen unter `kienzlefon/` erreichbar.
+Abgedeckt sind alle von der deutschen Zahlenfunktion fuer nichtnegative
+32-Bit-Positionszahlen zusammengesetzten Fragmente, beispielsweise 21, Werte
+ueber 100 sowie Million und Milliarde. Negative Zahlen sind fuer
+Queue-Positionen nicht vorgesehen; `digits/minus` wird daher nicht ersetzt.
+Eine Wartezeit wird in der aktuellen Kienzlefax-Queue nicht ausgegeben
+(`announce-holdtime=no`); deshalb werden keine unbenutzten
+Minuten-/Sekundenpfade pauschal ersetzt. Die Queue- und Zahlenansagen werden
+unabhaengig davon immer installiert, ob Wartemusik aktiviert ist.
+
+Die optionale Wartemusik ist davon getrennt. `[wartemusik].installiert`
+beschreibt die vorhandenen Medien, `[wartemusik].modus` waehlt
+`klingelzeichen` oder `musik`. Bei installierten Medien spielt 8805 die
+Melodie nur intern zur Hoerprobe ab. Die eigene Asterisk-Klasse
+`kienzlefon-wartemusik` veraendert weder globale Defaults noch fremde Klassen.
+Die 16-kHz-Browser-/Asterisk-WAV liegt im Musikordner korrekt als
+`wartemusik.wav16`; eine als 8-kHz-WAV missverstaendliche `wartemusik.wav`
+wird dort nicht installiert. Die Weboberflaeche liefert davon weiterhin eine
+geschuetzte Kopie mit WAV-MIME-Typ aus.

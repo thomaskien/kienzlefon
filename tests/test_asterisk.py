@@ -34,6 +34,7 @@ def test_render_keeps_red_phone_as_dedicated_endpoint(app_config) -> None:
     assert "member => PJSIP/299" not in pjsip
     assert "Set(QUEUE_PRIO=10)" in extensions
     assert "Set(QUEUE_RAISE_PENALTY=0)" in extensions
+    assert extensions.count("Set(CHANNEL(language)=de_kienzlefon)") >= 2
     assert "Queue(praxis,r,,kienzlefon/pharmacy_agent)" in extensions
     assert "Dial(PJSIP/299,20)" in extensions
     assert 'GotoIf($["${DIALSTATUS}"="ANSWER"]?done)' in extensions
@@ -106,11 +107,14 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     assert "exten => 299,1,Dial(PJSIP/299,120)" in kfx
     assert "exten => 8800,1,Goto(kienzlefon-internal-targets,8800,1)" in kfx
     assert "kienzlefon-callerid" in kfx
+    assert kfx.count("Set(CHANNEL(language)=de_kienzlefon)") == 1
     assert (etc / "queues-kienzlefon.conf").is_file()
     assert '#include "/etc/asterisk/queues-kienzlefon.conf"' in (
         etc / "queues.conf"
     ).read_text(encoding="utf-8")
-    assert (etc / "queues-kfx.conf").read_text(encoding="utf-8") == kfx_queues
+    patched_queues = (etc / "queues-kfx.conf").read_text(encoding="utf-8")
+    assert patched_queues.startswith(kfx_queues)
+    assert "queue-thankyou=kienzlefon/queue_thankyou" in patched_queues
     assert '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"' in (
         etc / "extensions.conf"
     ).read_text(encoding="utf-8")
@@ -283,5 +287,6 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     phone = (etc / "extensions-kfx-telefonie.conf").read_text(encoding="utf-8")
     assert phone.count("; kienzlefon internal routes begin") == 1
     assert phone.count("; kienzlefon outbound routes begin") == 1
+    assert phone.count("Set(CHANNEL(language)=de_kienzlefon)") == 1
     assert "exten => 300,1,Dial(PJSIP/300,120)" in phone
     assert "exten => 777,1,Goto(kienzlefon-red-local,777,1)" in phone
