@@ -30,12 +30,17 @@ def decide_number(rules: DialRulesConfig, dialed: str) -> DialDecision:
     value = dialed.strip().replace(" ", "")
     if value in EMERGENCY_NUMBERS:
         return DialDecision(True, value, "notruf_ausnahme")
-    if value.startswith("+") or value.startswith("00"):
+    international = value.startswith("+") or value.startswith("00")
+    if international:
+        value = value[1:] if value.startswith("+") else value[2:]
+    if not re.fullmatch(r"[0-9]+", value) or len(value) < rules.minimum_external_digits:
+        return DialDecision(False, "", "ungueltige_rufnummer")
+    if international and not value.startswith(rules.country_code):
         if rules.block_international:
             return DialDecision(False, "", "international_gesperrt")
-        value = value[1:] if value.startswith("+") else value[2:]
-    if not value.isdigit() or len(value) < rules.minimum_external_digits:
-        return DialDecision(False, "", "ungueltige_rufnummer")
+        # Keep foreign destinations unambiguous through repeated policy checks
+        # (Click-to-Dial/transfer followed by the common outbound route).
+        return DialDecision(True, "00" + value, "freigegeben")
     if rules.block_118 and value.startswith("118"):
         return DialDecision(False, "", "118_auskunft_gesperrt")
 

@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.3
+# Version: 2.5.4
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -343,7 +343,6 @@ def dial_main() -> None:
     try:
         decision = decide_number(config.dial_rules, arguments.number)
         audit_decision(config, arguments.number, caller_id, decision)
-        channel.set_variable("KZF_DIAL_ALLOWED", "1" if decision.allowed else "0")
         channel.set_variable("KZF_DIAL_NUMBER", decision.normalized)
         channel.set_variable("KZF_DIAL_REASON", decision.reason)
         selected_caller_id = channel.get_variable("KZF_OUT_CALLERID")
@@ -351,6 +350,7 @@ def dial_main() -> None:
             "KZF_DIAL_CALLERID",
             selected_caller_id or canonical_practice_number(config.dial_rules),
         )
+        channel.set_variable("KZF_DIAL_ALLOWED", "1" if decision.allowed else "0")
     except AgiHangup:
         return
     except Exception as exc:
@@ -400,7 +400,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.5.3 ergaenzen")
+    parser = _parser("Kienzlefon Konfiguration auf 2.5.4 ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -433,4 +433,4 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
-    print(f"Konfiguration auf Version 2.5.3 ergaenzt: {target}")
+    print(f"Konfiguration auf Version 2.5.4 ergaenzt: {target}")

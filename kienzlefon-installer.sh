@@ -2,7 +2,7 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.5.3
+# Version: 2.5.4
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -41,7 +41,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.5.3"
+VERSION="2.5.4"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -1755,6 +1755,7 @@ configure_asterisk(){
   asterisk -rx "features reload"
   asterisk -rx "moh reload"
   asterisk -rx "module reload app_queue.so" || true
+  "${VENV}/bin/kienzlefon-transfer-setup" verify --config "$CONFIG_FILE"
   asterisk_supports_format wav16 \
     || die "Asterisk stellt das erforderliche Aufnahmeformat wav16 nicht bereit."
   red_enabled="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["ivr"]["rotes_telefon_aktiv"] else "n")' "$CONFIG_FILE")"
@@ -1866,13 +1867,14 @@ main(){
   sep "Optionale Wartemusik"
   install_hold_music
   sep "Asterisk integrieren"
+  "${VENV}/bin/kienzlefon-transfer-setup" preflight --config "$CONFIG_FILE"
   "${VENV}/bin/kienzlefon-middleware" install --config "$CONFIG_FILE"
   configure_asterisk
   start_and_verify
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.5.3 ist installiert"
+  sep "Kienzlefon 2.5.4 ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'

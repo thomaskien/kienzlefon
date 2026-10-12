@@ -40,6 +40,17 @@ verschoben. Neue Bausteine werden ausschliesslich am Ende angehaengt. Die
 Texte stehen unter `[ansagen]` in `/etc/kienzlefon/kienzlefon.toml`; dynamische
 Zeittexte werden aus den Zeitprofilen gebildet.
 
+Bei der Queue-Positionsansage spricht Asterisk die **eigene Position** aus,
+nicht die Anzahl der Anrufe davor. Die Bausteine 61 und 62 umschliessen diese
+Zahl: "Sie sind auf Position" + "zwei" + "in der Warteschlange." Fuer Position
+eins wird nur Baustein 60 ("Sie sind als Naechstes an der Reihe.") verwendet.
+Siehe [Asterisk 20, app_queue](https://github.com/asterisk/asterisk/blob/20/apps/app_queue.c).
+Die bisherigen Standardtexte "Vor Ihnen warten noch" / "Anrufe." werden bei
+der Migration gemeinsam korrigiert und beim naechsten normalen Generatorlauf
+neu erzeugt. Ist einer der Texte angepasst oder eine manuelle Aufnahme aktiv,
+bleibt das Paar erhalten und muss bei Bedarf im Webinterface gemeinsam
+angepasst beziehungsweise neu eingesprochen werden.
+
 Die Wiedergabe wird getrennt vom Text unter `[ansagen_modus]` gesteuert.
 Zulaessige Werte sind `immer`, `offen`, `zu` und `deaktiviert`. Fehlende Werte
 bleiben aus Kompatibilitaetsgruenden `immer`; fuer `greeting_open`,
@@ -109,8 +120,8 @@ Deaktivierungsweg und wird abgelehnt; nur der zusaetzliche Textbaustein
 58. `webadmin_record_discarded`: Aufnahme verworfen
 59. `queue_thankyou`: Dank fuer die Geduld
 60. `queue_youarenext`: Hinweis auf die naechste Warteposition
-61. `queue_thereare`: Einleitung zur Zahl wartender Anrufe
-62. `queue_callswaiting`: Abschluss nach der Zahl wartender Anrufe
+61. `queue_thereare`: Einleitung zur eigenen Warteposition ("Sie sind auf Position")
+62. `queue_callswaiting`: Abschluss nach der Warteposition ("in der Warteschlange.")
 63.–82. `queue_digit_0` bis `queue_digit_19`: eigenstaendige Zahlen Null bis Neunzehn
 83.–91. `queue_digit_1_and` bis `queue_digit_9_and`: Einer mit angehaengtem „und“
 92. `queue_digit_20`: Zwanzig

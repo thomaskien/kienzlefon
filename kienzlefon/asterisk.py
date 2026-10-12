@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.3
+# Version: 2.5.4
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -23,6 +23,7 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from .config import AppConfig, SipLineConfig
 from .hold_music import MUSIC_CLASS
 from .middleware_dialplan import render_middleware
 from .queue_prompts import ASTERISK_QUEUE_LANGUAGE
+from .transfer_dialplan import decorate_calls, render_transfer
+from .transfer_features import DEFAULT_TRANSFER_FEATURES, resolve_transfer_features
 
 
 class AsteriskConfigError(RuntimeError):
@@ -137,7 +140,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.5.3
+; Version: 2.5.4
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -245,11 +248,14 @@ device_state_busy_at=1
 
 def _outbound_route(config: AppConfig, endpoint: str, caller_id: str) -> str:
     capacity = ""
+    transfer_failed = (
+        " same => n,Gosub(kienzlefon-transfer-progress,s,1(failed))\n"
+        if config.middleware.enabled else ""
+    )
     if config.asterisk.outbound_counts_capacity:
         capacity = """ same => n,Gosub(kfx_external_capacity,primary-phone,1)
  same => n,GotoIf($[\"${KFX_CAPACITY_OK}\"=\"1\"]?dial)
- same => n,Hangup(17)
-"""
+""" + transfer_failed + " same => n,Hangup(17)\n"
     return f"""exten => _XXX,1,NoOp(Kienzlefon ausgehend)
  same => n,Set(KZF_OUT_ENDPOINT={endpoint})
  same => n,Set(KZF_OUT_CALLERID={caller_id})
@@ -264,9 +270,10 @@ exten => _+X.,1,NoOp(Kienzlefon ausgehend)
  same => n,Goto(kienzlefon-outbound,${{EXTEN}},1)
 
 [kienzlefon-outbound]
-exten => _X.,1,AGI(/opt/kienzlefon/venv/bin/kienzlefon-wahlpruefung,--config,/etc/kienzlefon/kienzlefon.toml,--number,${{EXTEN}})
+exten => _X.,1,Set(KZF_DIAL_ALLOWED=0)
+ same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-wahlpruefung,--config,/etc/kienzlefon/kienzlefon.toml,--number,${{EXTEN}})
  same => n,GotoIf($["${{KZF_DIAL_ALLOWED}}"="1"]?capacity)
- same => n,Playback(kienzlefon/blocked_destination)
+{transfer_failed} same => n,Playback(kienzlefon/blocked_destination)
  same => n,Hangup()
  same => n(capacity),NoOp(Kienzlefon freigegebene Rufnummer ${{KZF_DIAL_NUMBER}})
 {capacity} same => n(dial),Set(CALLERID(num)=${{KZF_DIAL_CALLERID}})
@@ -281,7 +288,7 @@ def _queue_options(config: AppConfig, options: str = "r") -> str:
     return options
 
 
-def render_extensions(config: AppConfig) -> str:
+def render_extensions(config: AppConfig, features: dict[str, str] | None = None) -> str:
     red = config.ivr.red_extension
     specialist_description = (
         "Kienzlefon Fachstelle zum roten Telefon"
@@ -382,7 +389,7 @@ def render_extensions(config: AppConfig) -> str:
  same => n,MusicOnHold({MUSIC_CLASS})
  same => n,Hangup()
 """
-    return f"""; kienzlefon
+    rendered = f"""; kienzlefon
 ; Version: 2.4.0
 ; Changelog:
 ; - 2.4.0: Taste 0 im Hauptmenue versucht AI ohne Ansage und ohne AI-Rekursion.
@@ -590,6 +597,8 @@ exten => _+X.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
  same => n,Goto(kienzlefon-outbound,${{EXTEN}},1)
 {render_middleware(config)}
 """
+    rendered += render_transfer(config, features or DEFAULT_TRANSFER_FEATURES)
+    return decorate_calls(rendered, enabled=config.middleware.enabled)
 
 
 def render_queues(config: AppConfig) -> str:
@@ -631,6 +640,63 @@ retry=1
 
 
 def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")) -> None:
+    """Plan and validate every generated/updated file before publishing or reload."""
+    features = resolve_transfer_features(etc) if config.middleware.enabled else None
+    names = (
+        "pjsip.conf", "extensions.conf", "queues.conf", "features.conf", "musiconhold.conf",
+        "extensions-kfx-telefonie.conf", "queues-kfx.conf", "pjsip-kienzlefon.conf",
+        "extensions-kienzlefon.conf", "queues-kienzlefon.conf", "features-kienzlefon.conf",
+        "musiconhold-kienzlefon.conf",
+    )
+    with tempfile.TemporaryDirectory(prefix="kienzlefon-asterisk-plan-") as name:
+        staging = Path(name)
+        for filename in names:
+            source = etc / filename
+            if source.exists():
+                shutil.copy2(source, staging / filename)
+        phone = staging / "extensions-kfx-telefonie.conf"
+        if phone.is_file():
+            phone.write_text(decorate_calls(phone.read_text(), enabled=False), encoding="utf-8")
+        _install_asterisk_config(config, staging, features, etc / "features-kienzlefon.conf")
+        phone.write_text(decorate_calls(phone.read_text(), enabled=config.middleware.enabled,
+                                        foreign=True), encoding="utf-8")
+        planned = {filename: (staging / filename).read_text(encoding="utf-8")
+                   for filename in names if (staging / filename).is_file()}
+        _validate_transfer_plan(config, planned)
+        for filename, text in planned.items():
+            _atomic_install(etc / filename, text)
+
+
+def _validate_transfer_plan(config: AppConfig, planned: dict[str, str]) -> None:
+    if not config.middleware.enabled:
+        return
+    extensions = planned["extensions-kienzlefon.conf"]
+    dialplans = "\n".join(text for name, text in planned.items() if name.startswith("extensions"))
+    for name in ("kienzlefon-transfer", "kienzlefon-transfer-prepare",
+                 "kienzlefon-transfer-caller", "kienzlefon-transfer-progress"):
+        if len(re.findall(r"^\s*\[" + re.escape(name) + r"\]\s*(?:;[^\n]*)?$", dialplans, re.M)) != 1:
+            raise AsteriskConfigError("Vermittlungskontext fehlt oder ist mehrfach vorhanden")
+    for text in planned.values():
+        if re.search(r"^\s*(?:include\s*=>|context\s*=)\s*kienzlefon-transfer(?:\s|,|;|$)", text, re.M):
+            raise AsteriskConfigError("Privater Vermittlungskontext darf nicht eingebunden werden")
+    route = extensions.split("[kienzlefon-transfer]\n", 1)[1].split("\n[", 1)[0]
+    patterns = re.findall(r"^exten => (_[^,]+),1,", route, re.M)
+    if patterns != ["_" + "X" * length for length in range(2, 33)]:
+        raise AsteriskConfigError("Vermittlungsroute ist nicht abgesichert")
+    for block in re.split(r"^exten => ", route, flags=re.M)[1:]:
+        if block.startswith("_") and not (
+            "Set(KF_TRANSFER_ALLOWED=0)" in block
+            and "kienzlefon-transfer-check" in block
+            and 'GotoIf($["${KF_TRANSFER_ALLOWED}"="1"]?approved)' in block
+        ):
+            raise AsteriskConfigError("Vermittlungsroute ohne vollstaendige Freigabepruefung")
+    for text in (extensions, planned["extensions-kfx-telefonie.conf"]):
+        if text.count("; kienzlefon transfer call begin") != text.count("; kienzlefon transfer call end"):
+            raise AsteriskConfigError("Unvollstaendige Vermittlungs-Hooks")
+
+
+def _install_asterisk_config(config: AppConfig, etc: Path,
+                             features: dict[str, str] | None, features_include: Path) -> None:
     from .hold_music import install_config as install_hold_music_config
 
     pjsip_target = etc / "pjsip-kienzlefon.conf"
@@ -638,7 +704,7 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
     queues_target = etc / "queues-kienzlefon.conf"
     features_target = etc / "features-kienzlefon.conf"
     _atomic_install(pjsip_target, render_pjsip(config))
-    _atomic_install(extensions_target, render_extensions(config))
+    _atomic_install(extensions_target, render_extensions(config, features))
     _atomic_install(queues_target, render_queues(config))
     _atomic_install(features_target, render_features())
     install_hold_music_config(config, etc)
@@ -648,7 +714,7 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
     )
     _ensure_include(etc / "queues.conf", '#include "/etc/asterisk/queues-kienzlefon.conf"')
     _ensure_include(
-        etc / "features.conf", '#include "/etc/asterisk/features-kienzlefon.conf"'
+        etc / "features.conf", f'#include "{features_include}"'
     )
     _patch_kienzlefax_ivr_route(etc / "extensions-kfx-telefonie.conf", config.middleware.enabled)
     _patch_middleware_overflow(etc / "extensions-kfx-telefonie.conf", config.middleware.enabled)

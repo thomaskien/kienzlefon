@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.3
+Version: 2.5.4
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,31 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.4
+
+- Vermittlungsuebergabe der T2med-Middleware vollstaendig im Installer und
+  Dialplan umgesetzt: private Zielpruefung, BlindTransfer, native Rueckfrage,
+  Abschluss und Abbruch mit vorhandenen Kanal-Featurecodes.
+- Tatsaechliche freigegebene PJSIP-Mitarbeiterkanaele erhalten Bereitschaft
+  und passende Transferrechte bei Queue-, Direkt-, internen und ausgehenden
+  Anrufen einschliesslich Click-to-Dial; Local-Zwischenwege werden beruecksichtigt.
+- Externe Ziele verwenden gemeinsame Wahlregeln, Mitarbeiter-Provider,
+  Praxis-Absendernummer und Kapazitaetspruefung. Fortschrittsereignis erst
+  unmittelbar vor dem echten Dial, Ablehnung separat; kein Fehler beim normalen
+  Besetzt/Nichtmelden oder beim Auflegen nach erfolgreicher Vermittlung.
+- Installer prueft Asterisk-Faehigkeiten, plant und validiert Konfigurationen
+  vor dem Schreiben und kontrolliert nach Reload die geladenen Kontexte.
+  Bestehende Featurecodes, native Rueckkehrregeln und AMI-Zugaenge bleiben erhalten.
+- Inland in internationaler Schreibweise folgt denselben Sperren wie nationale
+  Nummern; freigegebene Auslandsnummern werden nicht als Ortsnummer umgedeutet.
+
+- Die Queue nennt jetzt die eigene Warteposition: "Sie sind auf Position zwei
+  in der Warteschlange." Asterisk liefert die Position einschliesslich des
+  eigenen Anrufs; "Vor Ihnen warten noch zwei Anrufe" war deshalb falsch.
+  Position eins bleibt "Sie sind als Naechstes an der Reihe."
+- Beim Update wird das unveraenderte bisherige TTS-Textpaar gemeinsam ersetzt.
+  Eigene Texte und manuelle Aufnahmen bleiben erhalten.
 
 ## 2.5.3
 

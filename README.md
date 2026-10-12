@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.3
+Version: 2.5.4
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.3**
+Version: **2.5.4**
 
 ## Eigenschaften
 
@@ -100,6 +100,30 @@ Version: **2.5.3**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.5.4
+
+Die AMI-Anbindung unterstuetzt jetzt die Vermittlungsfunktionen der separaten
+T2med-Middleware: direkt weitergeben oder Rueckfrage, jeweils intern und extern,
+mit nativem Abschluss und Rueckkehr zum Anrufer. Der Installer bereitet die
+tatsaechlichen Mitarbeiterkanaele vor und richtet den privaten Zielkontext
+`kienzlefon-transfer` ein. Freigegeben sind die in `[middleware].nebenstellen`
+ausgewaehlten physischen Telefone; Fax, KI und Funktionsziele sind ausgeschlossen.
+Bestehende AMI-Zugangsdaten, IP-Regeln und globale Transfercodes bleiben erhalten.
+
+Externe Vermittlungen verwenden Rufnummernsperren, Provider, Praxis-Absendernummer
+und Kapazitaetspruefung der normalen Ausgehroute. `0049…`, `+49…` und nationale
+Schreibweisen werden fuer deutsche Ziele gleich behandelt; Auslandsziele bleiben
+bei aktivierter Auslandssperre gesperrt. Freigegebene Auslandsnummern behalten
+ihre Landesvorwahl auch nach mehreren Pruefschritten.
+
+Die Queue sagt jetzt korrekt **„Sie sind auf Position zwei in der Warteschlange.“**
+Position eins bleibt „Sie sind als Naechstes an der Reihe.“ Unveraenderte alte
+Standardtexte werden beim Update ersetzt; eigene Texte und Aufnahmen bleiben erhalten.
+
+Update ueber den normalen Hauptinstaller. Danach neue Gespraeche verwenden:
+Bereits laufende Gespraeche erhalten die neuen Kanal-Hooks nicht nachtraeglich.
+Einrichtung und vollstaendige Live-Testfolge: [Vermittlung](docs/VERMITTLUNG.md).
 
 ## Korrektur in 2.5.3
 

@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from kienzlefon.config import load_config
+from kienzlefon.migration import migrate_config, set_string
 from kienzlefon.prompts import PROMPT_CATALOG, rendered_prompts
 from kienzlefon.queue_prompts import (
     QUEUE_NUMBER_PROMPTS,
@@ -84,3 +88,62 @@ def test_generation_repeats_and_manual_update_refresh_digit_aliases(
     manual_config = replace(app_config, prompt_sources={name: "manuell"})
     assert PromptGenerator(manual_config).generate(only={name}) == (1, 0)
     assert all(path.read_bytes().startswith(b"manual-number") for path in aliases)
+
+
+def test_queue_position_update_regenerates_only_both_changed_fragments(
+    app_config, monkeypatch
+) -> None:
+    from kienzlefon.prompts import PromptGenerator
+
+    def generate_one(self, name: str, text: str, staging: Path) -> None:
+        for directory, suffixes in (("masters", ("wav",)),
+                                    ("prompts", ("sln16", "g722", "alaw", "ulaw"))):
+            output = staging / directory
+            output.mkdir(parents=True, exist_ok=True)
+            for suffix in suffixes:
+                (output / f"{name}.{suffix}").write_text(text, encoding="utf-8")
+
+    monkeypatch.setattr(PromptGenerator, "_generate_one", generate_one)
+    set_string(app_config.source, "ansagen", "queue_thereare", "Vor Ihnen warten noch")
+    set_string(app_config.source, "ansagen", "queue_callswaiting", "Anrufe.")
+    selected = set(QUEUE_PROMPTS)
+    assert PromptGenerator(load_config(app_config.source)).generate(only=selected) == (4, 0)
+
+    template = Path("config/kienzlefon.toml.example")
+    assert migrate_config(app_config.source, template) is True
+    updated = load_config(app_config.source)
+    assert PromptGenerator(updated).generate(only=selected) == (2, 2)
+    assert migrate_config(app_config.source, template) is False
+    assert PromptGenerator(updated).generate(only=selected) == (0, 4)
+    prompts = rendered_prompts(updated)
+    assert prompts["queue_youarenext"] == "Sie sind als Nächstes an der Reihe."
+    # app_queue speaks qe->pos unchanged between these two audio fragments.
+    assert " ".join((prompts["queue_thereare"], "zwei", prompts["queue_callswaiting"])) == (
+        "Sie sind auf Position zwei in der Warteschlange."
+    )
+    for name in selected:
+        for suffix in ("sln16", "g722", "alaw", "ulaw"):
+            assert (updated.paths.prompts / f"{name}.{suffix}").read_text(
+                encoding="utf-8"
+            ) == prompts[name]
+
+
+@pytest.mark.parametrize("name", ["queue_thereare", "queue_callswaiting"])
+@pytest.mark.parametrize("customization", ["text", "manual", "upload-wav", "upload-wav16"])
+def test_queue_position_migration_preserves_custom_pairs(app_config, name, customization) -> None:
+    set_string(app_config.source, "ansagen", "queue_thereare", "Vor Ihnen warten noch")
+    set_string(app_config.source, "ansagen", "queue_callswaiting", "Anrufe.")
+    if customization == "text":
+        set_string(app_config.source, "ansagen", name, "Eigener Text.")
+    elif customization == "manual":
+        with app_config.source.open("a", encoding="utf-8") as handle:
+            handle.write(f'\n[ansagen_quellen]\n{name} = "manuell"\n')
+    else:
+        # Old installations also activate uploads without an explicit source.
+        app_config.tts.upload_directory.mkdir(parents=True, exist_ok=True)
+        (app_config.tts.upload_directory / f"{name}.{customization[7:]}").write_bytes(
+            b"custom recording"
+        )
+    before = app_config.source.read_bytes()
+    assert migrate_config(app_config.source, Path("config/kienzlefon.toml.example")) is False
+    assert app_config.source.read_bytes() == before

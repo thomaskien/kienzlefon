@@ -94,6 +94,7 @@ def migrate_config(target: Path, template: Path) -> bool:
     template_text = template.read_text(encoding="utf-8")
     updated = _migrate_legacy_whisper_model(text)
     updated = _replace_old_defaults(updated, template_text)
+    updated = _migrate_queue_position_prompts(updated, template_text, target.parent)
     for section, keys in REMOVED_KEYS.items():
         updated = _remove_keys(updated, section, keys)
     for section, body in _sections(template_text):
@@ -123,6 +124,44 @@ def migrate_config(target: Path, template: Path) -> bool:
     finally:
         temporary.unlink(missing_ok=True)
     return True
+
+
+def _migrate_queue_position_prompts(text: str, template_text: str, base: Path) -> str:
+    """Ersetzt nur das unveraenderte TTS-Paar, niemals halbe Saetze/Aufnahmen."""
+    legacy = {
+        "queue_thereare": "Vor Ihnen warten noch",
+        "queue_callswaiting": "Anrufe.",
+    }
+    current = tomllib.loads(text)
+    prompts = current.get("ansagen", {})
+    if any(prompts.get(key) != value for key, value in legacy.items()):
+        return text
+    sources = current.get("ansagen_quellen", {})
+    upload_value = current.get("tts", {}).get("uploadverzeichnis")
+    upload = Path(upload_value).expanduser() if upload_value else None
+    if upload is not None and not upload.is_absolute():
+        upload = base / upload
+    for key in legacy:
+        source = sources.get(key)
+        if source == "manuell" or (
+            source != "tts" and upload is not None
+            and any((upload / f"{key}.{suffix}").is_file() for suffix in ("wav16", "wav"))
+        ):
+            return text
+    replacements = tomllib.loads(template_text).get("ansagen", {})
+    if not legacy.keys() <= replacements.keys():
+        return text
+    section = re.search(r"^\[ansagen\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if section is None:
+        return text
+    body = section["body"]
+    for key in legacy:
+        body = re.sub(
+            rf"^{key}\s*=.*$",
+            lambda _match: f"{key} = {json.dumps(replacements[key], ensure_ascii=False)}",
+            body, count=1, flags=re.M,
+        )
+    return text[:section.start("body")] + body + text[section.end("body"):]
 
 
 def _migrate_legacy_whisper_model(text: str) -> str:

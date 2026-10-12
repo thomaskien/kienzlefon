@@ -135,8 +135,8 @@ PROMPT_LABELS = {
     "webadmin_record_discarded": "Bestätigung verworfene Aufnahme",
     "queue_thankyou": "Queue – Dank für die Geduld",
     "queue_youarenext": "Queue – als Nächstes an der Reihe",
-    "queue_thereare": "Queue – Einleitung wartende Anrufe",
-    "queue_callswaiting": "Queue – wartende Anrufe",
+    "queue_thereare": "Queue – Einleitung zur eigenen Warteposition",
+    "queue_callswaiting": "Queue – Abschluss nach der Warteposition",
 }
 
 PRIMARY_PROMPTS = frozenset(

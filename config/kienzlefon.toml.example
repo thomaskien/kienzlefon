@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.3
+# Version: 2.5.4
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -290,8 +290,9 @@ webadmin_record_saved = "Die Aufnahme wurde gespeichert, aber noch nicht aktivie
 webadmin_record_discarded = "Die Aufnahme wurde verworfen."
 queue_thankyou = "Vielen Dank für Ihre Geduld."
 queue_youarenext = "Sie sind als Nächstes an der Reihe."
-queue_thereare = "Vor Ihnen warten noch"
-queue_callswaiting = "Anrufe."
+# Asterisk spricht die eigene Position, nicht die Zahl der Anrufe davor.
+queue_thereare = "Sie sind auf Position"
+queue_callswaiting = "in der Warteschlange."
 queue_digit_0 = "Null"
 queue_digit_1 = "Eins"
 queue_digit_2 = "Zwei"

@@ -1,4 +1,4 @@
-"""Version 2.5.3: optional AMI access and its public configuration contract.
+"""Version 2.5.4: optional AMI access and its public configuration contract.
 
 AMI grants action categories, not per-variable/per-context capabilities. The
 middleware is a trusted server; browser/workstation credentials must never be
@@ -340,6 +340,8 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
             private_write(managed, "; Kienzlefon-Middleware deaktiviert.\n", 0o640)
         if previous is not None:
             previous["enabled"] = False
+            if "transfer" in previous:
+                previous["transfer"]["enabled"] = False
             write_connection(config_dir, previous)
         return export
     planned = listener_plan(options, manager)  # Validate BEFORE writing secrets or changing listener.
@@ -385,6 +387,9 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
         # A newly created manager.conf has no foreign ownership to preserve.
         if not manager_existed:
             os.chown(manager, manager.stat().st_uid, gid)
+    from .transfer_agi import staff_extensions
+
+    staff = list(staff_extensions(config))
     data = {
         "schema_version": 1, "enabled": True,
         "ami": {"host": options.server_ip, "port": options.port, "transport": options.transport,
@@ -394,6 +399,8 @@ def provision(config: AppConfig, etc: Path = Path("/etc/asterisk"), *, rotate: b
         "click_to_dial": {"enabled": options.click_to_dial,
                           "context": "kienzlefon-click-to-dial", "extensions": list(options.extensions),
                           "ring_timeout_ms": options.ring_timeout_ms},
+        "transfer": {"enabled": bool(staff), "context": "kienzlefon-transfer",
+                     "extensions": staff, "progress_schema_version": 1},
     }
     if previous and previous.get("ufw_rule"):
         data["ufw_rule"] = previous["ufw_rule"]

@@ -1,4 +1,9 @@
-# AMI-Middleware ab Kienzlefon 2.5.3
+# AMI-Middleware ab Kienzlefon 2.5.4
+
+Ab 2.5.4 ist die Vermittlungsuebergabe umgesetzt: direkte Vermittlung und native
+Rueckfrage intern/extern, Mitarbeiter-Kanalvorbereitung, eigener privater
+Zielkontext und Fortschrittsereignisse. Einrichtung, Vertrag und Live-Abnahme
+stehen in [VERMITTLUNG.md](VERMITTLUNG.md).
 
 Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
 Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die

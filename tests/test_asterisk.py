@@ -118,7 +118,7 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     assert '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"' in (
         etc / "extensions.conf"
     ).read_text(encoding="utf-8")
-    assert '#include "/etc/asterisk/features-kienzlefon.conf"' in (
+    assert f'#include "{etc}/features-kienzlefon.conf"' in (
         etc / "features.conf"
     ).read_text(encoding="utf-8")
     assert kfx.count("Gosub(kienzlefon-ai-queue-fallback,s,1)") == 1
