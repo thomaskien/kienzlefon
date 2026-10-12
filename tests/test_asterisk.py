@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from kienzlefon.asterisk import (
     install_asterisk_config,
     render_extensions,
@@ -77,7 +79,13 @@ def test_disabled_red_phone_routes_directly_to_special_queue(app_config) -> None
     assert "PJSIP/299" not in render_queues(config)
 
 
-def test_installer_patches_only_known_kienzlefax_route(app_config, tmp_path: Path) -> None:
+@pytest.mark.parametrize("overflow", [
+    "",
+    "[kfx-phone-overflow-in]\nexten => s,1,Hangup(21)\n",
+    "[kfx-phone-overflow-in]\nexten => s,1,Goto(kfx-phone-queue,s,1)\n",
+    "[kfx-phone-overflow-in]\n same => n(accepted),Goto(kienzlefon-entry,s,1)\n",
+])
+def test_installer_patches_only_known_kienzlefax_route(app_config, tmp_path: Path, overflow: str) -> None:
     etc = tmp_path / "asterisk"
     etc.mkdir()
     (etc / "pjsip.conf").write_text("[system]\ntype=system\n", encoding="utf-8")
@@ -97,11 +105,14 @@ exten => s,1,NoOp(KienzleFax Telefoniewarteschlange)
 exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
  same => n(dial),Set(CALLERID(num)=4923311234)
  same => n,Dial(PJSIP/${EXTEN}@kfx-phone-in-endpoint,120)
-""",
+""" + overflow,
         encoding="utf-8",
     )
     install_asterisk_config(app_config, etc)
     kfx = (etc / "extensions-kfx-telefonie.conf").read_text(encoding="utf-8")
+    assert not app_config.middleware.enabled
+    if overflow:
+        assert overflow in kfx
     assert "Goto(kienzlefon-entry,s,1)" in kfx
     assert "; kienzlefon internal routes begin" in kfx
     assert "exten => 299,1,Dial(PJSIP/299,120)" in kfx

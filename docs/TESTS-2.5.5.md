@@ -3,7 +3,7 @@
 Stand: 12.10.2026, vor dem GitHub-Upload. Getrennte Release-Arbeitskopie ohne
 die unabhaengigen, unveroeffentlichten SMS-Arbeiten.
 
-- Gesamte Python-Suite: **551 Tests bestanden**. Enthalten sind vollstaendige
+- Gesamte Python-Suite nach Installer-Nachkorrektur: **559 Tests bestanden**. Enthalten sind vollstaendige
   AGI-Protokolldialoge fuer Queue-Eintritt und Rufangebot, Zyklusgrenzen,
   Kopfwechsel, Prioritaeten, fehlende Metadaten und Schutz angenommener Anrufe.
 - Installer: Fehlererkennung mit realistischem Asterisk-Dial-Hilfetext,
@@ -12,6 +12,12 @@ die unabhaengigen, unveroeffentlichten SMS-Arbeiten.
   Gleichnamige fremde Regeln, doppelte relative/absolute Includes, Glob-Includes
   und Include-Zyklen werden vor der Publikation abgewiesen; die geladenen Regeln
   muessen genau einem vollstaendigen erwarteten Regelblock entsprechen.
+- Nachkorrektur fuer Installationen ohne Middleware: Der gemeldete Fehler im
+  Ueberlauf-Patch wurde mit dem zuvor veroeffentlichten Code reproduziert.
+  Gesamte Installation und idempotente Wiederholung mit fehlendem, deaktiviertem,
+  altem und abweichendem Ueberlaufkontext geprueft. Unverwaltete Routen bleiben
+  bei ausgeschalteter Middleware unveraendert; vorhandene eigene Hooks werden
+  weiter zurueckgenommen, mehrdeutige Verweise ohne Schreibzugriff abgewiesen.
 - Audio: Migration bekannter alter Standardtexte, Erhalt eigener Texte und
   Aufnahmen, Veroeffentlichung der Queue-Dateien in allen vier Telefonieformaten,
   aktive Dateipfade und Erzeugungsstand aus dem Manifest.

@@ -37,6 +37,10 @@ Changelog:
 
 ## 2.5.5
 
+- Installer-Nachkorrektur: Bei deaktivierter Middleware bleiben unverwaltete
+  Ueberlaufrouten unveraendert; ein Middleware-Uebergabepunkt ist dann nicht
+  erforderlich. Bereits gesetzte eigene Middleware-Hooks werden beim Abschalten
+  weiterhin zurueckgenommen, mehrdeutige Hooks vor dem Schreiben abgewiesen.
 - Parallele erste Rufversuche werden vor dem naechsten Zyklus des ersten wartenden
   Anrufers beendet; ab dann wartet der nachrangige Anrufer bis zur Annahme oder zum
   Auflegen des vorrangigen Anrufers. Laufende Gespraeche werden nicht beendet.

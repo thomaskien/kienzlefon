@@ -1055,10 +1055,15 @@ def _patch_middleware_overflow(path: Path, enabled: bool) -> None:
     context = re.search(r"^\[kfx-phone-overflow-in\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
     if context is None:
         return
+    # Without middleware, an existing overflow route needs no integration.
+    # Only undo our own hook when disabling a previously enabled installation.
+    # Older/custom Kienzlefax routes do not necessarily have an accepted label.
+    if not enabled and "kienzlefon-middleware-queue-in" not in context["body"]:
+        return
     target = "kienzlefon-middleware-queue-in" if enabled else "kfx-phone-queue"
     body, count = re.subn(
         r"same => n\(accepted\),Goto\((?:kfx-phone-queue|kienzlefon-middleware-queue-in),s,1\)",
-        f"same => n(accepted),Goto({target},s,1)", context["body"], count=1,
+        f"same => n(accepted),Goto({target},s,1)", context["body"],
     )
     if count != 1:
         raise AsteriskConfigError("Externer Ueberlauf-Eingang fuer Middleware nicht eindeutig gefunden")

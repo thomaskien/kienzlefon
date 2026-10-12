@@ -207,6 +207,36 @@ def test_external_main_and_overflow_update_without_internal_hook(tmp_path):
     assert path.read_text() == original
 
 
+@pytest.mark.parametrize("body", [
+    "exten => s,1,Hangup(21)\n",
+    "exten => s,1,Goto(kfx-phone-queue,s,1)\n",
+    " same => n(accepted),Goto(kienzlefon-entry,s,1)\n",
+])
+def test_disabled_middleware_leaves_unmanaged_overflow_untouched(tmp_path, body):
+    from kienzlefon.asterisk import AsteriskConfigError, _patch_middleware_overflow
+    path = tmp_path / "extensions.conf"
+    original = "[kfx-phone-overflow-in]\n" + body
+    path.write_text(original)
+    _patch_middleware_overflow(path, False)
+    assert path.read_text() == original
+    assert list(tmp_path.iterdir()) == [path]  # No backup/write needed.
+    with pytest.raises(AsteriskConfigError, match="nicht eindeutig"):
+        _patch_middleware_overflow(path, True)
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_ambiguous_existing_middleware_overflow_is_rejected_without_write(tmp_path, enabled):
+    from kienzlefon.asterisk import AsteriskConfigError, _patch_middleware_overflow
+    path = tmp_path / "extensions.conf"
+    original = ("[kfx-phone-overflow-in]\n"
+                + " same => n(accepted),Goto(kienzlefon-middleware-queue-in,s,1)\n" * 2)
+    path.write_text(original)
+    with pytest.raises(AsteriskConfigError, match="nicht eindeutig"):
+        _patch_middleware_overflow(path, enabled)
+    assert path.read_text() == original
+
+
 def test_firewall_changes_only_own_rule_and_retains_tracking_when_inactive(app_config, monkeypatch):
     from types import SimpleNamespace
 
