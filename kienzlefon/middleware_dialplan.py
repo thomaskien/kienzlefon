@@ -62,12 +62,9 @@ exten => s,1,GotoIf($["${KF_PHONE_LOOKUP_STARTED}"="1"]?return)
  same => n,UserEvent(KienzlefonLookupFinished,SchemaVersion: 1,RequestId: ${KF_PHONE_REQUEST_ID},SourceUniqueid: ${UNIQUEID},Status: ${KF_PHONE_STATUS},Applied: ${KF_PHONE_APPLIED})
  same => n(return),Return()
 '''
-    c2d = """[kienzlefon-click-to-dial]
-exten => _.,1,Hangup(21)
-"""
+    c2d_steps = "Hangup(21)\n"
     if options.enabled and options.click_to_dial:
-        c2d = r'''[kienzlefon-click-to-dial]
-exten => _.,1,Set(KF_C2D_ALLOWED=0)
+        c2d_steps = r'''Set(KF_C2D_ALLOWED=0)
  same => n,Set(KF_C2D_TARGET=${EXTEN})
  same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-c2d-check,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,GotoIf($["${KF_C2D_ALLOWED}"="1"]?approved)
@@ -75,7 +72,13 @@ exten => _.,1,Set(KF_C2D_ALLOWED=0)
  same => n(approved),UserEvent(KienzlefonClickToDialProgress,SchemaVersion: 1,RequestId: ${KF_C2D_ID},Phase: dialing_target,SourceUniqueid: ${UNIQUEID})
  same => n,Goto(kienzlefon-outbound,${KF_C2D_NUMBER},1)
 '''
-    return "\n; Kienzlefon Middleware v1 / 2.5.2\n" + r'''[kienzlefon-middleware-in]
+    # Match number prefixes only, never h/s/i/t. The AGI validates the complete
+    # target (3..32 digits, optional leading plus) before authorizing any call.
+    c2d = ("[kienzlefon-click-to-dial]\n"
+           "exten => h,1,NoOp(Kienzlefon Click-to-Dial beendet)\n")
+    for pattern in ("_XXX", "_XXX.", "_+XXX", "_+XXX."):
+        c2d += f"exten => {pattern},1,{c2d_steps}"
+    return "\n; Kienzlefon Middleware v1 / 2.5.3\n" + r'''[kienzlefon-middleware-in]
 exten => s,1,AGI(/opt/kienzlefon/venv/bin/kienzlefon-callerid,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,Gosub(kienzlefon-lookup,s,1)
  same => n,Goto(kienzlefon-entry,s,1)

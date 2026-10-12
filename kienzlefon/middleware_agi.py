@@ -52,7 +52,7 @@ def main() -> None:
             request_id=channel.get_variable("KF_C2D_ID"),
             client_id=channel.get_variable("KF_C2D_CLIENT"),
             extension=channel.get_variable("KF_C2D_EXTENSION"),
-            endpoint=channel.get_variable("CHANNEL(pjsip,endpoint)"),
+            endpoint=channel.get_variable("CHANNEL(endpoint)"),
             number=channel.get_variable("KF_C2D_TARGET"),
         )
         channel.set_variable("KF_C2D_NUMBER", number)

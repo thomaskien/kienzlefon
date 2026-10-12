@@ -1,4 +1,4 @@
-"""Version 2.5.2: optional AMI access and its public configuration contract.
+"""Version 2.5.3: optional AMI access and its public configuration contract.
 
 AMI grants action categories, not per-variable/per-context capabilities. The
 middleware is a trusted server; browser/workstation credentials must never be

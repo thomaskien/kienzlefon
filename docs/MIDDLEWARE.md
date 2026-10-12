@@ -1,4 +1,4 @@
-# AMI-Middleware ab Kienzlefon 2.5.2
+# AMI-Middleware ab Kienzlefon 2.5.3
 
 Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
 Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die
@@ -181,7 +181,10 @@ Arbeitsplatzkennung, `__KF_C2D_EXTENSION` die freigegebene Telefonnummer.
 Ein vollstaendiges Originate-Beispiel steht in der Uebergabe.
 
 Nach Abheben kontrolliert Kienzlefon diese Werte sowie den tatsaechlichen
-PJSIP-Endpunkt. Externe Zielrufnummern enthalten nur Ziffern und optional ein
+PJSIP-Endpunkt ueber `CHANNEL(endpoint)`. Der Endpunkt muss zur angeforderten
+und freigegebenen Nebenstelle passen. Ein leerer oder abweichender Wert wird
+abgelehnt; `KF_C2D_EXTENSION` dient niemals als Ersatz fuer die Kanalidentitaet.
+Externe Zielrufnummern enthalten nur Ziffern und optional ein
 fuehrendes Plus. Die bestehenden Sperren gelten weiter. Der passende Haupt-
 oder Direktprovider und die Praxis-Absenderrufnummer werden gesetzt, dann
 uebernimmt `kienzlefon-outbound`. Eine eigene zweite Provider-Diallogik gibt es
@@ -189,6 +192,35 @@ nicht. `KienzlefonClickToDialProgress` mit Phase dialing_target bestaetigt den
 Beginn des Zielrufes; verbunden ist ein Gespraech erst nach beobachteter
 Zielannahme und passender Bruecke. Bei Verbindungsabbruch nicht automatisch
 noch einmal waehlen.
+
+### Korrektur und Live-Test ab 2.5.3
+
+Bis 2.5.2 wurde faelschlich `CHANNEL(pjsip,endpoint)` abgefragt. Unter Asterisk 20
+fuehrte dies zu einem leeren Endpunkt und damit unmittelbar nach dem Abheben
+zu `Hangup(21)`. Ab 2.5.3 wird die dokumentierte Abfrage `CHANNEL(endpoint)`
+verwendet. Die Sicherheitspruefung bleibt unveraendert streng.
+
+Der Kontext verwendet nun `_XXX`, `_XXX.`, `_+XXX` und `_+XXX.` als Einstiege.
+Diese grenzen Rufnummernpraefixe gegen Spezial-Extensions ab; der AGI prueft
+weiterhin die vollstaendige Zielrufnummer auf 3 bis 32 Ziffern mit optionalem
+fuehrenden Plus sowie die bestehenden Wahlsperren. Ein eigener `h`-Eintrag
+beendet die Verarbeitung ohne erneute AGI-Pruefung.
+
+Den aktuellen Hauptinstaller erneut ausfuehren; er aktualisiert das Python-Paket,
+erzeugt die Asterisk-Konfiguration neu und laedt den Dialplan. Ein manuell
+geaenderter generierter Dialplan allein behebt den Python-Fehler nicht dauerhaft.
+AMI-Zugangsdaten und Middleware-Anfragen bleiben unveraendert.
+
+Danach mit einer freigegebenen Nebenstelle, zum Beispiel 202, pruefen:
+
+1. Click-to-Dial ausloesen: Nebenstelle klingelt.
+2. Abheben: `GET VARIABLE CHANNEL(endpoint)` liefert 202, `KF_C2D_ALLOWED` wird 1.
+3. `KienzlefonClickToDialProgress` meldet `dialing_target`; die Route erreicht
+   `kienzlefon-outbound` und das externe `Dial()`.
+4. Ziel nimmt an: Gespraech in beide Richtungen pruefen, danach auflegen.
+   Keine erneute Click-to-Dial-AGI-Pruefung fuer Extension `h`.
+5. Bei leerem/falschem Endpunkt und gesperrter Nebenstelle muss die Freigabe
+   weiterhin ausbleiben. Rufnummern mit und ohne fuehrendes Plus pruefen.
 
 ## Pruefung auf der Telefonanlage
 

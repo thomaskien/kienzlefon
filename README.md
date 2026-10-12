@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.2
+Version: 2.5.3
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.2**
+Version: **2.5.3**
 
 ## Eigenschaften
 
@@ -100,6 +100,20 @@ Version: **2.5.2**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Korrektur in 2.5.3
+
+Click-to-Dial brach unter Asterisk 20 nach dem Abheben des Mitarbeitertelefons
+ab: Die Endpunktabfrage hatte einen falschen Funktionsparameter. Sie verwendet
+jetzt `CHANNEL(endpoint)`. Nur wenn der tatsaechliche Kanal zur angeforderten
+und freigegebenen Nebenstelle passt, wird die bestehende Ausgehroute erreicht.
+Leere oder abweichende Endpunkte werden weiterhin abgelehnt.
+
+Beim Auflegen startet der Click-to-Dial-Kontext keine erneute AGI-Pruefung mehr.
+Die Korrektur wird ueber den regulaeren Hauptinstaller angewendet; Zugangsdaten
+und Middleware-Konfiguration muessen dafuer nicht geaendert werden. Anschliessend
+live pruefen: Telefon klingelt, abheben, externes Ziel klingelt, Gespraech fuehren
+und auflegen. Details siehe [AMI-Middleware](docs/MIDDLEWARE.md#click-to-dial).
 
 ## Neu in 2.5.2
 

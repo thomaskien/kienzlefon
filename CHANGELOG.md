@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.2
+Version: 2.5.3
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,18 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.3
+
+- Click-to-Dial fragt den tatsaechlichen PJSIP-Endpunkt korrekt ueber
+  `CHANNEL(endpoint)` ab. Die bisherige Abfrage `CHANNEL(pjsip,endpoint)` lieferte
+  unter Asterisk 20 einen leeren Wert und fuehrte nach dem Abheben zu Hangup(21).
+- Leere oder abweichende Endpunkte bleiben abgewiesen; die angeforderte
+  Nebenstelle wird nicht als Ersatzwert fuer die Kanalidentitaet verwendet.
+- Der Click-to-Dial-Kontext verwendet Rufnummern-Einstiege statt `_.` und
+  behandelt `h` separat ohne AGI. Auflegen startet keine erneute Freigabepruefung.
+- Regressionstests pruefen den vollstaendigen AGI-Dialog einschliesslich der
+  konkreten Endpunktabfrage, Antwortverarbeitung, Freigabe und Ablehnungsfaelle.
 
 ## 2.5.2
 
