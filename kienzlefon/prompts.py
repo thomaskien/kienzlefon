@@ -40,7 +40,7 @@ from typing import Any, Callable
 from .config import WEEKDAYS, AppConfig, TimeWindow, WeeklySchedule
 from .health import worker_is_healthy
 from .kokoro import MODEL_FILES, MODEL_REVISION, RUNTIME_VERSION
-from .queue_prompts import QUEUE_NUMBER_PROMPTS, digit_output_paths
+from .queue_prompts import QUEUE_NUMBER_PROMPTS, digit_output_paths, phrase_output_paths
 from .speech_text import SPEECH_TEXT_VERSION, normalize_german_speech
 from .spool import write_json_atomic
 
@@ -354,7 +354,8 @@ class PromptGenerator:
                             staging / "prompts" / f"{name}.{suffix}",
                             self.config.paths.prompts / f"{name}.{suffix}",
                         )
-                    for alias in digit_output_paths(self.config.paths.prompts, name):
+                    for alias in (*digit_output_paths(self.config.paths.prompts, name),
+                                  *phrase_output_paths(self.config.paths.prompts, name)):
                         self._replace(
                             staging / "prompts" / f"{name}{alias.suffix}",
                             alias,
@@ -846,7 +847,8 @@ class PromptGenerator:
             self.config.paths.prompts / f"{name}.{suffix}"
             for suffix in ("sln16", "g722", "alaw", "ulaw")
         ]
-        aliases = digit_output_paths(self.config.paths.prompts, name)
+        aliases = (*digit_output_paths(self.config.paths.prompts, name),
+                   *phrase_output_paths(self.config.paths.prompts, name))
         return master.is_file() and all(path.is_file() for path in (*outputs, *aliases))
 
     def _digest(self, name: str, text: str, *, qwen_variant: int = 0) -> str:

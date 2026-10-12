@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.4
+# Version: 2.5.5
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -30,7 +30,17 @@ from pathlib import Path
 from .config import AppConfig, SipLineConfig
 from .hold_music import MUSIC_CLASS
 from .middleware_dialplan import render_middleware
-from .queue_prompts import ASTERISK_QUEUE_LANGUAGE
+from .queue_dialplan import (
+    RULE_NAME,
+    decorate_entries,
+    decorate_members,
+    practice_timing,
+    render_rules,
+    unwrap,
+    validate_rules_include,
+)
+from .queue_dispatch import member_interface, render_member_context
+from .queue_prompts import ASTERISK_QUEUE_LANGUAGE, QUEUE_PHRASES, phrase_path
 from .transfer_dialplan import decorate_calls, render_transfer
 from .transfer_features import DEFAULT_TRANSFER_FEATURES, resolve_transfer_features
 
@@ -140,7 +150,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.5.4
+; Version: 2.5.5
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -288,7 +298,8 @@ def _queue_options(config: AppConfig, options: str = "r") -> str:
     return options
 
 
-def render_extensions(config: AppConfig, features: dict[str, str] | None = None) -> str:
+def render_extensions(config: AppConfig, features: dict[str, str] | None = None,
+                      timing: tuple[int, int] = (19, 1)) -> str:
     red = config.ivr.red_extension
     specialist_description = (
         "Kienzlefon Fachstelle zum roten Telefon"
@@ -597,6 +608,8 @@ exten => _+X.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
  same => n,Goto(kienzlefon-outbound,${{EXTEN}},1)
 {render_middleware(config)}
 """
+    rendered += render_member_context()
+    rendered = decorate_entries(rendered, config, timing)
     rendered += render_transfer(config, features or DEFAULT_TRANSFER_FEATURES)
     return decorate_calls(rendered, enabled=config.middleware.enabled)
 
@@ -610,7 +623,7 @@ def render_queues(config: AppConfig) -> str:
         members.append(config.ivr.red_extension)
     members.extend(config.special_queue.additional_extensions)
     rendered_members = "\n".join(
-        f"member => PJSIP/{extension},0,Telefon {extension},PJSIP/{extension}"
+        f"member => {member_interface(extension)},0,Telefon {extension},PJSIP/{extension}"
         for extension in dict.fromkeys(members)
     )
     music_property = (
@@ -646,7 +659,7 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
         "pjsip.conf", "extensions.conf", "queues.conf", "features.conf", "musiconhold.conf",
         "extensions-kfx-telefonie.conf", "queues-kfx.conf", "pjsip-kienzlefon.conf",
         "extensions-kienzlefon.conf", "queues-kienzlefon.conf", "features-kienzlefon.conf",
-        "musiconhold-kienzlefon.conf",
+        "musiconhold-kienzlefon.conf", "queuerules.conf", "queuerules-kienzlefon.conf",
     )
     with tempfile.TemporaryDirectory(prefix="kienzlefon-asterisk-plan-") as name:
         staging = Path(name)
@@ -656,13 +669,15 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
                 shutil.copy2(source, staging / filename)
         phone = staging / "extensions-kfx-telefonie.conf"
         if phone.is_file():
-            phone.write_text(decorate_calls(phone.read_text(), enabled=False), encoding="utf-8")
+            phone.write_text(unwrap(decorate_calls(phone.read_text(), enabled=False)), encoding="utf-8")
         _install_asterisk_config(config, staging, features, etc / "features-kienzlefon.conf")
-        phone.write_text(decorate_calls(phone.read_text(), enabled=config.middleware.enabled,
-                                        foreign=True), encoding="utf-8")
+        phone.write_text(decorate_calls(decorate_entries(phone.read_text(), config,
+                                        practice_timing(staging / "queues-kfx.conf", config.ivr.queue_name)),
+                                        enabled=config.middleware.enabled, foreign=True), encoding="utf-8")
         planned = {filename: (staging / filename).read_text(encoding="utf-8")
                    for filename in names if (staging / filename).is_file()}
         _validate_transfer_plan(config, planned)
+        validate_rules_include(etc, planned)
         for filename, text in planned.items():
             _atomic_install(etc / filename, text)
 
@@ -703,9 +718,14 @@ def _install_asterisk_config(config: AppConfig, etc: Path,
     extensions_target = etc / "extensions-kienzlefon.conf"
     queues_target = etc / "queues-kienzlefon.conf"
     features_target = etc / "features-kienzlefon.conf"
+    timing = practice_timing(etc / "queues-kfx.conf", config.ivr.queue_name)
     _atomic_install(pjsip_target, render_pjsip(config))
-    _atomic_install(extensions_target, render_extensions(config, features))
+    _atomic_install(extensions_target, render_extensions(config, features, timing))
     _atomic_install(queues_target, render_queues(config))
+    _atomic_install(etc / "queuerules-kienzlefon.conf", render_rules(config, timing))
+    if not (etc / "queuerules.conf").exists():
+        _atomic_install(etc / "queuerules.conf", "; Kienzlefon Queue-Regeln\n")
+    _ensure_include(etc / "queuerules.conf", '#include "/etc/asterisk/queuerules-kienzlefon.conf"')
     _atomic_install(features_target, render_features())
     install_hold_music_config(config, etc)
     _ensure_include(etc / "pjsip.conf", '#tryinclude "/etc/asterisk/pjsip-kienzlefon.conf"')
@@ -723,6 +743,9 @@ def _install_asterisk_config(config: AppConfig, etc: Path,
     _patch_kienzlefax_queue_handoff_fallback(etc / "extensions-kfx-telefonie.conf")
     _patch_kienzlefax_queue_audio(config, etc / "extensions-kfx-telefonie.conf")
     _patch_kienzlefax_queue_properties(config, etc / "queues-kfx.conf")
+    queue_path = etc / "queues-kfx.conf"
+    if queue_path.is_file():
+        _atomic_install(queue_path, decorate_members(queue_path.read_text(), config))
     _patch_internal_routes(config, etc / "extensions-kfx-telefonie.conf")
     _patch_direct_did_routes(config, etc / "extensions-kfx-telefonie.conf", "kfx-phone-in")
     _patch_direct_did_routes(config, etc / "extensions.conf", "kfx-provider-in")
@@ -892,10 +915,10 @@ def _patch_kienzlefax_queue_properties(config: AppConfig, path: Path) -> None:
         raise AsteriskConfigError("Kienzlefax-Queue [praxis] wurde nicht gefunden")
     values = [
         "; kienzlefon queue properties begin",
-        "queue-thankyou=kienzlefon/queue_thankyou",
-        "queue-youarenext=kienzlefon/queue_youarenext",
-        "queue-thereare=kienzlefon/queue_thereare",
-        "queue-callswaiting=kienzlefon/queue_callswaiting",
+        "strategy=ringall", "autofill=yes", "ringinuse=no", "weight=0",
+        f"defaultrule={RULE_NAME}",
+        *(f"{name.replace('_', '-')}={phrase_path(config.paths.prompts, name)}"
+          for name in QUEUE_PHRASES),
     ]
     if config.hold_music.mode == "musik":
         values.append(f"musicclass={MUSIC_CLASS}")

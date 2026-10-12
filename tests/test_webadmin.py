@@ -137,7 +137,7 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     }
     assert state["product"] == {
         "name": "kienzlefon.de",
-        "version": "2.5.4",
+        "version": "2.5.5",
         "author": "Dr. Thomas Kienzle",
         "url": "https://kienzlefon.de",
     }
@@ -822,7 +822,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="2.5.4"' in installer
+    assert 'VERSION="2.5.5"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -905,7 +905,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
         "practice": "Praxis Test",
         "product": {
             "name": "kienzlefon.de",
-            "version": "2.5.4",
+            "version": "2.5.5",
             "author": "Dr. Thomas Kienzle",
             "url": "https://kienzlefon.de",
         },
@@ -1052,7 +1052,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert "Anrufsbaum" in result.stdout
     assert "Taste 0" in result.stdout
     assert "Keine Taste" in result.stdout
-    assert "Kienzlefon 2.5.4" in result.stdout
+    assert "Kienzlefon 2.5.5" in result.stdout
     assert "kienzlefon.de" in result.stdout
     assert "Dr. Thomas Kienzle" in result.stdout
     assert "Genau diese Ansage aufnehmen" in result.stdout

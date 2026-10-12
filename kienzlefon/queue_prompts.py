@@ -5,6 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 ASTERISK_QUEUE_LANGUAGE = "de_kienzlefon"
+QUEUE_PHRASES = ("queue_thankyou", "queue_youarenext", "queue_thereare", "queue_callswaiting")
+
+
+def phrase_path(prompts_directory: Path, name: str) -> Path:
+    """Separate active queue files from old stock/language-specific recordings."""
+    if name not in QUEUE_PHRASES:
+        raise ValueError("Unbekannter Queue-Ansagebaustein")
+    return prompts_directory / "queue" / name
+
+
+def phrase_output_paths(prompts_directory: Path, name: str) -> tuple[Path, ...]:
+    if name not in QUEUE_PHRASES:
+        return ()
+    return tuple(phrase_path(prompts_directory, name).with_suffix("." + suffix)
+                 for suffix in ("sln16", "g722", "alaw", "ulaw"))
 
 # Die Dateinamen entsprechen exakt ast_say_number_full_de in Asterisk say.c.
 # Die Reihenfolge ist zugleich die stabile Fortsetzung des Ansagenkatalogs.

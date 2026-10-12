@@ -60,9 +60,9 @@ def test_special_queue_rings_all_normal_and_selected_additional_phones(app_confi
     queues = render_queues(config)
     assert "strategy=ringall" in queues
     assert "weight=100" in queues
-    assert "member => PJSIP/201,0,Telefon 201,PJSIP/201" in queues
-    assert "member => PJSIP/300,0,Telefon 300,PJSIP/300" in queues
-    assert "member => PJSIP/299,0,Telefon 299,PJSIP/299" in queues
+    assert "member => Local/201@kienzlefon-queue-member,0,Telefon 201,PJSIP/201" in queues
+    assert "member => Local/300@kienzlefon-queue-member,0,Telefon 300,PJSIP/300" in queues
+    assert "member => Local/299@kienzlefon-queue-member,0,Telefon 299,PJSIP/299" in queues
 
 
 def test_disabled_red_phone_routes_directly_to_special_queue(app_config) -> None:
@@ -113,8 +113,10 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
         etc / "queues.conf"
     ).read_text(encoding="utf-8")
     patched_queues = (etc / "queues-kfx.conf").read_text(encoding="utf-8")
-    assert patched_queues.startswith(kfx_queues)
-    assert "queue-thankyou=kienzlefon/queue_thankyou" in patched_queues
+    assert patched_queues.startswith("[praxis]\nstrategy=ringall\n")
+    assert "; original: member => PJSIP/201,0" in patched_queues
+    assert "member => Local/201@kienzlefon-queue-member,0,,PJSIP/201" in patched_queues
+    assert f"queue-thankyou={app_config.paths.prompts}/queue/queue_thankyou" in patched_queues
     assert '#tryinclude "/etc/asterisk/extensions-kienzlefon.conf"' in (
         etc / "extensions.conf"
     ).read_text(encoding="utf-8")
@@ -122,6 +124,11 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
         etc / "features.conf"
     ).read_text(encoding="utf-8")
     assert kfx.count("Gosub(kienzlefon-ai-queue-fallback,s,1)") == 1
+    assert "defaultrule=kienzlefon-progressive" in patched_queues
+    assert 'queuerules-kienzlefon.conf"' in (etc / "queuerules.conf").read_text()
+    snapshot = {path.name: path.read_bytes() for path in etc.iterdir() if path.is_file()}
+    install_asterisk_config(app_config, etc)
+    assert snapshot == {path.name: path.read_bytes() for path in etc.iterdir() if path.is_file()}
 
 
 def test_ai_slots_are_push_admitted_and_busy_on_busy(app_config) -> None:

@@ -13,6 +13,7 @@ from kienzlefon.queue_prompts import (
     QUEUE_NUMBER_TEXTS,
     digit_directory,
     german_number_files,
+    phrase_output_paths,
 )
 
 QUEUE_PROMPTS = (
@@ -126,6 +127,16 @@ def test_queue_position_update_regenerates_only_both_changed_fragments(
             assert (updated.paths.prompts / f"{name}.{suffix}").read_text(
                 encoding="utf-8"
             ) == prompts[name]
+        for path in phrase_output_paths(updated.paths.prompts, name):
+            assert path.read_text(encoding="utf-8") == prompts[name]
+
+
+@pytest.mark.parametrize("text", ["Vor Ihnen warten", "Vor Ihnen warten noch", "vor ihnen warten:"])
+def test_queue_position_migration_recognizes_old_count_variants(app_config, text):
+    set_string(app_config.source, "ansagen", "queue_thereare", text)
+    set_string(app_config.source, "ansagen", "queue_callswaiting", "Anrufe.")
+    assert migrate_config(app_config.source, Path("config/kienzlefon.toml.example"))
+    assert load_config(app_config.source).prompts.values["queue_thereare"] == "Sie sind auf Position"
 
 
 @pytest.mark.parametrize("name", ["queue_thereare", "queue_callswaiting"])

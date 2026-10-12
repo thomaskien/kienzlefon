@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.4
+Version: 2.5.5
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ im Produktivmodus als verschluesselte Telepraxis-Datei ab.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.4**
+Version: **2.5.5**
 
 ## Eigenschaften
 
@@ -100,6 +100,26 @@ Version: **2.5.4**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.5.5
+
+Unbeantwortete Anrufe werden beim Wechsel des Rufzyklus neu verteilt: Anfangs
+koennen mehrere Anrufe gleichzeitig an verschiedenen Telefonen klingeln. Ab dem
+zweiten Zyklus hat der erste wartende Anruf Vorrang; juengere Anrufe warten bis zu
+seiner Annahme oder seinem Auflegen. Angenommene Gespraeche laufen weiter, waehrend
+freie Telefone wieder weitere Anrufe erhalten. Die vorhandene Apothekenprioritaet
+und die globale Prioritaet der roten Sonderqueue bleiben erhalten.
+
+Die Positionsansage lautet bei Position 2 „Sie sind auf Position zwei in der
+Warteschlange.“ Der Installer migriert bekannte alte Standardtexte, installiert
+eindeutige Queue-Audiodateien und prueft deren Erzeugungsstand nach dem Reload.
+Eigene Aufnahmen bleiben erhalten; die Diagnose kennzeichnet sie als Aufnahme.
+
+Die Asterisk-Vorpruefung akzeptiert normale Dial-Hilfetexte mit „not registered“
+und erfolgt vor der Ansagenerzeugung. Die Wartemusikfrage lautet jetzt
+„Wartemusik von Johannes Plachetka installieren?“.
+
+Technik, Diagnose und Live-Abnahme: [Rufzyklen und Queue-Ansagen](docs/WARTESCHLANGE.md).
 
 ## Neu in 2.5.4
 

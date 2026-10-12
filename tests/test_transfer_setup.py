@@ -123,6 +123,15 @@ def successful_cli(command):
     return "Feature codes\n"
 
 
+def completed_cli(command, *, stdout=None, stderr="", returncode=0):
+    return subprocess.CompletedProcess(
+        ["asterisk", "-rx", command],
+        returncode,
+        stdout=successful_cli(command) if stdout is None else stdout,
+        stderr=stderr,
+    )
+
+
 def test_preflight_is_read_only_and_checks_actions_hooks_and_features(transfer_config, asterisk_etc, monkeypatch):
     commands = []
     def cli(command):
@@ -138,6 +147,37 @@ def test_preflight_is_read_only_and_checks_actions_hooks_and_features(transfer_c
     assert config_files(asterisk_etc) == before
 
 
+def test_preflight_accepts_realistic_dial_help_with_not_registered(
+    transfer_config, asterisk_etc, monkeypatch
+):
+    commands = []
+    dial_help = """
+\x1b[1;35m  -= Info about Application 'Dial' =- \x1b[0m
+
+[Description]
+This application sets DIALSTATUS to CHANUNAVAIL when the endpoint is not registered.
+Normal documentation may contain No such context without reporting a CLI failure.
+
+[Syntax]
+Dial(Technology/Resource[,timeout[,options]])
+
+[Arguments]
+b(context^exten^priority)
+"""
+
+    def run(args, **kwargs):
+        assert kwargs == {"capture_output": True, "text": True, "timeout": 20, "check": False}
+        command = args[2]
+        commands.append(command)
+        output = dial_help if command == "core show application Dial" else successful_cli(command)
+        return completed_cli(command, stdout=output)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    transfer_setup.preflight(transfer_config, asterisk_etc)
+    assert "core show application Dial" in commands
+    assert commands[-1] == "features show"
+
+
 @pytest.mark.parametrize("missing", ["manager show command Atxfer", "manager show command PlayDTMF",
                                      "core show function FEATURE", "core show application Queue"])
 def test_preflight_rejects_missing_capabilities(transfer_config, asterisk_etc, monkeypatch, missing):
@@ -146,14 +186,48 @@ def test_preflight_rejects_missing_capabilities(transfer_config, asterisk_etc, m
         transfer_setup.preflight(transfer_config, asterisk_etc)
 
 
-@pytest.mark.parametrize("output,code", [("No such command 'manager show command Atxfer'", 0),
-                                         ("Unable to connect to remote asterisk", 0),
-                                         ("failure", 1)])
+@pytest.mark.parametrize("output,code", [
+    ("No such command 'manager show command Atxfer'", 0),
+    ("Unable to connect to remote asterisk (does /run/asterisk/asterisk.ctl exist?)", 0),
+    ("Your application(s) is (are) not registered", 0),
+    ("No function by that name registered.", 0),
+    ("There is no existence of 'missing' context", 0),
+    ("failure", 1),
+])
 def test_cli_detects_asterisk_errors_even_with_exit_zero(monkeypatch, output, code):
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess(args, code, stdout=output, stderr=""))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Asterisk-Vorpruefung fehlgeschlagen"):
         transfer_setup._cli("manager show command Atxfer")
+
+
+@pytest.mark.parametrize("output", [
+    "\n\x1b[32mDial(...,b(context^exten^priority))\x1b[0m\nendpoint is not registered\n",
+    "[Description]\nA missing target can report No such application during a call.\n",
+    "[Description]\nThe endpoint is not registered, so Dial sets CHANUNAVAIL.\n",
+])
+def test_cli_allows_normal_documentation_and_strips_ansi(monkeypatch, output):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=output, stderr=""),
+    )
+    assert "\x1b" not in transfer_setup._cli("core show application Dial")
+
+
+def test_cli_error_diagnostic_is_bounded_and_redacts_secrets(monkeypatch):
+    output = "secret=super-secret " + "x" * 300
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 2, stdout="", stderr=output),
+    )
+    with pytest.raises(ValueError) as raised:
+        transfer_setup._cli("features show")
+    message = str(raised.value)
+    assert "super-secret" not in message
+    assert "Exitcode 2" in message
+    assert len(message) < 300
 
 
 def test_verify_checks_loaded_contexts_and_detects_stale_outbound(transfer_config, asterisk_etc, monkeypatch):

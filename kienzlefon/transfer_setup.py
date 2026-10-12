@@ -1,4 +1,5 @@
 """Read-only Asterisk capability and loaded-dialplan checks for the installer."""
+
 from __future__ import annotations
 
 import argparse
@@ -10,16 +11,44 @@ from .config import AppConfig, load_config
 from .transfer_agi import staff_extensions
 from .transfer_features import resolve_transfer_features
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_CLI_ERROR = re.compile(
+    r"^\s*(?:"
+    r"No such command\b.*|"
+    r"Unable to connect to remote asterisk\b.*|"
+    r"Your application\(s\) is \(are\) not registered\.?|"
+    r"No function by that name registered\.?|"
+    r"No such (?:context|function|application)\b.*|"
+    r"There is no existence of .+ (?:context|extension)(?: in all contexts)?|"
+    r"Command '.+' failed\."
+    r")\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _cli_diagnostic(output: str, error: re.Match[str] | None, returncode: int) -> str:
+    detail = error.group(0).strip() if error else next(
+        (line.strip() for line in output.splitlines() if line.strip()), "keine CLI-Ausgabe"
+    )
+    detail = re.sub(
+        r"(?i)\b(password|secret|token|api[-_ ]?key)\s*([:=])\s*\S+",
+        r"\1\2<ausgeblendet>",
+        detail,
+    )
+    if len(detail) > 200:
+        detail = detail[:199] + "…"
+    status = f"Exitcode {returncode}; " if returncode else ""
+    return status + detail
+
 
 def _cli(command: str) -> str:
     result = subprocess.run(["asterisk", "-rx", command], capture_output=True,
                             text=True, timeout=20, check=False)
-    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
-    if result.returncode or re.search(
-        r"No such command|Unable to connect|not registered|No such (?:context|function|application)|"
-        r"There is no existence of", output, re.I,
-    ):
-        raise ValueError(f"Asterisk-Vorpruefung fehlgeschlagen: {command}")
+    output = _ANSI_ESCAPE.sub("", "\n".join(part for part in (result.stdout, result.stderr) if part))
+    error = _CLI_ERROR.search(output)
+    if result.returncode or error:
+        diagnostic = _cli_diagnostic(output, error, result.returncode)
+        raise ValueError(f"Asterisk-Vorpruefung fehlgeschlagen: {command} ({diagnostic})")
     return output
 
 
@@ -29,7 +58,7 @@ def preflight(config: AppConfig, etc: Path = Path("/etc/asterisk")) -> None:
     resolve_transfer_features(etc)
     for action in ("Getvar", "BlindTransfer", "Atxfer", "CancelAtxfer", "PlayDTMF"):
         output = _cli("manager show command " + action)
-        if not re.search(r"Action:\s*" + action + r"\b", output, re.I):
+        if not re.search(r"Action:\s*" + action + r"\b", output, re.IGNORECASE):
             raise ValueError(f"AMI-Aktion fehlt: {action}")
         if action == "PlayDTMF" and "Receive" not in output:
             raise ValueError("AMI PlayDTMF unterstuetzt Receive nicht")

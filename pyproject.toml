@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.4
+# Version: 2.5.5
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -40,7 +40,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kienzlefon"
-version = "2.5.4"
+version = "2.5.5"
 description = "Konfigurationsgesteuertes Asterisk-IVR mit lokaler Whisper-Transkription"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -56,6 +56,8 @@ dependencies = [
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
 [project.scripts]
+kienzlefon-queue-dispatch = "kienzlefon.queue_dispatch:main"
+kienzlefon-queue-setup = "kienzlefon.queue_setup:main"
 kienzlefon-middleware = "kienzlefon.middleware_setup:main"
 kienzlefon-c2d-check = "kienzlefon.middleware_agi:main"
 kienzlefon-transfer-check = "kienzlefon.transfer_agi:main"

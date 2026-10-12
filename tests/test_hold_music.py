@@ -86,7 +86,7 @@ def test_queue_patch_is_repeatable_and_restores_original_options(
         "queues.conf": "[general]\n",
         "features.conf": "[general]\n",
         "musiconhold.conf": "[default]\nmode=files\n",
-        "queues-kfx.conf": "[praxis]\nstrategy=ringall\nmusicclass=fremd\n",
+        "queues-kfx.conf": "[praxis]\nstrategy=ringall\nmusicclass=fremd\nmember => PJSIP/201,0\n",
         "extensions-kfx-telefonie.conf": (
             "[kfx-phone-in]\n same => n(accepted),Goto(kfx-phone-queue,s,1)\n"
             "[kfx-phone-queue]\nexten => s,1,NoOp(KienzleFax Telefoniewarteschlange)\n"

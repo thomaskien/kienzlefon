@@ -78,7 +78,7 @@ exten => s,1,GotoIf($["${KF_PHONE_LOOKUP_STARTED}"="1"]?return)
            "exten => h,1,NoOp(Kienzlefon Click-to-Dial beendet)\n")
     for pattern in ("_XXX", "_XXX.", "_+XXX", "_+XXX."):
         c2d += f"exten => {pattern},1,{c2d_steps}"
-    return "\n; Kienzlefon Middleware v1 / 2.5.4\n" + r'''[kienzlefon-middleware-in]
+    return "\n; Kienzlefon Middleware v1 / 2.5.5\n" + r'''[kienzlefon-middleware-in]
 exten => s,1,AGI(/opt/kienzlefon/venv/bin/kienzlefon-callerid,--config,/etc/kienzlefon/kienzlefon.toml)
  same => n,Gosub(kienzlefon-lookup,s,1)
  same => n,Goto(kienzlefon-entry,s,1)

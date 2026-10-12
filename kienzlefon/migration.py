@@ -128,13 +128,14 @@ def migrate_config(target: Path, template: Path) -> bool:
 
 def _migrate_queue_position_prompts(text: str, template_text: str, base: Path) -> str:
     """Ersetzt nur das unveraenderte TTS-Paar, niemals halbe Saetze/Aufnahmen."""
-    legacy = {
-        "queue_thereare": "Vor Ihnen warten noch",
-        "queue_callswaiting": "Anrufe.",
-    }
+    legacy = {"queue_thereare", "queue_callswaiting"}
     current = tomllib.loads(text)
     prompts = current.get("ansagen", {})
-    if any(prompts.get(key) != value for key, value in legacy.items()):
+    if not (
+        re.fullmatch(r"vor\s+ihnen\s+warten(?:\s+noch)?[.:]?",
+                     str(prompts.get("queue_thereare", "")).strip(), re.I)
+        and re.fullmatch(r"anrufe[.]?", str(prompts.get("queue_callswaiting", "")).strip(), re.I)
+    ):
         return text
     sources = current.get("ansagen_quellen", {})
     upload_value = current.get("tts", {}).get("uploadverzeichnis")
@@ -149,7 +150,7 @@ def _migrate_queue_position_prompts(text: str, template_text: str, base: Path) -
         ):
             return text
     replacements = tomllib.loads(template_text).get("ansagen", {})
-    if not legacy.keys() <= replacements.keys():
+    if not legacy <= replacements.keys():
         return text
     section = re.search(r"^\[ansagen\]\n(?P<body>.*?)(?=^\[|\Z)", text, re.M | re.S)
     if section is None:

@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.4
+Version: 2.5.5
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,20 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.5.5
+
+- Parallele erste Rufversuche werden vor dem naechsten Zyklus des ersten wartenden
+  Anrufers beendet; ab dann wartet der nachrangige Anrufer bis zur Annahme oder zum
+  Auflegen des vorrangigen Anrufers. Laufende Gespraeche werden nicht beendet.
+- Bestehende Apothekenprioritaet, Sonderqueue-Gewichtung und PJSIP-Belegtzustaende
+  bleiben Teil der Verteilung; native Queue-Ansagen und Wartepositionen bleiben erhalten.
+- Positionsansagen nutzen eigene eindeutig konfigurierte Audiodateien; bekannte
+  fehlerhafte Standardformulierungen werden gemeinsam migriert. Installerdiagnose
+  prueft Texte, Dateien und den erfolgreichen Queue-Reload.
+- Asterisk-Vorpruefung erkennt echte CLI-Fehler statt Hilfetext-Schluesselwoertern
+  und laeuft vor der Ansagenerzeugung.
+- Installerfrage: „Wartemusik von Johannes Plachetka installieren?“.
 
 ## 2.5.4
 
