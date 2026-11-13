@@ -61,6 +61,27 @@ def canonical_practice_number(rules: DialRulesConfig) -> str:
     return decide_number(rules, rules.practice_number).normalized
 
 
+def format_sip_target(rules: DialRulesConfig, decision: DialDecision, endpoint: str) -> str:
+    """Format an authorized number for its outbound SIP endpoint.
+
+    Keep dialing policy, caller ID and audited canonical values unchanged.
+    Emergency/service numbers are never rewritten.
+    """
+    if not decision.allowed:
+        raise ValueError("Gesperrte Rufnummer darf nicht formatiert werden")
+    value = decision.normalized
+    number_format = rules.sip_target_formats.get(endpoint, "digits")
+    if number_format == "digits" or value in EMERGENCY_NUMBERS:
+        return value
+    if number_format == "e164_plus":
+        if value.startswith("00"):
+            return "+" + value[2:]
+        if value.startswith(rules.country_code):
+            return "+" + value
+        raise ValueError("Kein internationales Rufnummernformat verfuegbar")
+    raise ValueError("Unbekanntes SIP-Zielformat")
+
+
 def normalize_incoming_caller_id(
     value: str | None,
     country_code: str = "49",

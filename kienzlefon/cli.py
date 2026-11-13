@@ -45,6 +45,7 @@ from .dialing import (
     audit_decision,
     canonical_practice_number,
     decide_number,
+    format_sip_target,
     normalize_incoming_caller_id,
 )
 from .errors import record_system_error
@@ -345,6 +346,15 @@ def dial_main() -> None:
         audit_decision(config, arguments.number, caller_id, decision)
         channel.set_variable("KZF_DIAL_NUMBER", decision.normalized)
         channel.set_variable("KZF_DIAL_REASON", decision.reason)
+        # Only format the final provider-facing target after dialing authorization.
+        sip_target = ""
+        if decision.allowed:
+            sip_target = format_sip_target(
+                config.dial_rules,
+                decision,
+                channel.get_variable("KZF_OUT_ENDPOINT") or "",
+            )
+        channel.set_variable("KZF_SIP_TARGET", sip_target)
         selected_caller_id = channel.get_variable("KZF_OUT_CALLERID")
         channel.set_variable(
             "KZF_DIAL_CALLERID",

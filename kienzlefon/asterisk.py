@@ -287,7 +287,7 @@ exten => _X.,1,Set(KZF_DIAL_ALLOWED=0)
  same => n,Hangup()
  same => n(capacity),NoOp(Kienzlefon freigegebene Rufnummer ${{KZF_DIAL_NUMBER}})
 {capacity} same => n(dial),Set(CALLERID(num)=${{KZF_DIAL_CALLERID}})
- same => n,Dial(PJSIP/${{KZF_DIAL_NUMBER}}@${{KZF_OUT_ENDPOINT}},120)
+ same => n,Dial(PJSIP/${{KZF_SIP_TARGET}}@${{KZF_OUT_ENDPOINT}},120)
  same => n,Hangup()
 """
 

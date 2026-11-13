@@ -166,6 +166,9 @@ sperre_0180 = false
 sperre_0700 = false
 sperre_032 = false
 audit_log = "/var/lib/kienzlefon/telefonie-audit.jsonl"
+# Optional provider-facing SIP target formats per outbound endpoint (default: digits).
+# Example for Fonial/Plusnet: { "kfx-phone-in-endpoint" = "e164_plus" }
+sip_zielformate = {}
 
 [sip_direkte_queue]
 aktiv = false

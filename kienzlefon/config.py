@@ -333,6 +333,7 @@ class DialRulesConfig:
     block_0700: bool
     block_032: bool
     audit_log: Path
+    sip_target_formats: Mapping[str, str]
 
 
 @dataclass(frozen=True)
@@ -1023,6 +1024,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             audit_log=_path(
                 base, dial_rules.get("audit_log", "/var/lib/kienzlefon/telefonie-audit.jsonl")
             ),
+            sip_target_formats=dial_rules.get("sip_zielformate", {}),
         ),
         prompts=PromptConfig(prompt_values),
         prompt_sources={**prompt_sources, **scheduled_sources},
@@ -1157,6 +1159,19 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         raise ConfigError("[wahlregeln].praxisrufnummer darf nur Ziffern enthalten")
     if config.dial_rules.minimum_external_digits < 3:
         raise ConfigError("[wahlregeln].min_extern_ziffern muss mindestens 3 sein")
+    formats = config.dial_rules.sip_target_formats
+    if not isinstance(formats, Mapping):
+        raise ConfigError("[wahlregeln].sip_zielformate muss eine Tabelle sein")
+    for endpoint, number_format in formats.items():
+        if (
+            not isinstance(endpoint, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", endpoint)
+            or number_format not in ("digits", "e164_plus")
+        ):
+            raise ConfigError(
+                "[wahlregeln].sip_zielformate: Endpunkte und Formate "
+                "(digits, e164_plus) pruefen"
+            )
     reserved = {str(value) for value in range(first, last + 1)} | {
         config.ivr.red_extension,
         config.announcement_ivr.extension,
