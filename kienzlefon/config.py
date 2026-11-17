@@ -37,7 +37,7 @@ from .models import CallType, FieldName
 from .queue_prompts import QUEUE_NUMBER_PROMPTS
 
 SUPPORTED_WHISPER_MODELS = frozenset({"large-v3-turbo", "large-v3"})
-SUPPORTED_TTS_ENGINES = frozenset({"kokoro", "piper", "qwen"})
+SUPPORTED_TTS_ENGINES = frozenset({"kokoro", "piper", "qwen", "google"})
 QWEN_SPEAKERS = (
     "ryan",
     "vivian",
@@ -232,6 +232,8 @@ class TTSConfig:
     qwen_language: str
     qwen_seed: int
     qwen_generator: Path
+    google_generator: Path
+    google_config: Path
     voice_directory: Path
     upload_directory: Path
     volume: float
@@ -957,6 +959,12 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
                     "/usr/local/bin/kienzlefon-qwen3-tts-generate",
                 ),
             ),
+            google_generator=Path(tts.get(
+                "google_generator", "/usr/local/bin/kienzlefon-google-tts-generate"
+            )),
+            google_config=Path(tts.get(
+                "google_konfig", "/etc/kienzlefon/google-tts.conf"
+            )),
             voice_directory=_path(base, _required(tts, "stimmenverzeichnis", "tts")),
             upload_directory=_path(base, _required(tts, "uploadverzeichnis", "tts")),
             volume=float(tts.get("lautstaerke", 1.0)),
@@ -1050,7 +1058,11 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if config.recording.format != "wav":
         raise ConfigError("[aufnahme].format ist fuer Version 1.7 verbindlich auf 'wav' festgelegt")
     if config.tts.engine not in SUPPORTED_TTS_ENGINES:
-        raise ConfigError("[tts].engine muss kokoro, piper oder qwen sein")
+        raise ConfigError("[tts].engine muss kokoro, piper, qwen oder google sein")
+    if not config.tts.google_generator.is_absolute():
+        raise ConfigError("[tts].google_generator muss ein absoluter Pfad sein")
+    if not config.tts.google_config.is_absolute():
+        raise ConfigError("[tts].google_konfig muss ein absoluter Pfad sein")
     if not config.tts.kokoro_generator.is_absolute():
         raise ConfigError("[tts].kokoro_generator muss ein absoluter Pfad sein")
     if not config.tts.kokoro_model_directory.is_absolute():

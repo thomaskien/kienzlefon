@@ -61,7 +61,7 @@ EDITABLE_SCHEDULES = (
     "fachstellenzeiten",
 )
 SOURCE_VALUES = frozenset({"tts", "manuell"})
-TTS_ENGINE_VALUES = frozenset({"kokoro", "piper", "qwen"})
+TTS_ENGINE_VALUES = frozenset({"kokoro", "piper", "qwen", "google"})
 RECORD_SESSION_SECONDS = 1500
 JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 PROMPT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -409,6 +409,14 @@ def _kokoro_generator_available(config: AppConfig) -> bool:
     )
 
 
+def _google_generator_available(config: AppConfig) -> bool:
+    generator = config.tts.google_generator
+    return (
+        generator.is_file() and os.access(generator, os.X_OK)
+        and config.tts.google_config.is_file()
+    )
+
+
 def _qwen_generator_available(config: AppConfig) -> bool:
     generator = config.tts.qwen_generator
     if not generator.is_file() or not os.access(generator, os.X_OK):
@@ -643,6 +651,7 @@ def export_state(
         "tts": {
             "engine": config.tts.engine,
             "kokoro_available": _kokoro_generator_available(config),
+            "google_available": _google_generator_available(config),
             "qwen_voice": config.tts.qwen_voice,
             "qwen_available": _qwen_generator_available(config),
             "qwen_voices": list(QWEN_SPEAKERS),
@@ -898,6 +907,10 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
             raise WebAdminError("Ungültiges TTS-Erzeugungsmodell")
         if engine == "kokoro" and not _kokoro_generator_available(config):
             raise WebAdminError("Kokoro-Thorsten ist nicht vollständig lokal installiert")
+        if engine == "google" and not _google_generator_available(config):
+            raise WebAdminError(
+                "Google-TTS ist nicht eingerichtet (Generator oder Konfiguration fehlt)"
+            )
         if engine == "qwen" and not _qwen_generator_available(config):
             raise WebAdminError(
                 "Qwen3-TTS ist nicht vollständig oder nicht sicher für Kienzlefon installiert"

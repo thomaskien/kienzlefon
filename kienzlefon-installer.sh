@@ -48,6 +48,8 @@ KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-
 QWEN_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefon-ai/refs/heads/main/install-kienzlefon-qwen3-tts-v1.5.sh"
 QWEN_INSTALLER_SHA256="2dd36de682e797f52486352a6ae395559dbeacdb6a47abfa9e82990c8c72dcc3"
 QWEN_GENERATOR="/usr/local/bin/kienzlefon-qwen3-tts-generate"
+GOOGLE_GENERATOR="/usr/local/bin/kienzlefon-google-tts-generate"
+GOOGLE_CONFIG="/etc/kienzlefon/google-tts.conf"
 KFX_ENV="/etc/kienzlefax-installer.env"
 CONFIG_DIR="/etc/kienzlefon"
 CONFIG_FILE="${CONFIG_DIR}/kienzlefon.toml"
@@ -59,6 +61,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPORTING_ERROR="n"
 EXISTING_INSTALL="n"
 KZF_INSTALL_QWEN="n"
+KZF_GOOGLE_API_KEY=""
+KZF_GOOGLE_VOICE="de-DE-Chirp3-HD-Sulafat"
+KZF_GOOGLE_LANG="de-DE"
+KZF_GOOGLE_RATE="0.93"
 KZF_FORCE_PROMPTS="n"
 
 log(){ printf '[%s] %s\n' "$(date -Is)" "$*"; }
@@ -140,6 +146,46 @@ qwen_generator_knows_worker(){
   grep -Fq 'kienzlefon-worker.service' "$QWEN_GENERATOR" 2>/dev/null
 }
 
+google_conf_value(){
+  # usage: google_conf_value KEY  (liest einen Wert aus der Google-TTS-Konfiguration)
+  [[ -r "$GOOGLE_CONFIG" ]] || return 0
+  sed -n "s/^${1}=//p" "$GOOGLE_CONFIG" | head -n 1 | tr -d '"'"'"'\r'
+}
+
+collect_google_tts_configuration(){
+  local keep="n" key=""
+  KZF_GOOGLE_API_KEY="$(google_conf_value API_KEY)"
+  KZF_GOOGLE_VOICE="$(google_conf_value VOICE)"; KZF_GOOGLE_VOICE="${KZF_GOOGLE_VOICE:-de-DE-Chirp3-HD-Sulafat}"
+  KZF_GOOGLE_LANG="$(google_conf_value LANG)"; KZF_GOOGLE_LANG="${KZF_GOOGLE_LANG:-de-DE}"
+  KZF_GOOGLE_RATE="$(google_conf_value RATE)"; KZF_GOOGLE_RATE="${KZF_GOOGLE_RATE:-0.93}"
+  printf '\nGoogle Cloud Text-to-Speech (Chirp 3 HD):\n'
+  printf '  Die Ansagetexte werden einmalig an Google uebertragen; es entstehen nur beim Erzeugen Kosten.\n'
+  printf '  Benoetigt wird ein API-Schluessel mit Zugriff auf die Cloud Text-to-Speech API.\n'
+  if [[ -n "$KZF_GOOGLE_API_KEY" ]]; then
+    ask_yes_no keep "Vorhandenen Google-API-Schluessel beibehalten?" "j"
+  fi
+  if [[ "$keep" != "y" ]]; then
+    while true; do
+      read -r -s -p "Google-API-Schluessel (Eingabe bleibt unsichtbar): " key
+      printf '\n'
+      [[ "$key" =~ ^[A-Za-z0-9_-]{20,}$ ]] && break
+      printf 'Der Schluessel darf nur Buchstaben, Ziffern, - und _ enthalten (mindestens 20 Zeichen).\n'
+    done
+    KZF_GOOGLE_API_KEY="$key"
+  fi
+  while true; do
+    ask_value KZF_GOOGLE_VOICE "Google-Stimme" "$KZF_GOOGLE_VOICE"
+    [[ "$KZF_GOOGLE_VOICE" =~ ^[A-Za-z0-9_-]+$ ]] && break
+    printf 'Ungueltiger Stimmenname.\n'
+  done
+  while true; do
+    ask_value KZF_GOOGLE_RATE "Sprechtempo (0.25 bis 2.0; kleiner = langsamer)" "$KZF_GOOGLE_RATE"
+    "${VENV}/bin/python" -c 'import sys; v=float(sys.argv[1]); sys.exit(0 if 0.25 <= v <= 2.0 else 1)' \
+      "$KZF_GOOGLE_RATE" 2>/dev/null && break
+    printf 'Bitte eine Zahl zwischen 0.25 und 2.0 eingeben.\n'
+  done
+}
+
 collect_tts_configuration(){
   local current_engine="kokoro" current_piper="de_DE-thorsten-high" current_qwen="ryan"
   local current_length="1.3" current_silence="0.8" install_prompt=""
@@ -165,6 +211,7 @@ collect_tts_configuration(){
   fi
 
   [[ "$current_engine" == "qwen" ]] && default_engine="3"
+  [[ "$current_engine" == "google" ]] && default_engine="4"
   if [[ "$current_engine" == "piper" ]]; then
     printf "Bisherige Engine: Piper. Standard ab 2.4.1 ist Kokoro-Thorsten; Piper bleibt ueber Auswahl 2 erhalten.\n"
   fi
@@ -175,10 +222,11 @@ collect_tts_configuration(){
     printf '  3) Qwen3-TTS 0.6B CustomVoice (hochwertig, Einmalgenerierung)\n'
   else
     printf '  3) Qwen3-TTS 0.6B CustomVoice (nicht installiert)\n'
-    default_engine="1"
+    [[ "$default_engine" != "3" ]] || default_engine="1"
   fi
+  printf '  4) Google Cloud TTS Chirp 3 HD (sehr natuerlich, API-Schluessel noetig)\n'
   while true; do
-    ask_value engine_choice "Auswahl des Erzeugungsmodells (1 bis 3)" "$default_engine"
+    ask_value engine_choice "Auswahl des Erzeugungsmodells (1 bis 4)" "$default_engine"
     case "$engine_choice" in
       1) KZF_TTS_ENGINE="kokoro"; break ;;
       2) KZF_TTS_ENGINE="piper"; break ;;
@@ -186,7 +234,8 @@ collect_tts_configuration(){
         [[ "$qwen_planned" == "y" ]] \
           || { printf 'Qwen3-TTS muss zuerst installiert werden.\n'; continue; }
         KZF_TTS_ENGINE="qwen"; break ;;
-      *) printf 'Bitte 1, 2 oder 3 eingeben.\n' ;;
+      4) KZF_TTS_ENGINE="google"; collect_google_tts_configuration; break ;;
+      *) printf 'Bitte 1, 2, 3 oder 4 eingeben.\n' ;;
     esac
   done
 
@@ -1708,6 +1757,25 @@ EOF
     || die "Admission-Listener konnte auf ${bind_ip}:${bind_port} nicht gestartet werden."
 }
 
+install_google_tts(){
+  [[ "${KZF_TTS_ENGINE:-}" == "google" ]] || return 0
+  [[ -n "$KZF_GOOGLE_API_KEY" ]] || die "Google-TTS ist gewaehlt, aber es liegt kein API-Schluessel vor."
+  install -d -m 0755 "$(dirname "$GOOGLE_GENERATOR")" "$(dirname "$GOOGLE_CONFIG")"
+  install -m 0755 "${SOURCE_TARGET}/scripts/google-tts/kienzlefon-google-tts-generate" "$GOOGLE_GENERATOR"
+  (
+    umask 077
+    printf 'API_KEY=%s\nVOICE=%s\nLANG=%s\nRATE=%s\n' \
+      "$KZF_GOOGLE_API_KEY" "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_LANG" "$KZF_GOOGLE_RATE" \
+      > "${GOOGLE_CONFIG}.new"
+  )
+  chown root:root "${GOOGLE_CONFIG}.new"
+  chmod 0600 "${GOOGLE_CONFIG}.new"
+  mv -f "${GOOGLE_CONFIG}.new" "$GOOGLE_CONFIG"
+  [[ -x "$GOOGLE_GENERATOR" && -r "$GOOGLE_CONFIG" ]] \
+    || die "Google-TTS konnte nicht eingerichtet werden."
+  printf 'Google-TTS eingerichtet: Stimme %s, Tempo %s.\n' "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_RATE"
+}
+
 install_kokoro_tts(){
   local engine
   engine="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["tts"].get("engine","kokoro"))' "$CONFIG_FILE")"
@@ -1733,6 +1801,10 @@ install_models_and_prompts(){
       || die "Qwen ist ausgewaehlt, aber der Generator fehlt: ${QWEN_GENERATOR}"
     qwen_generator_knows_worker \
       || die "Der Qwen-Generator darf den Kienzlefon-Worker nicht sicher verwalten."
+  fi
+  if [[ "$engine" == "google" ]]; then
+    [[ -x "$GOOGLE_GENERATOR" && -r "$GOOGLE_CONFIG" ]] \
+      || die "Google-TTS ist ausgewaehlt, aber Generator oder Konfiguration fehlt: ${GOOGLE_GENERATOR}, ${GOOGLE_CONFIG}"
   fi
   prompt_arguments=(--config "$CONFIG_FILE")
   [[ "$KZF_FORCE_PROMPTS" != "y" ]] || prompt_arguments+=(--all)
@@ -1864,6 +1936,8 @@ main(){
   install_admission_listener_unit
   sep "Optionale Qwen3-TTS-Installation"
   install_qwen_tts
+  sep "Google Cloud TTS vorbereiten"
+  install_google_tts
   sep "Kokoro-Thorsten vorbereiten"
   install_kokoro_tts
   sep "Modelle und Ansagen"

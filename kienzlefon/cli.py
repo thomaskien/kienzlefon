@@ -418,7 +418,7 @@ def migrate_main() -> None:
     parser.add_argument("--name-model")
     parser.add_argument("--medication-model")
     parser.add_argument("--demo-anonymize", choices=("true", "false"))
-    parser.add_argument("--tts-engine", choices=("kokoro", "piper", "qwen"))
+    parser.add_argument("--tts-engine", choices=("kokoro", "piper", "qwen", "google"))
     parser.add_argument("--piper-voice")
     parser.add_argument("--qwen-voice")
     arguments = parser.parse_args()

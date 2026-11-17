@@ -182,6 +182,7 @@ class PromptGenerator:
         self._scheduled_tts_overrides: dict[str, Path] = {}
         self._cached_qwen_identity: str | None = None
         self._cached_kokoro_identity: tuple[str, ...] | None = None
+        self._cached_google_identity: tuple[str, ...] | None = None
         self._maintenance_depth = 0
 
     def generate(
@@ -866,6 +867,14 @@ class PromptGenerator:
                 str(self.config.tts.max_true_peak_db),
                 human_digest,
             )
+        elif self.config.tts.engine == "google":
+            parts = (
+                text,
+                *self._google_identity(),
+                str(self.config.tts.target_loudness_lufs),
+                str(self.config.tts.max_true_peak_db),
+                human_digest,
+            )
         elif self.config.tts.engine == "piper":
             # Das Piper-Schema bleibt absichtlich kompatibel zum 1.9-Manifest.
             # Eine unveraenderte Drueberinstallation erzeugt daher nichts neu.
@@ -918,6 +927,8 @@ class PromptGenerator:
     def _tts_identity(self) -> str:
         if self.config.tts.engine == "kokoro":
             parts = self._kokoro_identity()
+        elif self.config.tts.engine == "google":
+            parts = self._google_identity()
         elif self.config.tts.engine == "piper":
             parts = (
                 "piper",
@@ -959,6 +970,33 @@ class PromptGenerator:
                 str(self.config.tts.kokoro_speed),
             )
         return self._cached_kokoro_identity
+
+    def _google_identity(self) -> tuple[str, ...]:
+        """Identitaet der Google-Erzeugung ohne den API-Schluessel.
+
+        Stimme, Sprache und Tempo stehen in der Google-Konfiguration. Ein
+        Wechsel erzeugt die Ansagen neu; ein neuer API-Schluessel nicht.
+        """
+        if self._cached_google_identity is not None:
+            return self._cached_google_identity
+        generator = self.config.tts.google_generator
+        digest = (
+            hashlib.sha256(generator.read_bytes()).hexdigest()
+            if generator.is_file() else f"missing:{generator}"
+        )
+        settings = {"VOICE": "", "LANG": "", "RATE": ""}
+        try:
+            for line in self.config.tts.google_config.read_text(encoding="utf-8").splitlines():
+                key, separator, value = line.partition("=")
+                if separator and key.strip() in settings:
+                    settings[key.strip()] = value.strip().strip("\"'")
+        except OSError:
+            pass
+        self._cached_google_identity = (
+            "google", str(generator), digest,
+            settings["VOICE"], settings["LANG"], settings["RATE"],
+        )
+        return self._cached_google_identity
 
     def _qwen_generator_identity(self) -> str:
         if self._cached_qwen_identity is not None:
@@ -1079,6 +1117,8 @@ class PromptGenerator:
             return self._kokoro_command(text, output)
         if self.config.tts.engine == "qwen":
             return self._qwen_command(text, output, seed=qwen_seed)
+        if self.config.tts.engine == "google":
+            return self._google_command(text, output)
         if self.config.tts.engine == "piper":
             return self._piper_command(text, output)
         raise RuntimeError(f"Unbekannte TTS-Engine: {self.config.tts.engine}")
@@ -1094,6 +1134,16 @@ class PromptGenerator:
             str(generator), "--text", text, "--output", str(output),
             "--model-dir", str(directory), "--speed", str(self.config.tts.kokoro_speed),
         ]
+
+    def _google_command(self, text: str, output: Path) -> list[str]:
+        generator = self.config.tts.google_generator
+        if not generator.is_file() or not os.access(generator, os.X_OK):
+            raise RuntimeError(f"Google-TTS-Generator ist nicht installiert: {generator}")
+        if not self.config.tts.google_config.is_file():
+            raise RuntimeError(
+                f"Google-TTS-Konfiguration fehlt: {self.config.tts.google_config}"
+            )
+        return [str(generator), "--text", text, "--output", str(output)]
 
     def _qwen_command(
         self, text: str, output: Path, *, seed: int | None = None

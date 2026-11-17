@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Kienzlefon-Ansagen ueber Google Cloud Text-to-Speech (Chirp 3 HD) erzeugen.
+
+Aufruf: kienzlefon-google-tts-generate --text TEXT --output AUSGABE.wav
+
+Konfiguration: /etc/kienzlefon/google-tts.conf (KEY=VALUE, Rechte 0600/0640)
+  API_KEY    Google-Cloud-API-Schluessel (Text-to-Speech API)
+  VOICE      Stimme, Standard de-DE-Chirp3-HD-Sulafat
+  LANG       Sprachcode, Standard de-DE
+  RATE       Sprechtempo 0.25-2.0, Standard 0.93
+  ENDPOINT   API-Host, Standard texttospeech.googleapis.com
+
+Die Ausgabe ist eine mono-WAV-Datei mit 24 kHz. Die Lautheitsnormalisierung
+uebernimmt Kienzlefon. Zusatzoptionen anderer Generatoren (--model-dir,
+--speed) werden akzeptiert und ignoriert.
+"""
+import argparse
+import base64
+import json
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+CONFIG = "/etc/kienzlefon/google-tts.conf"
+DEFAULTS = {
+    "VOICE": "de-DE-Chirp3-HD-Sulafat",
+    "LANG": "de-DE",
+    "RATE": "0.93",
+    "ENDPOINT": "texttospeech.googleapis.com",
+}
+
+
+def read_config(path: str) -> dict[str, str]:
+    values = dict(DEFAULTS)
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def endpoint_url(endpoint: str) -> str:
+    # Nur ein expliziter Loopback-Host darf ohne TLS erreicht werden (Tests).
+    if endpoint.startswith(("http://127.0.0.1", "http://localhost")):
+        return endpoint.rstrip("/") + "/v1/text:synthesize"
+    if "://" in endpoint:
+        raise SystemExit("ENDPOINT muss ein Hostname sein")
+    return f"https://{endpoint}/v1/text:synthesize"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--text", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--config", default=CONFIG)
+    parser.add_argument("--model-dir")
+    parser.add_argument("--speed")
+    arguments = parser.parse_args()
+
+    try:
+        config = read_config(arguments.config)
+    except OSError as exc:
+        print(f"Konfiguration nicht lesbar: {exc}", file=sys.stderr)
+        return 2
+    key = config.get("API_KEY", "")
+    if not key:
+        print("API_KEY fehlt in der Google-TTS-Konfiguration", file=sys.stderr)
+        return 2
+    try:
+        rate = float(config["RATE"])
+    except ValueError:
+        print("RATE ist keine Zahl", file=sys.stderr)
+        return 2
+    rate = min(2.0, max(0.25, rate))
+
+    body = {
+        "input": {"text": arguments.text},
+        "voice": {"languageCode": config["LANG"], "name": config["VOICE"]},
+        "audioConfig": {
+            "audioEncoding": "LINEAR16",
+            "sampleRateHertz": 24000,
+            "speakingRate": rate,
+        },
+    }
+    request = urllib.request.Request(
+        endpoint_url(config["ENDPOINT"]),
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-Goog-Api-Key": key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:500]
+        print(f"Google TTS HTTP {exc.code}: {detail}", file=sys.stderr)
+        return 1
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        print(f"Google TTS nicht erreichbar: {exc}", file=sys.stderr)
+        return 1
+    try:
+        audio = base64.b64decode(payload["audioContent"])
+    except (KeyError, ValueError):
+        print("Google TTS lieferte kein Audio", file=sys.stderr)
+        return 1
+
+    # Sehr kurze Clips bekommen am Ende Stille, damit die Lautheitsmessung
+    # (loudnorm) in Kienzlefon ein verwertbares Ergebnis liefert.
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error", "-f", "wav", "-i", "pipe:0",
+            "-af", "apad=whole_dur=0.5", "-ar", "24000", "-ac", "1",
+            "-c:a", "pcm_s16le", "-f", "wav", arguments.output,
+        ],
+        input=audio,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        print(result.stderr.decode("utf-8", "replace")[:500], file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
