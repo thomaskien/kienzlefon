@@ -82,3 +82,28 @@ def test_shared_outbound_route_uses_provider_specific_target(app_config):
     extensions = render_extensions(app_config)
     assert "Dial(PJSIP/${KZF_SIP_TARGET}@${KZF_OUT_ENDPOINT},120)" in extensions
     assert "Dial(PJSIP/${KZF_DIAL_NUMBER}@${KZF_OUT_ENDPOINT},120)" not in extensions
+
+
+@pytest.mark.parametrize(
+    "dialed",
+    ["017612345678", "+4917612345678", "004917612345678", "4917612345678"],
+)
+def test_national_format_is_specific_to_the_outbound_endpoint(app_config, dialed):
+    rules = replace(
+        app_config.dial_rules,
+        sip_target_formats={"voip2gsm-endpoint": "national"},
+    )
+    decision = decide_number(rules, dialed)
+    assert decision.allowed
+    assert format_sip_target(rules, decision, "voip2gsm-endpoint") == "017612345678"
+    assert format_sip_target(rules, decision, "different-trunk") == "4917612345678"
+
+
+@pytest.mark.parametrize("dialed", ["110", "112", "116116", "116117"])
+def test_national_format_keeps_emergency_numbers(app_config, dialed):
+    rules = replace(
+        app_config.dial_rules,
+        sip_target_formats={"voip2gsm-endpoint": "national"},
+    )
+    decision = decide_number(rules, dialed)
+    assert format_sip_target(rules, decision, "voip2gsm-endpoint") == dialed

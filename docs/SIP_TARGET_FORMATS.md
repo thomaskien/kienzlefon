@@ -16,6 +16,9 @@ Die Zuordnung erfolgt ueber den Namen des konfigurierten Asterisk-PJSIP-Endpunkt
 - `digits` (Standard): bisheriges normalisiertes Format ohne `+`.
 - `e164_plus`: deutsche Rufnummern `49...` werden zu `+49...` und erlaubte
   auslaendische Ziele `00...` zu `+...`.
+- `national`: deutsche Rufnummern `49...` werden zu `0...`; auslaendische Ziele
+  bleiben im Format `00...`. Gedacht fuer Provider, die internationale Praefixe
+  ohne `0` ablehnen (z. B. voip2gsm: `49...` fuehrt zu `404 Invalid phone number`).
 - Die Ausnahmeziele `110`, `112`, `116116`, `116117` bleiben unveraendert.
 
 Nicht aufgefuehrte Endpunkte behalten das bisherige Verhalten (`digits`).

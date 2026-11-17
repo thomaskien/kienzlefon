@@ -79,6 +79,12 @@ def format_sip_target(rules: DialRulesConfig, decision: DialDecision, endpoint: 
         if value.startswith(rules.country_code):
             return "+" + value
         raise ValueError("Kein internationales Rufnummernformat verfuegbar")
+    if number_format == "national":
+        if value.startswith("00"):
+            return value
+        if value.startswith(rules.country_code):
+            return "0" + value[len(rules.country_code):]
+        raise ValueError("Kein nationales Rufnummernformat verfuegbar")
     raise ValueError("Unbekanntes SIP-Zielformat")
 
 

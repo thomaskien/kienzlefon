@@ -1166,11 +1166,11 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         if (
             not isinstance(endpoint, str)
             or not re.fullmatch(r"[A-Za-z0-9_-]+", endpoint)
-            or number_format not in ("digits", "e164_plus")
+            or number_format not in ("digits", "e164_plus", "national")
         ):
             raise ConfigError(
                 "[wahlregeln].sip_zielformate: Endpunkte und Formate "
-                "(digits, e164_plus) pruefen"
+                "(digits, e164_plus, national) pruefen"
             )
     reserved = {str(value) for value in range(first, last + 1)} | {
         config.ivr.red_extension,
