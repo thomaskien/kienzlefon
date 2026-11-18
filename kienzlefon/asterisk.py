@@ -612,6 +612,27 @@ exten => _+X.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
 {render_middleware(config)}
 """
     rendered += render_member_context()
+    if config.control_api.enabled:
+        rendered = rendered.replace(
+            'Dial(PJSIP/${KZF_SIP_TARGET}@${KZF_OUT_ENDPOINT},120)',
+            'Dial(PJSIP/${KZF_SIP_TARGET}@${KZF_OUT_ENDPOINT},120,b(kienzlefon-control-outbound^s^1))',
+        )
+        rendered += """
+[kienzlefon-control-outbound]
+exten => s,1,Set(KF_LIVE_OUTBOUND=1)
+ same => n,Return()
+
+[kienzlefon-control-ready]
+exten => s,1,Set(KF_CONTROL_WAIT=0)
+ same => n(check),GotoIf($["${GLOBAL(KF_CONTROL_READY)}"="1"]?confirmed)
+ same => n,GotoIf($[${KF_CONTROL_WAIT}>=5]?unavailable)
+ same => n,Set(KF_CONTROL_WAIT=$[${KF_CONTROL_WAIT}+1])
+ same => n,Wait(1)
+ same => n,Goto(check)
+ same => n(unavailable),Congestion(2)
+ same => n,Hangup(34)
+ same => n(confirmed),Return()
+"""
     if config.statistics_pbx_id:
         capacity = "Gosub(kfx_external_capacity,primary-phone,1)"
         entry = entry_statement(config.statistics_pbx_id)
@@ -650,7 +671,7 @@ def render_queues(config: AppConfig) -> str:
     rendered_members = "\n".join(
         f"member => {member_interface(extension)},0,Telefon {extension},PJSIP/{extension}"
         for extension in dict.fromkeys(members)
-    )
+    ) if not config.control_api.enabled else "; Mitgliedschaft verwaltet durch Kienzlefon Control API"
     music_property = (
         f"musicclass={MUSIC_CLASS}"
         if config.hold_music.mode == "musik"

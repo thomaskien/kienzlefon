@@ -904,6 +904,10 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
         "config_hash": "a" * 64,
         "practice": "Praxis Test",
         "ivr_keys": {"ki": "7", "rot": ""},
+        "routing_policy": {"remote_enabled": True, "labels": {"201": "Empfang"}, "members": {"201": {
+            "normal": {"eligible": True, "default_member": True, "can_enable": True, "can_disable": False, "penalty": 0},
+            "specialist": {"eligible": True, "default_member": True, "can_enable": False, "can_disable": False, "penalty": 0},
+        }}},
         "product": {
             "name": "kienzlefon.de",
             "version": "2.5.5",
@@ -1053,6 +1057,8 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert "Anrufsbaum" in result.stdout
     assert 'data-ivr-key="ki" maxlength="1" pattern="[0-9*#]?" size="2" value="7"' in result.stdout
     assert 'data-ivr-key="rot"' in result.stdout
+    assert 'data-page="routing">Rufgruppen</button>' in result.stdout
+    assert 'data-routing-extension="201" data-routing-route="specialist"' in result.stdout
     assert "Keine Taste" in result.stdout
     assert "Kienzlefon 2.5.5" in result.stdout
     assert "kienzlefon.de" in result.stdout

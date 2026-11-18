@@ -56,6 +56,10 @@ def member_interface(extension: str) -> str:
 
 
 def queue_members(config: AppConfig) -> set[str]:
+    if config.control_api.enabled:
+        from .telephony_policy import managed_phones
+
+        return set(managed_phones(config))
     first = config.asterisk.first_queue_extension
     members = {str(value) for value in range(first, first + config.asterisk.queue_extension_count)}
     members.update(config.special_queue.additional_extensions)

@@ -2020,14 +2020,55 @@ collect_regeneration_choice(){
   export KZF_FORCE_PROMPTS
 }
 
+install_control_unit(){
+  cat >/etc/systemd/system/kienzlefon-control.service <<EOF
+[Unit]
+Description=Kienzlefon Anlagensteuerung und Live-Statistik
+After=asterisk.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+ExecStart=${VENV}/bin/kienzlefon-control --config ${CONFIG_FILE}
+Restart=on-failure
+RestartSec=2
+StateDirectory=kienzlefon/control
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  chmod 0644 /etc/systemd/system/kienzlefon-control.service
+  systemctl daemon-reload
+  systemctl enable --now kienzlefon-control.service
+}
+
 configure_asterisk(){
-  local red_enabled red_extension special_queue ai_enabled ai_count hold_installed
+  local red_enabled red_extension special_queue ai_enabled ai_count hold_installed control_enabled
+  control_enabled="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb")).get("control_api",{}).get("enabled",False) else "n")' "$CONFIG_FILE")"
+  if [[ "$control_enabled" == "y" ]]; then
+    "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" provision
+    asterisk -rx "manager reload"
+    "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" preflight
+  fi
   "${VENV}/bin/kienzlefon-asterisk" --config "$CONFIG_FILE"
   asterisk -rx "pjsip reload"
   asterisk -rx "dialplan reload"
   asterisk -rx "features reload"
   asterisk -rx "moh reload"
   "${VENV}/bin/kienzlefon-queue-setup" reload --config "$CONFIG_FILE"
+  if [[ "$control_enabled" == "y" ]]; then
+    "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" initialize
+    install_control_unit
+    systemctl restart kienzlefon-control.service
+  fi
   "${VENV}/bin/kienzlefon-queue-setup" verify --config "$CONFIG_FILE"
   "${VENV}/bin/kienzlefon-transfer-setup" verify --config "$CONFIG_FILE"
   asterisk_supports_format wav16 \
@@ -2122,7 +2163,6 @@ main(){
   demo_mode="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
     printf 'Lokale Ablage in der Praxis (unverschlüsselt).\n'
-    printf 'Auf KEINEN FALL echte Patientendaten verwenden.\n'
   else
     openssl pkey -pubin -in "$PUBLIC_KEY_FILE" -noout >/dev/null
   fi

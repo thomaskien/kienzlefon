@@ -36,6 +36,7 @@ from .ivr_keys import DEFAULTS as IVR_KEY_DEFAULTS, FOLLOWUP_PROMPTS, GENERATED_
 from .middleware import MiddlewareConfig, telephone_extensions
 from .models import CallType, FieldName
 from .queue_prompts import QUEUE_NUMBER_PROMPTS
+from .telephony_policy import ControlConfig, RoutingPolicy, policy_for
 
 SUPPORTED_WHISPER_MODELS = frozenset({"large-v3-turbo", "large-v3"})
 SUPPORTED_TTS_ENGINES = frozenset({"kokoro", "piper", "qwen", "google"})
@@ -383,6 +384,8 @@ class AppConfig:
     middleware: MiddlewareConfig = MiddlewareConfig()
     statistics_pbx_id: str = ""
     ivr_keys: Mapping[str, str] = field(default_factory=lambda: IVR_KEY_DEFAULTS.copy())
+    control_api: ControlConfig = ControlConfig()
+    routing_policy: RoutingPolicy = field(default_factory=RoutingPolicy)
 
     @property
     def local_extensions(self) -> tuple[str, ...]:
@@ -912,9 +915,17 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         raise ConfigError("[anrufstatistik].pbx_id ist ungueltig")
     try:
         ivr_keys = validate_keys(raw.get("ivr_tasten", {}))
-    except ValueError as exc:
+        control_api = ControlConfig.parse(raw.get("control_api", {}))
+        routing_policy = RoutingPolicy.parse(raw.get("routing_policy", {}))
+        if control_api.enabled:
+            if statistics_pbx_id and statistics_pbx_id != control_api.pbx_id:
+                raise ValueError("Steuerungsdienst und Anrufstatistik benötigen dieselbe Anlagenkennung")
+            statistics_pbx_id = control_api.pbx_id
+    except (ValueError, TypeError) as exc:
         raise ConfigError(str(exc)) from exc
     config = AppConfig(
+        control_api=control_api,
+        routing_policy=routing_policy,
         statistics_pbx_id=statistics_pbx_id,
         ivr_keys=ivr_keys,
         middleware=middleware,
@@ -1271,6 +1282,10 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if unknown_middleware:
         raise ConfigError("Middleware enthaelt nicht eingerichtete Telefon-Nebenstellen: "
                           + ", ".join(sorted(unknown_middleware)))
+    try:
+        policy_for(config)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
     return config
 
 

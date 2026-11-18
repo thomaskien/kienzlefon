@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .config import AppConfig, load_config
 from .prompts import PromptGenerator
-from .queue_dialplan import RULE_NAME, practice_timing
+from .queue_dialplan import RULE_NAME, penalty_stages, practice_timing
 from .queue_dispatch import MEMBER_CONTEXT, member_interface
 from .queue_prompts import QUEUE_PHRASES, phrase_output_paths, phrase_path
 from .transfer_setup import _cli
@@ -66,7 +66,7 @@ def verify(config: AppConfig) -> None:
         weight = 0 if name == config.ivr.queue_name else config.special_queue.weight
         if "'ringall' strategy" not in output or f"W:{weight}," not in output:
             raise ValueError(f"Queue {name}: Strategie oder Prioritaet nicht geladen")
-        for number in range(first, first + config.asterisk.queue_extension_count):
+        for number in range(first, first + (0 if config.control_api.enabled else config.asterisk.queue_extension_count)):
             lines = [line for line in output.splitlines() if member_interface(str(number)) in line]
             penalty = number - first if name == config.ivr.queue_name else 0
             if len(lines) != 1 or "(ringinuse disabled)" not in lines[0]:
@@ -79,7 +79,7 @@ def verify(config: AppConfig) -> None:
     expected = [f"Rule: {RULE_NAME}"] + [
         f"After {index * cycle - 1} seconds, adjust QUEUE_MAX_PENALTY by 0, "
         f"adjust QUEUE_MIN_PENALTY by 0 and adjust QUEUE_RAISE_PENALTY to {index}"
-        for index in range(1, config.asterisk.queue_extension_count)
+        for index in range(1, penalty_stages(config) + 1)
     ]
     if [line.strip() for line in rules.splitlines() if line.strip()] != expected:
         raise ValueError("Queue-Rufregeln fehlen, weichen ab oder sind mehrfach geladen")

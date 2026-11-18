@@ -381,6 +381,18 @@ emergency = "immer"
 # Leer deaktiviert Ereignisse. Dieselbe stabile Anlagenkennung in der Middleware verwenden.
 pbx_id = ""
 
+[control_api]
+enabled = false
+bind = "127.0.0.1"
+port = 8767
+allowed_networks = ["127.0.0.1/32"]
+credentials_file = "/etc/kienzlefon/control-identities.json"
+pbx_id = ""
+
+[routing_policy]
+remote_enabled = false
+# Anlagen-Admin speichert die Mitgliedschaften je Nebenstelle und Gruppe.
+
 [middleware]
 aktiv = false
 # Exakte Middleware-IP oder "*" fuer alle Clients an der VPN-Zieladresse.

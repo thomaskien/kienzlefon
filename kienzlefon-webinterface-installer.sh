@@ -342,7 +342,7 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/etc/kienzlefon /etc/asterisk /run/kienzlefon -/var/lib/kienzlefon/qwen3-tts ${RUNTIME_DIR} ${PROMPTS_DIR} ${QUEUE_DIGITS_DIR} ${MASTERS_DIR} ${UPLOADS_DIR}
+ReadWritePaths=/etc/kienzlefon /etc/asterisk /run/kienzlefon -/var/lib/kienzlefon/qwen3-tts -/var/lib/kienzlefon/control ${RUNTIME_DIR} ${PROMPTS_DIR} ${QUEUE_DIGITS_DIR} ${MASTERS_DIR} ${UPLOADS_DIR}
 TimeoutStartSec=4h
 EOF
 

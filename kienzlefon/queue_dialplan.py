@@ -73,8 +73,12 @@ def render_rules(config: AppConfig, timing: tuple[int, int]) -> str:
     # second before the next cycle, otherwise a stage can be a full cycle late.
     cycle = sum(timing)
     rules = "\n".join(f"penaltychange => {index * cycle - 1},,,{index}"
-                      for index in range(1, config.asterisk.queue_extension_count))
+                      for index in range(1, penalty_stages(config) + 1))
     return f"; Kienzlefon Rufzyklen\n[{RULE_NAME}]\n{rules}\n"
+
+
+def penalty_stages(config: AppConfig) -> int:
+    return 1000 if config.control_api.enabled else config.asterisk.queue_extension_count - 1
 
 
 def unwrap(text: str, begin: str = BEGIN, end: str = END) -> str:
@@ -114,11 +118,14 @@ def decorate_entries(text: str, config: AppConfig, timing: tuple[int, int] = (19
             output.append(line)
             continue
         ring, retry = timing if queue == config.ivr.queue_name else (19, 1)
-        output.extend((BEGIN, "; original: " + line,
-                       match[1] + "AGI(/opt/kienzlefon/venv/bin/kienzlefon-queue-dispatch,"
+        output.extend((BEGIN, "; original: " + line))
+        prefix = match[1]
+        if config.control_api.enabled:
+            output.append(prefix + "Gosub(kienzlefon-control-ready,s,1)")
+            prefix = " same => n,"
+        output.extend((prefix + "AGI(/opt/kienzlefon/venv/bin/kienzlefon-queue-dispatch,"
                        f"enter,--config,/etc/kienzlefon/kienzlefon.toml,--queue,{queue},"
-                       f"--ring,{ring},--retry,{retry})",
-                       f" same => n,Queue({match[2]}){match[3]}", END))
+                       f"--ring,{ring},--retry,{retry})", f" same => n,Queue({match[2]}){match[3]}", END))
     return "\n".join(output) + ("\n" if text.endswith("\n") else "")
 
 
@@ -152,8 +159,9 @@ def decorate_members(text: str, config: AppConfig) -> str:
         fields[3] = fields[0]
         fields[4] = "no"
         fields[0] = member_interface(extension)
-        output.extend((MEMBER_BEGIN, "; original: " + line,
-                       "member => " + ",".join(fields) + match[2], MEMBER_END))
+        managed = "; Mitgliedschaft verwaltet durch Kienzlefon Control API" if config.control_api.enabled else (
+            "member => " + ",".join(fields) + match[2])
+        output.extend((MEMBER_BEGIN, "; original: " + line, managed, MEMBER_END))
         seen.add(extension)
     if seen != allowed:
         raise ValueError("Praxisqueue hat nicht alle konfigurierten Telefon-Mitglieder")

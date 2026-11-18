@@ -633,6 +633,14 @@ Abholung und die dort gewählte Audio-Beilage. Anliegen mehrerer Patienten
 erzeugen getrennte Vorgänge. Eine Gesamtaufnahme, die mehrere Patienten
 betrifft, wird dabei nicht beigelegt. [Gemeinsamer JSON-Vertrag](docs/vorgang-v1/ANLIEGEN.md)
 
+## Rufgruppen und Live-Zähler
+
+Der optionale Kienzlefon-Steuerungsdienst liefert **Normal**, **ROT** sowie
+die aktuellen Zähler für Warteschleife, IVR und KI. Die Administration legt
+Standardteilnahme, Freigaben und die Rufstufe fest. Der Anlagenzustand und
+temporäre Änderungen werden über Asterisk bestätigt.
+[Einrichtung und Abnahme](docs/ANLAGENSTEUERUNG.md)
+
 ## Entwicklung
 
 ```bash

@@ -131,6 +131,7 @@ function queue_job(array $payload): string
     }
     $allowed = [
         'save',
+        'save_routing_policy',
         'record',
         'activate_candidate',
         'regenerate_prompt',
@@ -619,6 +620,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
             <button type="button" data-page="overview" class="active">Übersicht</button>
             <button type="button" data-page="times">Zeiten</button>
             <button type="button" data-page="calltree">Anrufsbaum</button>
+            <?php if (is_array($state['routing_policy'] ?? null)): ?><button type="button" data-page="routing">Rufgruppen</button><?php endif; ?>
             <button type="button" data-page="prompts">Ansagen</button>
             <button type="button" data-page="override">Sonderansage</button>
         </nav>
@@ -730,6 +732,27 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
             </div>
             <?php $treeIndex++; endforeach; ?>
         </section>
+
+        <?php if (is_array($state['routing_policy'] ?? null)): $policy = $state['routing_policy']; ?>
+        <section id="page-routing" class="page" aria-labelledby="routing-title">
+            <div class="toolbar"><div><h2 id="routing-title">Rufgruppen</h2><p class="muted">Grundeinstellungen und Rechte für Normal und ROT.</p></div><button class="button" type="button" id="save-routing-policy">Rufgruppen speichern</button></div>
+            <label class="checkbox"><input type="checkbox" id="routing-remote" <?= !empty($policy['remote_enabled']) ? 'checked' : '' ?>> Änderungen aus App und Middleware erlauben</label>
+            <?php foreach (($policy['members'] ?? []) as $extension => $routes): ?>
+                <details><summary><?= h($policy['labels'][$extension] ?? 'Telefon') ?> <?= h((string)$extension) ?></summary>
+                    <div class="details-body planning-grid">
+                    <?php foreach (['normal' => 'Normal', 'specialist' => 'ROT'] as $route => $label): $member = $routes[$route]; ?>
+                        <fieldset data-routing-extension="<?= h((string)$extension) ?>" data-routing-route="<?= h($route) ?>"><legend><?= h($label) ?></legend>
+                            <?php foreach (['eligible' => 'Für diese Rufgruppe zugelassen', 'default_member' => 'Teilnahme als Standard', 'can_enable' => 'Hinzufügen aus App oder Middleware erlauben', 'can_disable' => 'Entfernen aus App oder Middleware erlauben'] as $key => $description): ?>
+                                <label class="checkbox"><input type="checkbox" data-routing-key="<?= h($key) ?>" <?= !empty($member[$key]) ? 'checked' : '' ?>> <?= h($description) ?></label>
+                            <?php endforeach; ?>
+                            <?php if ($route === 'normal'): ?><label>Rufstufe <input type="number" min="0" max="1000" required data-routing-key="penalty" value="<?= h((string)$member['penalty']) ?>"></label><?php endif; ?>
+                        </fieldset>
+                    <?php endforeach; ?>
+                    </div>
+                </details>
+            <?php endforeach; ?>
+        </section>
+        <?php endif; ?>
 
         <section id="page-prompts" class="page" aria-labelledby="prompts-title">
             <div class="toolbar"><div><h2 id="prompts-title">Ansagen</h2><p class="muted">Texte und aktive Audioquelle werden gemeinsam gespeichert.</p></div><button class="button" type="button" id="save-prompts">Ansagen speichern</button></div>
@@ -910,6 +933,21 @@ async function saveCalltree() {
     const ivr_keys = Object.fromEntries([...document.querySelectorAll('[data-ivr-key]')].map(input => [input.dataset.ivrKey, input.value.trim()]));
     await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues(), ivr_keys});
 }
+async function saveRoutingPolicy() {
+    const members = {};
+    for (const group of document.querySelectorAll('[data-routing-extension]')) {
+        const {routingExtension, routingRoute} = group.dataset;
+        const member = {penalty:0};
+        for (const input of group.querySelectorAll('[data-routing-key]')) {
+            if (!input.checkValidity()) throw new Error('Die Rufstufe muss zwischen 0 und 1000 liegen.');
+            member[input.dataset.routingKey] = input.type === 'number' ? input.valueAsNumber : input.checked;
+        }
+        members[routingExtension] ??= {};
+        members[routingExtension][routingRoute] = member;
+    }
+    await queue({action:'save_routing_policy', config_hash:configHash,
+        policy:{remote_enabled:document.getElementById('routing-remote').checked, members}});
+}
 async function saveAssistant() { await queue({action:'save', config_hash:configHash, assistant:{enabled:document.getElementById('assistant-enabled').checked}}); }
 async function saveHoldMusic() { await queue({action:'save', config_hash:configHash, hold_music:{mode:document.getElementById('hold-music-mode').value}}); }
 function overridePresetValues() { const priority = Number(document.getElementById('override-preset-priority').value); if (!Number.isInteger(priority)) throw new Error('Bitte geben Sie eine ganzzahlige Priorität ein.'); return {preset_id:editingPresetId, name:document.getElementById('override-preset-name').value, announcement:document.getElementById('override-text').value, active:document.getElementById('override-preset-active').checked, priority, valid_from:document.getElementById('override-preset-valid-from').value, expires_at:document.getElementById('override-preset-expiry').value, block_phone_hours:document.getElementById('override-preset-block').checked, position:document.getElementById('override-preset-position').value, source:document.getElementById('override-preset-source').value}; }
@@ -920,6 +958,7 @@ async function saveOverridePreset() { await queue({action:'save_override_preset'
 async function recordOverridePreset(values = overridePresetValues()) { const extension = document.getElementById('override-record-extension').value; await queue({action:'record_override_preset', ...values, extension}); }
 document.getElementById('save-times').addEventListener('click', () => safely(async () => { const schedules = {}; document.querySelectorAll('[data-schedule]').forEach(input => { schedules[input.dataset.schedule] ??= {}; schedules[input.dataset.schedule][input.dataset.day] = splitRanges(input.value); }); await queue({action:'save', config_hash:configHash, schedules}); }));
 document.getElementById('save-calltree').addEventListener('click', () => safely(saveCalltree));
+document.getElementById('save-routing-policy')?.addEventListener('click', () => safely(saveRoutingPolicy));
 document.getElementById('save-prompts').addEventListener('click', () => safely(savePrompts));
 const saveAssistantButton = document.getElementById('save-assistant'); if (saveAssistantButton) saveAssistantButton.addEventListener('click', () => safely(saveAssistant));
 const saveHoldMusicButton = document.getElementById('save-hold-music'); if (saveHoldMusicButton) saveHoldMusicButton.addEventListener('click', () => safely(saveHoldMusic));

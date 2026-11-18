@@ -487,6 +487,8 @@ def export_state(
     php_binary: str = "/usr/bin/php",
 ) -> dict[str, Any]:
     config = load_config(config_path)
+    from .telephony_policy import managed_phones, policy_for
+
     raw = _read_toml(config_path)
     defaults = _read_toml(defaults_path)
     web = _web_settings(web_config_path)
@@ -635,6 +637,8 @@ def export_state(
         "config_hash": _config_hash(config_path),
         "practice": config.practice.name,
         "ivr_keys": dict(config.ivr_keys),
+        "routing_policy": ({**policy_for(config).export(), "labels": managed_phones(config)}
+                           if config.control_api.enabled else None),
         "product": {
             "name": "kienzlefon.de",
             "version": __version__,
@@ -1240,6 +1244,8 @@ class WebAdminWorker:
             action = job.get("action")
             if action == "save":
                 self._apply_save(job_id, job)
+            elif action == "save_routing_policy":
+                self._save_routing_policy(job_id, job)
             elif action == "record":
                 self._start_recording(job_id, job)
             elif action == "activate_candidate":
@@ -1268,6 +1274,22 @@ class WebAdminWorker:
                 self._status(job_id, "auftrag_abgelehnt", detail=str(exc))
         finally:
             path.unlink(missing_ok=True)
+
+    def _save_routing_policy(self, job_id: str, job: Mapping[str, Any]) -> None:
+        from .control_setup import write_policy
+        from .telephony_policy import RoutingPolicy, policy_for
+
+        if set(job) != {"id", "action", "config_hash", "policy"} or job["config_hash"] != _config_hash(self.config_path):
+            raise WebAdminError("Konfigurationsstand hat sich geändert. Bitte neu laden.")
+        config = load_config(self.config_path)
+        if not config.control_api.enabled:
+            raise WebAdminError("Anlagensteuerung ist nicht eingerichtet")
+        policy = RoutingPolicy.parse(job["policy"])
+        if policy.members.keys() != policy_for(config).members.keys():
+            raise WebAdminError("Rufgruppen müssen für alle verwalteten Telefone angegeben werden")
+        write_policy(config, policy)
+        self.export()
+        self._status(job_id, "einstellungen_aktuell", detail="Rufgruppen-Grundeinstellungen gespeichert.")
 
     def _temporary_config(self, text: str) -> Path:
         descriptor, name = tempfile.mkstemp(
