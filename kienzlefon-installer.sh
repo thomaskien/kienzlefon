@@ -511,7 +511,7 @@ PY
     KZF_DELIVERY_PUBLIC_KEY="$PUBLIC_KEY_FILE"
   fi
   ask_yes_no KZF_ATTACH_AUDIO "Audio beilegen? Bei Nein wird nur JSON ausgegeben." "$audio_default"
-  if [[ "$choice" == "2" && "$KZF_ATTACH_AUDIO" == "y" && "$audio_default" != "j" ]]; then
+  if [[ "$choice" == "2" && "$KZF_ATTACH_AUDIO" == "y" && ( "$default" != "2" || "$audio_default" != "j" ) ]]; then
     ask_yes_no keep_key "Der lokale Praxis-Abholer unterstützt Vorgangspaket v1 und Quittungen?" "n"
     [[ "$keep_key" == "y" ]] || die "Bitte den kompatiblen Abholer einrichten oder Nur JSON wählen."
   fi
