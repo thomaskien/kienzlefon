@@ -611,6 +611,28 @@ Ausgabe bzw. bestätigter Ablage entfernt Kienzlefon die temporären WAVs aus
 dem Spool. Anschließend verwaltet die App die Tonaufnahmen in der Inbox.
 [Gemeinsamer Audiovertrag](docs/vorgang-v1/AUDIO.md)
 
+## Mehrere Anliegen pro Anruf
+
+Der klassische IVR fragt nach jedem Anliegen nach einem weiteren. Die
+Folgeauswahl bietet die im Admin-Menü aktivierten Anliegenarten an. Name,
+Geburtsdatum und Rückrufnummer werden gemeinsam erfasst. Auflegen oder eine
+ausbleibende Auswahl schließt den Vorgang mit den vorhandenen Aufnahmen ab.
+Ein einzelnes Anliegen behält das bisherige JSON-Format. Mehrere Anliegen
+werden als gemeinsame Vorgangs-JSON mit stabilen Teilanliegen-IDs ausgegeben.
+
+Kienzlefon kann fertige KI-Fälle der Runtime 2.9 aus einem geschützten
+Ergebnisverzeichnis übernehmen. `ergebnisverzeichnis` unter `[ki_integration]`
+ist der absolute Pfad zu den UUID-Fallordnern des KI-Postprozessors. Bei
+getrennten Rechnern benötigt der Kienzlefon-Worker geschützten Lesezugriff auf
+die bereitgestellten Fallordner mit `call.json`, `result.json` und optional
+`caller.wav`. Einzelne Fälle lassen sich mit `kienzlefon-ki-import` und dem
+Pfad zum Fallordner übernehmen.
+
+Der Import verwendet die eingestellte Praxisablage oder verschlüsselte
+Abholung und die dort gewählte Audio-Beilage. Anliegen mehrerer Patienten
+erzeugen getrennte Vorgänge. Eine Gesamtaufnahme, die mehrere Patienten
+betrifft, wird dabei nicht beigelegt. [Gemeinsamer JSON-Vertrag](docs/vorgang-v1/ANLIEGEN.md)
+
 ## Entwicklung
 
 ```bash

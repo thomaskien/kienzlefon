@@ -30,6 +30,20 @@ from .statistics import emit_agi_route
 
 LOGGER = logging.getLogger(__name__)
 ALL_DIGITS = "0123456789*#"
+DIRECT_CONCERNS = {
+    "rezept": CallType.PRESCRIPTION,
+    "ueberweisung": CallType.REFERRAL,
+    "termin": CallType.APPOINTMENT,
+}
+OTHER_CONCERNS = {"rueckruf": CallType.CALLBACK_DETAILS, "sonstiges": CallType.OTHER}
+CONCERN_ROUTES = {
+    CallType.PRESCRIPTION: "prescription",
+    CallType.REFERRAL: "referral",
+    CallType.APPOINTMENT: "appointment",
+    CallType.CALLBACK_DETAILS: "callback",
+    CallType.CALLBACK_FALLBACK: "callback",
+    CallType.OTHER: "other",
+}
 
 
 class IVR:
@@ -210,15 +224,10 @@ class IVR:
         if digit == keys["praxis"] and self.config.phone_is_open():
             self._goto_queue()
             return True
-        if digit == keys["rezept"]:
-            self._record_structured(CallType.PRESCRIPTION, "rezept")
-            return True
-        if digit == keys["ueberweisung"]:
-            self._record_structured(CallType.REFERRAL, "ueberweisung")
-            return True
-        if digit == keys["termin"]:
-            self._record_structured(CallType.APPOINTMENT, "termin")
-            return True
+        for action, call_type in DIRECT_CONCERNS.items():
+            if digit == keys[action]:
+                self._record_structured(call_type, action)
+                return True
         if digit == keys["weitere"]:
             return self._submenu_five()
         if digit == keys["apotheke"] and self.config.pharmacy_is_available():
@@ -230,39 +239,44 @@ class IVR:
         return False
 
     def _submenu_five(self) -> bool:
-        keys = self.config.ivr_keys
-        available = keys["rueckruf"] + keys["sonstiges"]
-        for _ in range(self.config.ivr.attempts if available else 0):
-            digit = self._get_option("submenu_five", available)
-            if digit == keys["rueckruf"]:
-                self._record_structured(CallType.CALLBACK_DETAILS, "rueckruf")
-                return True
-            if digit == keys["sonstiges"]:
-                self._record_structured(CallType.OTHER, "sonstiges")
-                return True
-            if digit is not None:
-                self._play("invalid")
-        if self.config.phone_is_open():
+        selection = self._select_other_concern()
+        if selection is not None:
+            category, call_type = selection
+            self._record_structured(call_type, category)
+        elif self.config.phone_is_open():
             self._play("no_selection_open")
             self._goto_queue()
         else:
             self._record_closed_fallback()
         return True
 
+    def _select_other_concern(self) -> tuple[str, CallType] | None:
+        keys = self.config.ivr_keys
+        available = {keys[action]: (action, call_type) for action, call_type in OTHER_CONCERNS.items()
+                     if keys[action]}
+        for _ in range(self.config.ivr.attempts if available else 0):
+            digit = self._get_option("submenu_five", "".join(available))
+            if digit in available:
+                return available[digit]
+            if digit is not None:
+                self._play("invalid")
+        return None
+
     def _record_structured(self, call_type: CallType, category: str) -> None:
-        self._stat_route({
-            CallType.PRESCRIPTION: "prescription",
-            CallType.REFERRAL: "referral",
-            CallType.APPOINTMENT: "appointment",
-            CallType.CALLBACK_DETAILS: "callback",
-            CallType.OTHER: "other",
-        }.get(call_type))
+        self._stat_route(CONCERN_ROUTES[call_type])
         self.call = self._create_call_if_admitted(call_type, category)
         if self.call is None:
             self._play("whisper_failure")
             self._goto_queue()
             return
         self._play("recording_hint")
+        self._record_person_details()
+        self._record_concern(call_type)
+        self._record_more_concerns()
+        self._play("completed")
+        self._finish_call("abgeschlossen")
+
+    def _record_person_details(self) -> None:
         for field, prompt, filename in (
             (FieldName.FIRST_NAME, "first_name", "vorname.wav"),
             (FieldName.LAST_NAME, "last_name", "nachname.wav"),
@@ -278,21 +292,46 @@ class IVR:
                 long=False,
             )
 
+    def _record_more_concerns(self, *, needs_person_details: bool = False) -> None:
+        assert self.call is not None
+        keys = self.config.ivr_keys
+        more = keys["weiteres_anliegen"]
+        types = {keys[action]: call_type for action, call_type in DIRECT_CONCERNS.items() if keys[action]}
+        submenu = keys["weitere"] if any(keys[action] for action in OTHER_CONCERNS) else ""
+        available = "".join(types) + submenu
+        if not more or not available or not self.config.prompt_is_active("more_concern"):
+            return
+        while self._get_option("more_concern", more + keys["anliegen_fertig"]) == more:
+            digit = self._get_option("concern_types", available)
+            if digit in types:
+                call_type = types[digit]
+            elif digit == submenu:
+                selection = self._select_other_concern()
+                if selection is None:
+                    return
+                _, call_type = selection
+            else:
+                return
+            identifier = self.call.add_concern(call_type)
+            if needs_person_details:
+                self._record_person_details()
+                needs_person_details = False
+            self._stat_route(CONCERN_ROUTES[call_type])
+            self._record_concern(call_type, concern_id=identifier)
+
+    def _record_concern(self, call_type: CallType, *, concern_id: str | None = None) -> None:
         if call_type is CallType.PRESCRIPTION:
-            self._record_medications()
+            self._record_medications(concern_id=concern_id)
             self._play("prescription_information")
         elif call_type is CallType.REFERRAL:
-            self._record_field(FieldName.SPECIALTY, "specialty", "fachrichtung.wav", long=True)
-            self._record_field(FieldName.REASON, "referral_reason", "grund.wav", long=True)
+            self._record_field(FieldName.SPECIALTY, "specialty", "fachrichtung.wav", long=True, concern_id=concern_id)
+            self._record_field(FieldName.REASON, "referral_reason", "grund.wav", long=True, concern_id=concern_id)
         elif call_type is CallType.APPOINTMENT:
-            self._record_field(FieldName.REASON, "appointment", "grund.wav", long=True)
+            self._record_field(FieldName.REASON, "appointment", "grund.wav", long=True, concern_id=concern_id)
         elif call_type is CallType.CALLBACK_DETAILS:
-            self._record_field(FieldName.REASON, "callback_reason", "grund.wav", long=True)
+            self._record_field(FieldName.REASON, "callback_reason", "grund.wav", long=True, concern_id=concern_id)
         elif call_type is CallType.OTHER:
-            self._record_field(FieldName.CONCERN, "other", "anliegen.wav", long=True)
-
-        self._play("completed")
-        self._finish_call("abgeschlossen")
+            self._record_field(FieldName.CONCERN, "other", "anliegen.wav", long=True, concern_id=concern_id)
 
     def _record_closed_fallback(self) -> None:
         self.call = self._create_call_if_admitted(
@@ -303,16 +342,19 @@ class IVR:
             self._play("whisper_failure")
             self._goto_queue()
             return
-        self._record_field(
+        captured = self._record_field(
             FieldName.REASON,
             "no_selection_closed",
             "grund.wav",
             long=True,
         )
+        if captured:
+            self._stat_route(CONCERN_ROUTES[CallType.CALLBACK_FALLBACK])
+            self._record_more_concerns(needs_person_details=True)
         self._play("completed")
         self._finish_call("stille_oder_auflegen")
 
-    def _record_medications(self) -> None:
+    def _record_medications(self, *, concern_id: str | None = None) -> None:
         index = 1
         while True:
             prompt = "first_medication" if index == 1 else "next_medication"
@@ -322,6 +364,7 @@ class IVR:
                 f"medikament-{index:02d}.wav",
                 long=False,
                 index=index,
+                concern_id=concern_id,
             ):
                 return
             keys = self.config.ivr_keys
@@ -338,10 +381,13 @@ class IVR:
         *,
         long: bool,
         index: int | None = None,
+        concern_id: str | None = None,
     ) -> bool:
         assert self.call is not None
         self._play(prompt)
-        audio_path = self.call.begin_audio(field, filename, index)
+        if concern_id is not None:
+            filename = f"{concern_id}-{filename}"
+        audio_path = self.call.begin_audio(field, filename, index, concern_id=concern_id)
         result = self.channel.record(
             audio_path,
             silence_seconds=(

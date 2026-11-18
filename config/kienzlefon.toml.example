@@ -72,6 +72,8 @@ rueckruf = "1"
 sonstiges = "2"
 weiteres_medikament = "1"
 rezept_fertig = "2"
+weiteres_anliegen = "1"
+anliegen_fertig = "2"
 
 [aufnahme]
 format = "wav"
@@ -152,6 +154,8 @@ anzahl_nebenstellen = 0
 lease_ttl_ms = 5000
 publisher_timeout_ms = 7000
 sip_passwoerter = []
+# Optionaler lokaler, geschützter Zugriff auf das Ergebnisverzeichnis des KI-Postprozessors.
+ergebnisverzeichnis = ""
 
 [ansagen_ivr]
 nebenstelle = "777"
@@ -278,6 +282,8 @@ callback_number = "Ihre Rufnummer wurde nicht übertragen. Bitte nennen Sie Ihre
 first_medication = "Bitte nennen Sie das erste Medikament mit Wirkstärke und Packungsgröße."
 next_medication = "Bitte nennen Sie das nächste Medikament mit Wirkstärke und Packungsgröße."
 medication_choice = "Für ein weiteres Medikament drücken Sie 1. Wenn Ihre Bestellung vollständig ist, drücken Sie 2."
+more_concern = "Haben Sie noch ein weiteres Anliegen? Für ein weiteres Anliegen drücken Sie 1. Zum Abschließen drücken Sie 2."
+concern_types = "Für ein Rezept drücken Sie 2. Für eine Überweisung drücken Sie 3. Für einen Termin drücken Sie 4. Für eine Rückrufbitte oder ein sonstiges Anliegen drücken Sie 5."
 specialty = "Für welche Fachrichtung benötigen Sie die Überweisung?"
 referral_reason = "Bitte nennen Sie den Grund für die Überweisung."
 appointment = "Bitte schildern Sie Ihren Terminwunsch."

@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
-from .ivr_keys import DEFAULTS as IVR_KEY_DEFAULTS, GENERATED_PROMPTS, validate_keys
+from .ivr_keys import DEFAULTS as IVR_KEY_DEFAULTS, FOLLOWUP_PROMPTS, GENERATED_PROMPTS, validate_keys
 from .middleware import MiddlewareConfig, telephone_extensions
 from .models import CallType, FieldName
 from .queue_prompts import QUEUE_NUMBER_PROMPTS
@@ -283,6 +283,7 @@ class AIIntegrationConfig:
     publisher_timeout_ms: int
     sip_passwords: tuple[str, ...]
     assistant_enabled: bool = True
+    result_directory: Path | None = None
 
     @property
     def admission_enabled(self) -> bool:
@@ -485,6 +486,8 @@ REQUIRED_PROMPTS = frozenset(
         "first_medication",
         "next_medication",
         "medication_choice",
+        "more_concern",
+        "concern_types",
         "specialty",
         "referral_reason",
         "appointment",
@@ -730,6 +733,10 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     tts = _section(raw, "tts")
     asterisk = _section(raw, "asterisk")
     ai_integration = _section(raw, "ki_integration")
+    ai_result_value = ai_integration.get("ergebnisverzeichnis", "")
+    if not isinstance(ai_result_value, str) or (ai_result_value and not Path(ai_result_value).is_absolute()):
+        raise ConfigError("[ki_integration].ergebnisverzeichnis muss leer oder absolut sein")
+    ai_result_directory = Path(ai_result_value) if ai_result_value else None
     announcement_ivr = _section(raw, "ansagen_ivr")
     standalone = _section(raw, "zusaetzliche_nebenstellen")
     special_queue = _section(raw, "sonderqueue")
@@ -759,7 +766,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         detail = ", ".join(f"{key}={value!r}" for key, value in invalid_models.items())
         raise ConfigError(f"Nicht unterstuetzte Whisper-Modellwahl: {detail}")
 
-    prompt_values = {str(key): str(value) for key, value in prompts.items()}
+    prompt_values = {**FOLLOWUP_PROMPTS, **{str(key): str(value) for key, value in prompts.items()}}
     prompt_values.setdefault("menu_intro", DEFAULT_MENU_INTRO)
     missing_prompts = REQUIRED_PROMPTS - prompt_values.keys()
     if missing_prompts:
@@ -1027,6 +1034,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             lease_ttl_ms=int(ai_integration.get("lease_ttl_ms", 5000)),
             publisher_timeout_ms=int(ai_integration.get("publisher_timeout_ms", 7000)),
             sip_passwords=tuple(str(value) for value in ai_password_values),
+            result_directory=ai_result_directory,
         ),
         announcement_ivr=AnnouncementIVRConfig(
             extension=str(announcement_ivr.get("nebenstelle", "777")),

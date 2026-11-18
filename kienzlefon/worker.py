@@ -25,6 +25,7 @@ from uuid import uuid4
 from pathlib import Path
 from typing import Any, Protocol
 
+from .ai_import import import_next_case
 from .config import AppConfig
 from .crypto import EncryptionError, TelepraxisEncryptor
 from .delivery import Delivery
@@ -193,6 +194,11 @@ class Worker:
             while not self.stop_event.is_set():
                 if time.monotonic() >= next_receipt_poll:
                     self._poll_delivery_receipts()
+                    if self.config.ai_integration.result_directory is not None:
+                        try:
+                            import_next_case(self.config.ai_integration.result_directory, self.config)
+                        except OSError:
+                            LOGGER.warning("Das KI-Ergebnisverzeichnis ist derzeit nicht lesbar.")
                     next_receipt_poll = time.monotonic() + 5
                 claimed = self._claim_next_if_admitted()
                 if claimed is None:

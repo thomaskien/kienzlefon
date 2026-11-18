@@ -163,6 +163,9 @@ class Delivery:
             payload = self._without_audio(record)
             if self.encryptor.demo_mode:
                 self._write_local(identifier, payload, {})
+            elif payload["_kienzlefon"].get("audio_beilage") == ERROR:
+                self._write_fallback(call, payload)
+                return
             else:
                 self.encryptor.write_payload(payload, identifier)
             self.remove_source_audio(call)
@@ -178,8 +181,7 @@ class Delivery:
                 self._write_local(identifier, payload, {})
                 self.remove_source_audio(call)
             else:
-                path = self.encryptor.write_payload(payload, identifier)
-                write_json_atomic(state_path, {"ersatz": hashlib.sha256(path.read_bytes()).hexdigest()})
+                self._write_fallback(call, payload)
             return
         if not files:
             if self.encryptor.demo_mode:
@@ -198,6 +200,16 @@ class Delivery:
             _write_file(target, self._seal(self.encryptor.build_plaintext_record(payload), files))
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
         write_json_atomic(state_path, {"paket": digest})
+
+    def _write_fallback(self, call: WorkingCall, payload: dict, *, state: dict | None = None) -> None:
+        state_path = call.path / "lieferung.json"
+        if state is None:
+            if state_path.exists():
+                return
+            state = {}
+        target = self.encryptor.write_payload(payload, call.call_id)
+        state["ersatz"] = hashlib.sha256(target.read_bytes()).hexdigest()
+        write_json_atomic(state_path, state)
 
     def _receipt(self, identifier: str, filename: str, digest: str, status: str) -> Path | None:
         receipt = self.receipts / f"{identifier}.{digest}.{status}.ack.json"
@@ -238,6 +250,4 @@ class Delivery:
             state_path.unlink(missing_ok=True)
             return
         if "ersatz" not in state and self._receipt(identifier, package, state["paket"], "ersatz_json_noetig"):
-            path = self.encryptor.write_payload(self._without_audio(call.load(), failed=True), identifier)
-            state["ersatz"] = hashlib.sha256(path.read_bytes()).hexdigest()
-            write_json_atomic(state_path, state)
+            self._write_fallback(call, self._without_audio(call.load(), failed=True), state=state)

@@ -32,7 +32,7 @@ def test_queue_prompts_are_appended_without_moving_existing_numbers() -> None:
         "webadmin_record_discarded",
     )
     assert PROMPT_CATALOG[58:62] == QUEUE_PROMPTS
-    assert PROMPT_CATALOG[62:] == tuple(QUEUE_NUMBER_PROMPTS)
+    assert PROMPT_CATALOG[62:62 + len(QUEUE_NUMBER_PROMPTS)] == tuple(QUEUE_NUMBER_PROMPTS)
 
 
 def test_queue_prompts_are_editable_rendered_texts(app_config) -> None:

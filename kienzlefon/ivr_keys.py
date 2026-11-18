@@ -22,11 +22,15 @@ MEDICATION = {
     "weiteres_medikament": ("1", "Ein weiteres Medikament"),
     "rezept_fertig": ("2", "Bestellung abschließen"),
 }
-MENUS = (MAIN, SUBMENU, MEDICATION)
+AFTER_CONCERN = {
+    "weiteres_anliegen": ("1", "Weiteres Anliegen aufnehmen"),
+    "anliegen_fertig": ("2", "Aufnahme abschließen"),
+}
+MENUS = (MAIN, SUBMENU, MEDICATION, AFTER_CONCERN)
 DEFAULTS = {name: value[0] for menu in MENUS for name, value in menu.items()}
 GENERATED_PROMPTS = {
     "menu_open", "menu_closed", "opening_hours_choice", "pharmacy_access",
-    "specialist_access", "submenu_five", "medication_choice",
+    "specialist_access", "submenu_five", "medication_choice", "more_concern", "concern_types",
 }
 
 
@@ -55,12 +59,16 @@ def generated_texts(keys: Mapping[str, str]) -> dict[str, str]:
     def combined(choices: dict[str, str]) -> str:
         return " ".join(filter(None, (sentence(name, words) for name, words in choices.items())))
 
-    closed = combined({
+    concern_menu = {
         "rezept": "Für ein Rezept",
         "ueberweisung": "Für eine Überweisung",
         "termin": "Für einen Termin",
         "weitere": "Für eine Rückrufbitte oder ein sonstiges Anliegen",
-    })
+    }
+    closed = combined(concern_menu)
+    additional = dict(concern_menu)
+    if not (keys["rueckruf"] or keys["sonstiges"]):
+        additional.pop("weitere")
     opened = combined({"praxis": "Um mit der Praxis zu sprechen"})
     return {
         "menu_open": " ".join(filter(None, (opened, closed))) or "Bitte bleiben Sie in der Leitung.",
@@ -75,4 +83,14 @@ def generated_texts(keys: Mapping[str, str]) -> dict[str, str]:
             "weiteres_medikament": "Für ein weiteres Medikament",
             "rezept_fertig": "Zum Abschluss der Bestellung",
         }) or "Vielen Dank.",
+        "more_concern": " ".join(filter(None, (
+            "Haben Sie noch ein weiteres Anliegen?",
+            sentence("weiteres_anliegen", "Für ein weiteres Anliegen"),
+            sentence("anliegen_fertig", "Zum Abschließen"),
+        ))),
+        "concern_types": combined(additional) or "Vielen Dank.",
     }
+
+
+FOLLOWUP_PROMPTS = {name: value for name, value in generated_texts(DEFAULTS).items()
+                    if name in {"more_concern", "concern_types"}}

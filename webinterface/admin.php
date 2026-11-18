@@ -464,6 +464,7 @@ $treeGroups = [
     'Taste 5 · Rückruf oder sonstiges Anliegen' => ['submenu_five', 'callback_reason', 'other'],
     'Durchstellung und internes Ziel' => ['pharmacy_agent', 'specialist_agent', 'blocked_destination'],
     'Keine Taste und Abschluss' => ['no_selection_open', 'no_selection_closed', 'completed'],
+    'Weiteres Anliegen' => ['more_concern', 'concern_types'],
     'Fehler und Fallback' => ['invalid', 'whisper_failure', 'personal_data_fallback'],
 ];
 $conditionalModeNames = ['greeting_open', 'greeting_closed', 'emergency'];
@@ -714,6 +715,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                             'apotheke' => 'Apotheke', 'rot' => 'ROT'],
                         'Untermenü Rückruf oder Anliegen' => ['rueckruf' => 'Rückrufbitte', 'sonstiges' => 'Sonstiges Anliegen'],
                         'Weitere Medikamente' => ['weiteres_medikament' => 'Weiteres Medikament', 'rezept_fertig' => 'Bestellung abschließen'],
+                        'Weitere Anliegen' => ['weiteres_anliegen' => 'Weiteres Anliegen', 'anliegen_fertig' => 'Aufnahme abschließen'],
                     ]; ?>
                     <?php foreach ($keySections as $section => $choices): ?>
                     <h4><?= h($section) ?></h4>

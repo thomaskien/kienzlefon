@@ -21,6 +21,8 @@ from .models import AudioStatus, CallState, CallType, ClaimedCall, FieldName
 
 SUMMARY_UNAVAILABLE = "keine Zusammenfassung vorhanden"
 STATE_NAMES = tuple(state.value for state in CallState)
+MULTIPLE_CONCERNS = "mehrere_anliegen"
+PERSON_FIELDS = {"vorname", "nachname", "geburtsdatum", "telefon"}
 
 
 def iso_now(timezone: ZoneInfo) -> str:
@@ -79,7 +81,10 @@ class WorkingCall:
         record["_kienzlefon"]["aktualisiert_am"] = iso_now(self.timezone)
         write_json_atomic(self.json_path, record)
 
-    def begin_audio(self, field: FieldName, filename: str, index: int | None = None) -> Path:
+    def begin_audio(
+        self, field: FieldName, filename: str, index: int | None = None, *,
+        concern_id: str | None = None,
+    ) -> Path:
         record = self.load()
         entry: dict[str, Any] = {
             "feld": field.value,
@@ -91,9 +96,56 @@ class WorkingCall:
         }
         if index is not None:
             entry["index"] = index
+        if concern_id is not None:
+            entry["anliegen_id"] = concern_id
         record["_kienzlefon"]["audio"].append(entry)
         self.save(record)
         return self.audio_directory / filename
+
+    def add_concern(self, call_type: CallType) -> str:
+        record = self.load()
+        if record["typ"] != MULTIPLE_CONCERNS:
+            first_type = CallType(record["typ"])
+            fields = set(payload_fields(first_type)) - PERSON_FIELDS
+            first = {"anliegen_id": "a-001", "typ": first_type.value}
+            first.update({field: record.pop(field) for field in fields})
+            for audio in record["_kienzlefon"]["audio"]:
+                if audio["feld"] in fields:
+                    audio["anliegen_id"] = first["anliegen_id"]
+            for field in PERSON_FIELDS:
+                record.setdefault(field, "")
+            record.update(typ=MULTIPLE_CONCERNS, anliegen_schema_version=1, anliegen_liste=[first])
+        concerns = record["anliegen_liste"]
+        identifier = f"a-{len(concerns) + 1:03d}"
+        additional = {"anliegen_id": identifier, "typ": call_type.value}
+        additional.update({field: "" for field in payload_fields(call_type) if field not in PERSON_FIELDS})
+        concerns.append(additional)
+        self.save(record)
+        return identifier
+
+    def finalize_concerns(self, record: dict[str, Any]) -> None:
+        if record["typ"] != MULTIPLE_CONCERNS:
+            return
+        audio_entries = record["_kienzlefon"]["audio"]
+        captured = set()
+        for audio in audio_entries:
+            if "anliegen_id" not in audio or audio.get("datei_vorhanden") is False:
+                continue
+            path = self.path / audio["datei"]
+            if path.is_file() and path.stat().st_size > 44:
+                captured.add(audio["anliegen_id"])
+        concerns = record["anliegen_liste"]
+        kept = [item for item in concerns if item["anliegen_id"] in captured] or concerns[:1]
+        kept_ids = {item["anliegen_id"] for item in kept}
+        audio_entries[:] = [entry for entry in audio_entries
+                            if "anliegen_id" not in entry or entry["anliegen_id"] in kept_ids]
+        if len(kept) > 1:
+            record["anliegen_liste"] = kept
+            return
+        record.update({key: value for key, value in kept[0].items() if key != "anliegen_id"})
+        del record["anliegen_liste"], record["anliegen_schema_version"]
+        for audio in audio_entries:
+            audio.pop("anliegen_id", None)
 
     def set_audio_record_status(self, filename: str, status: str, present: bool) -> None:
         record = self.load()
@@ -218,6 +270,7 @@ class Spool:
 
     def finish_recording(self, call: WorkingCall, reason: str) -> WorkingCall:
         record = call.load()
+        call.finalize_concerns(record)
         record["_kienzlefon"]["abschluss"] = reason
         call.save(record)
         return self.transition(call, CallState.QUEUE)
@@ -266,10 +319,7 @@ class Spool:
             if now - path.stat().st_mtime < stale_seconds:
                 continue
             call = WorkingCall(path, self.timezone)
-            record = call.load()
-            record["_kienzlefon"]["abschluss"] = "verwaiste_aufnahme_wiederhergestellt"
-            call.save(record)
-            self.transition(call, CallState.QUEUE)
+            self.finish_recording(call, "verwaiste_aufnahme_wiederhergestellt")
             count += 1
         return count
 

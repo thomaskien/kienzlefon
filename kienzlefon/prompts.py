@@ -67,6 +67,7 @@ PROMPT_CATALOG = (
     "webadmin_record_discarded",
     "queue_thankyou", "queue_youarenext", "queue_thereare", "queue_callswaiting",
     *QUEUE_NUMBER_PROMPTS,
+    "more_concern", "concern_types",
 )
 
 

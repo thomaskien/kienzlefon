@@ -341,6 +341,9 @@ class SilentPersonalDataChannel:
     def stream_file(self, _path: Path, _digits: str = "") -> None:
         pass
 
+    def get_option(self, _path: Path, _digits: str, _timeout: int) -> None:
+        return None
+
     def record(self, path: Path, *, silence_seconds: int, max_seconds: int) -> RecordingResult:
         self.recorded.append(path.name)
         if path.name == "grund.wav":
@@ -352,6 +355,77 @@ class SilentPersonalDataChannel:
 class HealthyRecordingIVR(IVR):
     def _worker_healthy(self) -> bool:
         return True
+
+
+class FollowupChannel(VariableChannel):
+    def __init__(self, choices, *, hangup_on: str = "", silent_on: str = "") -> None:
+        super().__init__()
+        self.choices = iter(choices)
+        self.recorded: list[str] = []
+        self.hangup_on = hangup_on
+        self.silent_on = silent_on
+
+    def stream_file(self, _path: Path, _digits: str = "") -> None:
+        pass
+
+    def get_option(self, path: Path, digits: str, _timeout: int) -> str | None:
+        prompt, choice = next(self.choices)
+        assert path.name == prompt
+        assert choice is None or choice in digits
+        return choice
+
+    def record(self, path: Path, **_kwargs) -> RecordingResult:
+        self.recorded.append(path.name)
+        if path.name == self.hangup_on:
+            raise AgiHangup("Aufgelegt während der Neuaufnahme")
+        if path.name == self.silent_on:
+            return RecordingResult(path, "SILENCE", False)
+        path.write_bytes(b"RIFF" + b"0" * 100)
+        return RecordingResult(path, "DTMF", True)
+
+
+def test_followup_records_repeat_types_with_separate_ids_and_shared_person(app_config) -> None:
+    channel = FollowupChannel([
+        ("medication_choice", "2"), ("more_concern", "1"), ("concern_types", "7"),
+        ("medication_choice", "2"), ("more_concern", "1"), ("concern_types", "5"),
+        ("submenu_five", "2"), ("more_concern", "2"),
+    ])
+    keys = {**app_config.ivr_keys, "rezept": "7", "ueberweisung": ""}
+    ivr = HealthyRecordingIVR(replace(app_config, ivr_keys=keys), channel)
+
+    ivr.run_menu(initial_digit="7")
+
+    call, = ivr.spool.calls(CallState.QUEUE)
+    record = call.load()
+    assert record["typ"] == "mehrere_anliegen"
+    assert [(item["anliegen_id"], item["typ"]) for item in record["anliegen_liste"]] == [
+        ("a-001", "rezeptbestellung"), ("a-002", "rezeptbestellung"), ("a-003", "sonstiges"),
+    ]
+    assert channel.recorded[:4] == ["vorname.wav", "nachname.wav", "geburtsdatum.wav", "telefon.wav"]
+    assert not any("anliegen_id" in audio for audio in record["_kienzlefon"]["audio"][:4])
+    assert [(audio["anliegen_id"], audio["datei"]) for audio in record["_kienzlefon"]["audio"][4:]] == [
+        ("a-001", "audio/medikament-01.wav"), ("a-002", "audio/a-002-medikament-01.wav"),
+        ("a-003", "audio/a-003-anliegen.wav"),
+    ]
+
+
+@pytest.mark.parametrize("hangup", [False, True])
+def test_empty_or_abandoned_followup_keeps_single_legacy_concern(app_config, hangup) -> None:
+    extra = "a-002-grund.wav"
+    choices = [("more_concern", "1"), ("concern_types", "4")]
+    if not hangup:
+        choices.append(("more_concern", None))
+    channel = FollowupChannel(choices, hangup_on=extra if hangup else "", silent_on=extra)
+    ivr = HealthyRecordingIVR(app_config, channel)
+
+    ivr.run_menu(initial_digit="4")
+
+    call, = ivr.spool.calls(CallState.QUEUE)
+    record = call.load()
+    assert record["typ"] == "termin"
+    assert "anliegen_liste" not in record
+    assert record["_kienzlefon"]["audio"][-1]["datei"] == "audio/grund.wav"
+    assert "anliegen_id" not in record["_kienzlefon"]["audio"][-1]
 
 
 def test_silent_personal_fields_do_not_skip_actual_concern(app_config) -> None:
