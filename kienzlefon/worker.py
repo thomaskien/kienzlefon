@@ -13,15 +13,21 @@
 from __future__ import annotations
 
 import fcntl
+import http.client
+import json
 import logging
 import os
+import re
 import signal
 import threading
+import time
+from uuid import uuid4
 from pathlib import Path
 from typing import Any, Protocol
 
 from .config import AppConfig
 from .crypto import EncryptionError, TelepraxisEncryptor
+from .delivery import Delivery
 from .errors import record_system_error, report_call_errors
 from .health import Heartbeat
 from .models import AudioStatus, CallState, FieldName
@@ -53,7 +59,7 @@ class FasterWhisperTranscriber:
         self.models = {
             model_name: model_factory(
                 model_name,
-                device=config.whisper.device,
+                device="cpu" if config.whisper.commander_ip else config.whisper.device,
                 compute_type=config.whisper.compute_type,
                 cpu_threads=config.whisper.cpu_threads,
                 num_workers=1,
@@ -85,6 +91,60 @@ class FasterWhisperTranscriber:
         ).strip()
 
 
+class CommanderTranscriber:
+    def __init__(self, config: AppConfig, fallback: Transcriber):
+        self.settings = config.whisper
+        self.fallback = fallback
+        self.retry_at = 0.0
+
+    def transcribe(self, path: Path, field: FieldName | str) -> str:
+        if time.monotonic() >= self.retry_at:
+            try:
+                return self._transcribe(path)
+            except (OSError, ValueError, http.client.HTTPException) as exc:
+                self.retry_at = time.monotonic() + 30
+                LOGGER.warning("Commander-ASR nicht nutzbar (%s), CPU-Whisper aktiv",
+                               type(exc).__name__)
+        return self.fallback.transcribe(path, field)
+
+    def _transcribe(self, path: Path) -> str:
+        limit = 32 * 1024 * 1024
+        with path.open("rb") as handle:
+            audio = handle.read(limit + 1)
+        if len(audio) > limit:
+            raise ValueError("Commander-Audio zu gross")
+        request_id = uuid4().hex
+        boundary = f"kienzlefon-{request_id}"
+        body = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n'
+            f'{self.settings.language}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\n'
+            'Content-Type: audio/wav\r\n\r\n'
+        ).encode() + audio + f"\r\n--{boundary}--\r\n".encode()
+        connection = http.client.HTTPConnection(
+            self.settings.commander_ip, 8185, timeout=self.settings.commander_timeout,
+        )
+        try:
+            connection.request("POST", "/v1/asr/final-block", body, {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Idempotency-Key": request_id,
+            })
+            with connection.getresponse() as response:
+                if response.status != 200:
+                    raise ValueError("Commander-Antwortstatus")
+                maximum_response_bytes = 1024 * 1024
+                raw = response.read(maximum_response_bytes + 1)
+            if len(raw) > maximum_response_bytes:
+                raise ValueError("Commander-Antwort zu gross")
+            payload = json.loads(raw)
+            text = payload.get("text") if isinstance(payload, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("Commander-Antwort ohne Text")
+            return text.strip()
+        finally:
+            connection.close()
+
+
 class Worker:
     def __init__(self, config: AppConfig, transcriber: Transcriber | None = None):
         self.config = config
@@ -96,6 +156,7 @@ class Worker:
             demo_mode=config.telepraxis.demo,
             anonymize_phone_numbers=config.telepraxis.anonymize_phone_numbers,
         )
+        self.delivery = Delivery(self.encryptor)
         self.transcriber = transcriber
         self.stop_event = threading.Event()
         self.heartbeat = Heartbeat(
@@ -118,13 +179,21 @@ class Worker:
                 LOGGER.warning("%d nicht abgeschlossene Vorgaenge wiederhergestellt", recovered)
             self.flush_error_reports()
             if self.transcriber is None:
-                self.transcriber = FasterWhisperTranscriber(self.config)
+                local = FasterWhisperTranscriber(self.config)
+                self.transcriber = (
+                    CommanderTranscriber(self.config, local)
+                    if self.config.whisper.commander_ip else local
+                )
             self.heartbeat.set_ready(True)
             LOGGER.info(
                 "Whisper-Modelle %s sind dauerhaft geladen",
                 ", ".join(self.config.whisper.models),
             )
+            next_receipt_poll = 0.0
             while not self.stop_event.is_set():
+                if time.monotonic() >= next_receipt_poll:
+                    self._poll_delivery_receipts()
+                    next_receipt_poll = time.monotonic() + 5
                 claimed = self._claim_next_if_admitted()
                 if claimed is None:
                     self.flush_error_reports()
@@ -198,6 +267,8 @@ class Worker:
             self._apply_transcripts(record)
             call.save(record)
             if not record["_kienzlefon"]["errors"] and not self._has_transcribed_content(record):
+                if self.config.telepraxis.attach_audio is not None:
+                    self.delivery.remove_source_audio(call)
                 self.spool.transition(call, CallState.READY)
                 self.heartbeat.set_ready(True)
                 LOGGER.info(
@@ -206,7 +277,7 @@ class Worker:
                 )
                 return
             report_call_errors(call, self.encryptor)
-            self.encryptor.write_payload(record, call.call_id)
+            self._publish(call, record)
             self.spool.transition(call, CallState.READY)
             self.heartbeat.set_ready(True)
             output_kind = "unverschluesselt ausgegeben" if self.config.telepraxis.demo else "verschluesselt ausgegeben"
@@ -268,7 +339,7 @@ class Worker:
             self._apply_transcripts(record)
             call.save(record)
             report_call_errors(call, self.encryptor)
-            self.encryptor.write_payload(record, call.call_id)
+            self._publish(call, record)
             self.spool.transition(call, CallState.ERROR)
         except Exception:
             LOGGER.exception(
@@ -290,21 +361,59 @@ class Worker:
             for entry in record["_kienzlefon"]["audio"]
         )
 
+    def _publish(self, call: WorkingCall, record: dict[str, Any]) -> None:
+        attach = self.config.telepraxis.attach_audio
+        if attach is None:
+            self.encryptor.write_payload(record, call.call_id)
+        else:
+            self.delivery.publish(call, record, attach=attach)
+
+    def _poll_delivery_receipts(self) -> None:
+        for state in (CallState.READY, CallState.ERROR):
+            for call in self.spool.calls(state):
+                try:
+                    self.delivery.receive_ack(call)
+                except (OSError, ValueError, KeyError, EncryptionError):
+                    LOGGER.exception("Zustellung für %s konnte noch nicht abgeglichen werden", call.call_id)
+
     @staticmethod
     def _apply_transcripts(record: dict[str, Any]) -> None:
-        medications: list[tuple[int, str]] = []
+        multiple = record.get("typ") == "mehrere_anliegen"
+        concerns: dict[str, dict[str, Any]] = {}
+        duplicates: set[str] = set()
+        if multiple and record.get("anliegen_schema_version") == 1:
+            items = record.get("anliegen_liste")
+            if isinstance(items, list):
+                for item in items:
+                    identifier = item.get("anliegen_id") if isinstance(item, dict) else None
+                    if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", identifier):
+                        continue
+                    if identifier in concerns:
+                        duplicates.add(identifier)
+                    concerns[identifier] = item
+        medications: dict[str | None, list[tuple[int, str]]] = {}
         for entry in record["_kienzlefon"]["audio"]:
             if entry.get("status") != AudioStatus.TRANSCRIBED.value:
                 continue
             transcript = clean_transcript(str(entry.get("transkript", "")))
             entry["transkript"] = transcript
             field = str(entry["feld"])
+            identifier = entry.get("anliegen_id")
+            if identifier is not None and (
+                not isinstance(identifier, str) or identifier not in concerns or identifier in duplicates
+            ):
+                continue
+            target = concerns[identifier] if identifier is not None else record
             if field == FieldName.MEDICATION.value:
-                medications.append((int(entry.get("index", len(medications) + 1)), transcript))
-            elif field in record:
-                record[field] = transcript
-        if medications:
-            record[FieldName.MEDICATION.value] = "\n".join(text for _, text in sorted(medications))
+                if multiple and identifier is None:
+                    continue
+                lines = medications.setdefault(identifier, [])
+                lines.append((int(entry.get("index", len(lines) + 1)), transcript))
+            elif field in target:
+                target[field] = transcript
+        for identifier, lines in medications.items():
+            target = concerns[identifier] if identifier is not None else record
+            target[FieldName.MEDICATION.value] = "\n".join(text for _, text in sorted(lines))
 
     def flush_error_reports(self) -> None:
         for call in self.spool.calls(CallState.ERROR):

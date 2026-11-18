@@ -20,6 +20,7 @@ import json
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 CONFIG = "/etc/kienzlefon/google-tts.conf"
@@ -44,12 +45,31 @@ def read_config(path: str) -> dict[str, str]:
 
 
 def endpoint_url(endpoint: str) -> str:
-    # Nur ein expliziter Loopback-Host darf ohne TLS erreicht werden (Tests).
-    if endpoint.startswith(("http://127.0.0.1", "http://localhost")):
-        return endpoint.rstrip("/") + "/v1/text:synthesize"
-    if "://" in endpoint:
-        raise SystemExit("ENDPOINT muss ein Hostname sein")
-    return f"https://{endpoint}/v1/text:synthesize"
+    error = "ENDPOINT muss ein Hostname sein. HTTP ist nur fuer Loopback erlaubt."
+    if any(char.isspace() or ord(char) < 32 for char in endpoint) or any(
+        char in endpoint for char in "\\@?#"
+    ):
+        raise SystemExit(error)
+    test_url = endpoint.startswith("http://")
+    if not test_url and "://" in endpoint:
+        raise SystemExit(error)
+    try:
+        url = urllib.parse.urlsplit(endpoint if test_url else f"https://{endpoint}")
+        port = url.port
+    except ValueError:
+        raise SystemExit(error) from None
+    if not url.hostname or url.path not in (("", "/") if test_url else ("",)):
+        raise SystemExit(error)
+    if test_url and url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise SystemExit(error)
+    if port == 0:
+        raise SystemExit(error)
+    return urllib.parse.urlunsplit((url.scheme, url.netloc, "/v1/text:synthesize", "", ""))
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def main() -> int:
@@ -93,7 +113,7 @@ def main() -> int:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=60) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:500]

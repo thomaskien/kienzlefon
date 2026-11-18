@@ -630,6 +630,7 @@ def export_state(
         "generated_at": datetime.now(config.practice.timezone).isoformat(timespec="seconds"),
         "config_hash": _config_hash(config_path),
         "practice": config.practice.name,
+        "ivr_keys": dict(config.ivr_keys),
         "product": {
             "name": "kienzlefon.de",
             "version": __version__,
@@ -756,6 +757,8 @@ def _validate_schedule(section: str, value: Any) -> dict[str, list[str]]:
 
 
 def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[str, Any]:
+    from .ivr_keys import validate_keys
+
     allowed_top = {
         "action",
         "id",
@@ -768,6 +771,7 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "tts",
         "hold_music",
         "assistant",
+        "ivr_keys",
     }
     if set(job) - allowed_top:
         raise WebAdminError("Auftrag enthält nicht freigegebene Felder")
@@ -946,6 +950,18 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
             raise WebAdminError("KI-Assistent kann ohne eingerichtete KI-Anbindung nicht aktiviert werden")
         assistant["enabled"] = enabled
 
+    ivr_keys: dict[str, str] = {}
+    if "ivr_keys" in job:
+        supplied = job["ivr_keys"]
+        if not isinstance(supplied, Mapping):
+            raise WebAdminError("IVR-Tasten müssen ein Objekt sein")
+        try:
+            proposed = validate_keys({**config.ivr_keys, **supplied})
+        except ValueError as exc:
+            raise WebAdminError(str(exc)) from exc
+        if proposed != config.ivr_keys:
+            ivr_keys = proposed
+
     return {
         "config_hash": config_hash,
         "schedules": schedules,
@@ -956,11 +972,14 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
         "tts": tts,
         "hold_music": hold_music,
         "assistant": assistant,
+        "ivr_keys": ivr_keys,
     }
 
 
 def _render_updated_config(text: str, values: Mapping[str, Any]) -> str:
     updated = text
+    for key, digit in values.get("ivr_keys", {}).items():
+        updated = _set_toml_value(updated, "ivr_tasten", key, digit)
     for section, days in values["schedules"].items():
         for day, ranges in days.items():
             updated = _set_toml_value(updated, section, day, ranges)
@@ -1464,6 +1483,8 @@ class WebAdminWorker:
         )
         self._status(job_id, "konfiguration_wird_geprueft")
         text = self.config_path.read_text(encoding="utf-8")
+        keys_changed = bool(values["ivr_keys"])
+        original_config_stat = self.config_path.stat() if keys_changed else None
         temporary: Path | None = None
         active_manual: Path | None = None
         previous_manual: bytes | None = None
@@ -1519,25 +1540,35 @@ class WebAdminWorker:
                 "sources",
                 "tts",
                 "hold_music",
+                "ivr_keys",
             )
         )
         assistant_only = assistant_changed and not has_other_changes
+        prompts_ready = False
         try:
             if not assistant_only:
                 self._generate_prompts(
                     job_id,
-                    final_status=not (assistant_changed or values["hold_music"]),
+                    final_status=not (assistant_changed or keys_changed or values["hold_music"]),
                 )
+                prompts_ready = True
             if values["hold_music"]:
                 self._update_asterisk()
-            elif assistant_changed:
+            elif assistant_changed or keys_changed:
                 self._update_dialplan()
+        except Exception:
+            if keys_changed:
+                _write_bytes_atomic(self.config_path, text.encode("utf-8"), original_config_stat)
+                if prompts_ready:
+                    self._generate_prompts(job_id, final_status=False)
+                    self._update_dialplan()
+            raise
         finally:
             self.export()
         # Publish completion only after the refreshed status is readable by PHP.
         if assistant_only:
             self._status(job_id, "einstellungen_aktuell")
-        elif assistant_changed or values["hold_music"]:
+        elif assistant_changed or keys_changed or values["hold_music"]:
             self._status(job_id, "ansagen_aktuell")
 
     def _update_dialplan(self) -> None:

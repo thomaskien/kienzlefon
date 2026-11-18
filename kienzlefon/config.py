@@ -26,12 +26,13 @@ import json
 import math
 import re
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time
 from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .ivr_keys import DEFAULTS as IVR_KEY_DEFAULTS, GENERATED_PROMPTS, validate_keys
 from .middleware import MiddlewareConfig, telephone_extensions
 from .models import CallType, FieldName
 from .queue_prompts import QUEUE_NUMBER_PROMPTS
@@ -189,6 +190,8 @@ class WhisperConfig:
     heartbeat_seconds: int
     stale_heartbeat_seconds: int
     max_attempts: int
+    commander_ip: str = ""
+    commander_timeout: float = 15.0
 
     @property
     def models(self) -> tuple[str, ...]:
@@ -219,6 +222,7 @@ class TelepraxisConfig:
     demo: bool
     anonymize_phone_numbers: bool
     public_key: Path | None
+    attach_audio: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -376,6 +380,8 @@ class AppConfig:
     pharmacy_hours: WeeklySchedule
     specialist_hours: WeeklySchedule
     middleware: MiddlewareConfig = MiddlewareConfig()
+    statistics_pbx_id: str = ""
+    ivr_keys: Mapping[str, str] = field(default_factory=lambda: IVR_KEY_DEFAULTS.copy())
 
     @property
     def local_extensions(self) -> tuple[str, ...]:
@@ -719,6 +725,8 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     recording = _section(raw, "aufnahme")
     whisper = _section(raw, "whisper")
     telepraxis = _section(raw, "telepraxis")
+    if "audio_beilegen" in telepraxis and type(telepraxis["audio_beilegen"]) is not bool:
+        raise ConfigError("[telepraxis].audio_beilegen muss true oder false sein")
     tts = _section(raw, "tts")
     asterisk = _section(raw, "asterisk")
     ai_integration = _section(raw, "ki_integration")
@@ -775,6 +783,19 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if heartbeat_stale <= heartbeat:
         raise ConfigError("Whisper-Heartbeat muss vor seiner Verfallszeit erneuert werden")
     max_attempts = int(whisper.get("maximale_versuche", 3))
+    commander_ip = str(whisper.get("commander_ip", "")).strip()
+    if commander_ip:
+        from ipaddress import ip_address
+
+        try:
+            address = ip_address(commander_ip)
+        except ValueError as exc:
+            raise ConfigError("[whisper].commander_ip muss eine IP-Adresse sein") from exc
+        if address.is_unspecified or address.is_multicast or getattr(address, "scope_id", None):
+            raise ConfigError("[whisper].commander_ip muss eine erreichbare Unicast-Adresse sein")
+    commander_timeout = float(whisper.get("commander_timeout_sekunden", 15))
+    if not 1 <= commander_timeout <= 60:
+        raise ConfigError("[whisper].commander_timeout_sekunden muss zwischen 1 und 60 liegen")
     if max_attempts < 1:
         raise ConfigError("[whisper].maximale_versuche muss mindestens 1 sein")
 
@@ -879,7 +900,16 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         middleware = MiddlewareConfig.parse(raw.get("middleware", {}))
     except (ValueError, TypeError) as exc:
         raise ConfigError(str(exc)) from exc
+    statistics_pbx_id = str(_section(raw, "anrufstatistik").get("pbx_id", "")) if "anrufstatistik" in raw else ""
+    if statistics_pbx_id and not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", statistics_pbx_id):
+        raise ConfigError("[anrufstatistik].pbx_id ist ungueltig")
+    try:
+        ivr_keys = validate_keys(raw.get("ivr_tasten", {}))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
     config = AppConfig(
+        statistics_pbx_id=statistics_pbx_id,
+        ivr_keys=ivr_keys,
         middleware=middleware,
         source=source,
         paths=paths_config,
@@ -931,6 +961,8 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             heartbeat_seconds=heartbeat,
             stale_heartbeat_seconds=heartbeat_stale,
             max_attempts=max_attempts,
+            commander_ip=commander_ip,
+            commander_timeout=commander_timeout,
         ),
         telepraxis=TelepraxisConfig(
             channel=str(_required(telepraxis, "kanal", "telepraxis")),
@@ -938,6 +970,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
             demo=demo_mode,
             anonymize_phone_numbers=anonymize_value,
             public_key=_path(base, public_key_value) if public_key_value else None,
+            attach_audio=telepraxis.get("audio_beilegen"),
         ),
         tts=TTSConfig(
             engine=str(tts.get("engine", "kokoro")).strip().lower(),
@@ -1055,6 +1088,14 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         and not override_manual_selected
     ):
         raise ConfigError("Aktiver Override benoetigt Text oder eine manuelle Override-Ansage")
+    if config.ivr_keys != IVR_KEY_DEFAULTS:
+        for name in GENERATED_PROMPTS:
+            source = config.prompt_sources.get(name)
+            if source == "manuell" or (source != "tts" and any(
+                (config.tts.upload_directory / f"{name}.{suffix}").is_file()
+                for suffix in ("wav16", "wav")
+            )):
+                raise ConfigError(f"Für geänderte IVR-Tasten zuerst die Tastenansage {name} auf TTS stellen")
     if config.recording.format != "wav":
         raise ConfigError("[aufnahme].format ist fuer Version 1.7 verbindlich auf 'wav' festgelegt")
     if config.tts.engine not in SUPPORTED_TTS_ENGINES:

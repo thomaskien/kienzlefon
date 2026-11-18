@@ -284,6 +284,7 @@ def test_domestic_premium_blocks_survive_international_notation(app_config, numb
 def test_common_outbound_agi_releases_only_after_number_and_callerid(app_config, monkeypatch, disconnect):
     replies = '200 result=1\n' * 2 + (
         '511 Command Not Permitted on a dead channel\n' if disconnect else
+        '200 result=1 (kfx-phone-in-endpoint)\n200 result=1\n'
         '200 result=1 (4923319999)\n200 result=1\n200 result=1\n')
     stdin = StringIO('agi_request: choice\nagi_callerid: 0044123456789\n\n' + replies)
     stdout = StringIO()
@@ -296,7 +297,9 @@ def test_common_outbound_agi_releases_only_after_number_and_callerid(app_config,
     if disconnect:
         assert not any('KZF_DIAL_ALLOWED "1"' in command for command in commands)
     else:
-        assert commands[-3:] == ['GET VARIABLE KZF_OUT_CALLERID',
+        assert commands[-5:] == ['GET VARIABLE KZF_OUT_ENDPOINT',
+                                 'SET VARIABLE KZF_SIP_TARGET "4923311234567"',
+                                 'GET VARIABLE KZF_OUT_CALLERID',
                                  'SET VARIABLE KZF_DIAL_CALLERID "4923319999"',
                                  'SET VARIABLE KZF_DIAL_ALLOWED "1"']
         assert 'SET VARIABLE KZF_DIAL_NUMBER "4923311234567"' in commands

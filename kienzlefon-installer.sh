@@ -158,6 +158,7 @@ collect_google_tts_configuration(){
   KZF_GOOGLE_VOICE="$(google_conf_value VOICE)"; KZF_GOOGLE_VOICE="${KZF_GOOGLE_VOICE:-de-DE-Chirp3-HD-Sulafat}"
   KZF_GOOGLE_LANG="$(google_conf_value LANG)"; KZF_GOOGLE_LANG="${KZF_GOOGLE_LANG:-de-DE}"
   KZF_GOOGLE_RATE="$(google_conf_value RATE)"; KZF_GOOGLE_RATE="${KZF_GOOGLE_RATE:-0.93}"
+  KZF_GOOGLE_ENDPOINT="$(google_conf_value ENDPOINT)"
   printf '\nGoogle Cloud Text-to-Speech (Chirp 3 HD):\n'
   printf '  Die Ansagetexte werden einmalig an Google uebertragen; es entstehen nur beim Erzeugen Kosten.\n'
   printf '  Benoetigt wird ein API-Schluessel mit Zugriff auf die Cloud Text-to-Speech API.\n'
@@ -367,7 +368,40 @@ update_existing_whisper_models(){
     --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
     --standard-model "$KZF_MODEL_STANDARD" \
     --name-model "$KZF_MODEL_NAMES" \
-    --medication-model "$KZF_MODEL_MEDICATIONS"
+    --medication-model "$KZF_MODEL_MEDICATIONS" \
+    --commander-ip "$KZF_COMMANDER_IP"
+}
+
+collect_commander_configuration(){
+  local current="" choice=""
+  if [[ -r "$CONFIG_FILE" ]]; then
+    current="$("${VENV}/bin/python" -c \
+      'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("whisper", {}).get("commander_ip", ""))' \
+      "$CONFIG_FILE")"
+  fi
+  while true; do
+    ask_value choice "IP-Adresse des kienzledoku-Commanders im Praxisnetz (- = nur CPU)" "${current:--}"
+    if [[ "$choice" == "-" ]]; then
+      KZF_COMMANDER_IP=""
+      break
+    fi
+    if "${VENV}/bin/python" - "$choice" <<'PY'
+import sys
+from ipaddress import ip_address
+try:
+    address = ip_address(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(int(address.is_unspecified or address.is_multicast
+                     or bool(getattr(address, "scope_id", None))))
+PY
+    then
+      KZF_COMMANDER_IP="$choice"
+      break
+    fi
+    printf 'Bitte eine gueltige IP-Adresse oder - eingeben.\n'
+  done
+  export KZF_COMMANDER_IP
 }
 
 update_existing_tts(){
@@ -428,6 +462,85 @@ configure_demo_anonymization(){
     --config "$CONFIG_FILE" \
     --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
     --demo-anonymize "$value"
+}
+
+collect_delivery_configuration(){
+  local default="2" choice="" audio_default="n" key_source="" keep_key="n"
+  local -a current=()
+  if [[ -r "$CONFIG_FILE" ]]; then
+    mapfile -t current < <("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    data = tomllib.load(handle).get("telepraxis", {})
+print("1" if data.get("demo") else "2")
+print("j" if data.get("audio_beilegen") else "n")
+print(data.get("public_key", ""))
+print("j" if data.get("anrufernummern_anonymisieren") else "n")
+PY
+    )
+    default="${current[0]:-2}"
+    audio_default="${current[1]:-n}"
+  fi
+  printf '\nWie sollen die Vorgänge an die Kienzlefon-App übergeben werden?\n'
+  printf '  1) Lokale Ablage in der Praxis (unverschlüsselt)\n'
+  printf '     Wenn Kienzlefon direkt in der Praxis betrieben wird.\n'
+  printf '     Kienzlefon legt die Vorgänge direkt in der Inbox der App ab.\n'
+  printf '  2) Verschlüsselte Ablage zur Abholung\n'
+  printf '     Zum Beispiel für Kienzlefon auf einem Root-Server im Rechenzentrum.\n'
+  printf '     In der Praxis muss ein lokaler Abholer eingerichtet werden.\n'
+  printf '     Er holt die verschlüsselten Vorgänge ab und entschlüsselt sie vor Ort.\n'
+  printf '     Die Anfragen werden ausschließlich in der Praxis bearbeitet.\n'
+  while true; do
+    ask_value choice "Auswahl (1 oder 2)" "$default"
+    case "$choice" in 1|2) break ;; esac
+    printf 'Bitte 1 oder 2 eingeben.\n'
+  done
+  KZF_DEMO_MODE="n"
+  KZF_DEMO_ANONYMIZE="n"
+  KZF_DELIVERY_PUBLIC_KEY="${current[2]:-$PUBLIC_KEY_FILE}"
+  if [[ "$choice" == "1" ]]; then
+    KZF_DEMO_MODE="y"
+    KZF_DELIVERY_PUBLIC_KEY=""
+    [[ "${current[3]:-n}" != "j" ]] || KZF_DEMO_ANONYMIZE="y"
+  elif [[ ! -r "$KZF_DELIVERY_PUBLIC_KEY" ]]; then
+    ask_value key_source "Pfad zur Telepraxis-Public-Key-PEM-Datei" ""
+    [[ -r "$key_source" ]] || die "Public-Key-Datei ist nicht lesbar."
+    openssl pkey -pubin -in "$key_source" -noout >/dev/null
+    install -d -m 0755 "$CONFIG_DIR"
+    install -m 0644 "$key_source" "$PUBLIC_KEY_FILE"
+    KZF_DELIVERY_PUBLIC_KEY="$PUBLIC_KEY_FILE"
+  fi
+  ask_yes_no KZF_ATTACH_AUDIO "Audio beilegen? Bei Nein wird nur JSON ausgegeben." "$audio_default"
+  if [[ "$choice" == "2" && "$KZF_ATTACH_AUDIO" == "y" && "$audio_default" != "j" ]]; then
+    ask_yes_no keep_key "Der lokale Praxis-Abholer unterstützt Vorgangspaket v1 und Quittungen?" "n"
+    [[ "$keep_key" == "y" ]] || die "Bitte den kompatiblen Abholer einrichten oder Nur JSON wählen."
+  fi
+  export KZF_DEMO_MODE KZF_DEMO_ANONYMIZE KZF_DELIVERY_PUBLIC_KEY KZF_ATTACH_AUDIO
+}
+
+update_existing_delivery(){
+  local local_delivery=false attach_audio=false
+  [[ "$KZF_DEMO_MODE" != "y" ]] || local_delivery=true
+  [[ "$KZF_ATTACH_AUDIO" != "y" ]] || attach_audio=true
+  "${VENV}/bin/kienzlefon-migration" --config "$CONFIG_FILE" \
+    --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
+    --local-delivery "$local_delivery" --attach-audio "$attach_audio" \
+    --delivery-public-key "$KZF_DELIVERY_PUBLIC_KEY"
+}
+
+collect_statistics_configuration(){
+  local current="" choice=""
+  if [[ -r "$CONFIG_FILE" ]]; then
+    current="$("${VENV}/bin/python" -c \
+      'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("anrufstatistik", {}).get("pbx_id", ""))' \
+      "$CONFIG_FILE")"
+  fi
+  ask_value choice "Anlagenkennung fuer die Anrufstatistik (- = aus, identisch zur Middleware)" "${current:--}"
+  [[ "$choice" != "-" ]] || choice=""
+  if [[ -n "$choice" && ! "$choice" =~ ^[A-Za-z0-9_.-]{1,64}$ ]]; then
+    die "Die Anlagenkennung ist ungueltig."
+  fi
+  export KZF_STATISTICS_PBX_ID="$choice"
 }
 
 configure_hold_music(){
@@ -837,20 +950,55 @@ PY
 
 
 collect_sip_line(){
-  local prefix="$1" label="$2" enabled did user password domain proxy expiration outbound
-  ask_yes_no enabled "Separate externe Rufnummer fuer ${label} einrichten?" "n"
-  if [[ "$enabled" == "y" ]]; then
-    ask_value did "Externe Rufnummer/DID fuer ${label}" ""
-    [[ "$did" =~ ^[0-9]+$ ]] || die "DID fuer ${label} ist ungueltig."
-    ask_value user "SIP-Benutzer fuer ${label}" "$did"
-    ask_secret password "SIP-Passwort fuer ${label}"
-    ask_value domain "SIP-Domain fuer ${label}" "${KFX_PHONE_IN_SIP_DOMAIN:-}"
-    [[ -n "$domain" ]] || die "SIP-Domain fuer ${label} fehlt."
-    ask_value proxy "Outbound-Proxy fuer ${label} (leer=keiner)" "${KFX_PHONE_IN_SIP_OUTBOUND_PROXY:-}"
-    ask_value expiration "Registration-Expiration fuer ${label}" "300"
-    ask_yes_no outbound "Diese Rufnummer ausgehend verwenden? Empfehlung: Praxis-Hauptnummer" "n"
-  else
-    did=""; user=""; password=""; domain=""; proxy=""; expiration="300"; outbound="n"
+  local prefix="$1" label="$2" section="$3"
+  local enabled did user password domain proxy expiration outbound change keep
+  local -a current=()
+  if [[ -r "$CONFIG_FILE" ]]; then
+    mapfile -t current < <("${VENV}/bin/python" - "$CONFIG_FILE" "$section" <<'PY'
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    line = tomllib.load(handle).get(sys.argv[2], {})
+print("y" if line.get("aktiv", False) else "n")
+for key in ("rufnummer", "benutzer", "passwort", "domain", "outbound_proxy"):
+    print(line.get(key, ""))
+print(line.get("expiration", 300))
+print("y" if line.get("ausgehend_verwenden", False) else "n")
+PY
+    )
+  fi
+  enabled="${current[0]:-n}"
+  did="${current[1]:-}"; user="${current[2]:-}"; password="${current[3]:-}"
+  domain="${current[4]:-}"; proxy="${current[5]:-}"
+  expiration="${current[6]:-300}"; outbound="${current[7]:-n}"
+  ask_yes_no change "Separate externe Rufnummer fuer ${label} einrichten oder aendern?" "n"
+  if [[ "$change" == "y" ]]; then
+    if [[ "$enabled" == "y" ]]; then
+      ask_yes_no enabled "Direktnummer fuer ${label} aktiv lassen?" "j"
+    else
+      enabled="y"
+    fi
+    if [[ "$enabled" == "y" ]]; then
+      ask_value did "Externe Rufnummer/DID fuer ${label}" "$did"
+      [[ "$did" =~ ^\+?[0-9]+$ ]] || die "DID fuer ${label} ist ungueltig."
+      did="${did#+}"
+      ask_value user "SIP-Benutzer fuer ${label}" "${user:-$did}"
+      keep="n"
+      if [[ -n "$password" ]]; then
+        ask_yes_no keep "Vorhandenes SIP-Passwort fuer ${label} beibehalten?" "j"
+      fi
+      [[ "$keep" == "y" ]] || ask_secret password "SIP-Passwort fuer ${label}"
+      ask_value domain "SIP-Domain fuer ${label}" "${domain:-${KFX_PHONE_IN_SIP_DOMAIN:-}}"
+      [[ -n "$domain" ]] || die "SIP-Domain fuer ${label} fehlt."
+      ask_value proxy "Outbound-Proxy fuer ${label} (- = keiner)" "${proxy:-${KFX_PHONE_IN_SIP_OUTBOUND_PROXY:--}}"
+      [[ "$proxy" != "-" ]] || proxy=""
+      ask_value expiration "Registration-Expiration fuer ${label}" "$expiration"
+      [[ "$expiration" =~ ^[1-9][0-9]*$ ]] || die "Registration-Expiration muss positiv sein."
+      local outbound_default="n"
+      [[ "$outbound" != "y" ]] || outbound_default="j"
+      ask_yes_no outbound "Diese Rufnummer ausgehend verwenden? Empfehlung: Praxis-Hauptnummer" "$outbound_default"
+    else
+      did=""; user=""; password=""; domain=""; proxy=""; expiration="300"; outbound="n"
+    fi
   fi
   printf -v "${prefix}_AKTIV" '%s' "$enabled"
   printf -v "${prefix}_DID" '%s' "$did"
@@ -862,6 +1010,77 @@ collect_sip_line(){
   printf -v "${prefix}_OUTBOUND" '%s' "$outbound"
   export "${prefix}_AKTIV" "${prefix}_DID" "${prefix}_USER" "${prefix}_PASSWORD"
   export "${prefix}_DOMAIN" "${prefix}_PROXY" "${prefix}_EXPIRATION" "${prefix}_OUTBOUND"
+}
+
+collect_direct_numbers(){
+  collect_sip_line KZF_QUEUE_LINE "die direkte Praxisqueue" sip_direkte_queue
+  collect_sip_line KZF_RED_LINE "den Rufweg ROT" sip_rotes_telefon
+}
+
+update_existing_direct_numbers(){
+  export CONFIG_FILE
+  "${VENV}/bin/python" - <<'PY'
+import json, os, re, tempfile
+from pathlib import Path
+from kienzlefon.config import load_config
+
+target = Path(os.environ["CONFIG_FILE"])
+text = target.read_text(encoding="utf-8")
+for section, prefix in (("sip_direkte_queue", "KZF_QUEUE_LINE"), ("sip_rotes_telefon", "KZF_RED_LINE")):
+    head = f"[{section}]\n"
+    start = text.index(head) + len(head)
+    end = text.find("\n[", start)
+    if end < 0:
+        end = len(text)
+    body = text[start:end]
+    for key, suffix in (
+        ("aktiv", "AKTIV"), ("rufnummer", "DID"), ("benutzer", "USER"),
+        ("passwort", "PASSWORD"), ("domain", "DOMAIN"), ("outbound_proxy", "PROXY"),
+        ("expiration", "EXPIRATION"), ("ausgehend_verwenden", "OUTBOUND"),
+    ):
+        value = os.environ[f"{prefix}_{suffix}"]
+        if suffix in ("AKTIV", "OUTBOUND"):
+            value = value == "y"
+        elif suffix == "EXPIRATION":
+            value = int(value)
+        body, count = re.subn(rf"^{key}\s*=.*$", lambda _: f"{key} = {json.dumps(value)}",
+                              body, count=1, flags=re.M)
+        if count != 1:
+            raise SystemExit(f"Fehlendes Installationsfeld [{section}].{key}")
+    text = text[:start] + body + text[end:]
+with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent, delete=False) as handle:
+    handle.write(text)
+    temporary = Path(handle.name)
+try:
+    os.chmod(temporary, target.stat().st_mode & 0o777)
+    load_config(temporary)
+    os.replace(temporary, target)
+finally:
+    temporary.unlink(missing_ok=True)
+PY
+}
+
+configure_provider_target_formats(){
+  local -a endpoints=()
+  if [[ "${KFX_PHONE_IN_PROVIDER:-}" == "voip2gsm" ]]; then
+    endpoints+=(kfx-phone-in-endpoint)
+  fi
+  if [[ "${KFX_PHONE_OUT_PROVIDER:-}" == "voip2gsm" ]]; then
+    endpoints+=(kfx-phone-out-endpoint)
+  fi
+  if [[ "${KZF_QUEUE_LINE_DOMAIN:-}" == *.vsip.eu ]]; then
+    endpoints+=(kienzlefon-direct-queue-endpoint)
+  fi
+  if [[ "${KZF_RED_LINE_DOMAIN:-}" == *.vsip.eu ]]; then
+    endpoints+=(kienzlefon-direct-red-endpoint)
+  fi
+  "${VENV}/bin/python" - "$CONFIG_FILE" "${endpoints[@]}" <<'PY'
+import sys
+from pathlib import Path
+from kienzlefon.migration import set_provider_target_defaults
+
+set_provider_target_defaults(Path(sys.argv[1]), sys.argv[2:])
+PY
 }
 
 configure_additional_extensions(){
@@ -1196,7 +1415,7 @@ PY
 }
 
 collect_configuration(){
-  local reuse="" reconfigure_times="" key_source="" suggested_red demo_confirm=""
+  local reuse="" reconfigure_times="" suggested_red
   if [[ -r "$CONFIG_FILE" ]]; then
     migrate_version_1_8
     ask_yes_no reuse "Vorhandene Kienzlefon-Konfiguration unveraendert wiederverwenden?" "j"
@@ -1204,6 +1423,7 @@ collect_configuration(){
       collect_tts_configuration
       update_existing_tts
       collect_whisper_models
+      collect_commander_configuration
       update_existing_whisper_models
       ask_yes_no reconfigure_times "Zeitprofile jetzt neu konfigurieren?" "n"
       if [[ "$reconfigure_times" == "y" ]]; then
@@ -1212,6 +1432,15 @@ collect_configuration(){
       fi
       configure_additional_extensions
       configure_special_queue
+      collect_direct_numbers
+      update_existing_direct_numbers
+      configure_provider_target_formats
+      collect_delivery_configuration
+      update_existing_delivery
+      collect_statistics_configuration
+      "${VENV}/bin/kienzlefon-migration" --config "$CONFIG_FILE" \
+        --template "$SOURCE_TARGET/config/kienzlefon.toml.example" \
+        --statistics-pbx-id "$KZF_STATISTICS_PBX_ID"
       configure_demo_anonymization
       configure_ai_integration
       return
@@ -1221,21 +1450,8 @@ collect_configuration(){
   ask_value KZF_PRACTICE_NAME "Praxisname fuer die Ansagen" "Praxisname"
   ask_value KZF_CHANNEL "Telepraxis-Kanal/SSH-Benutzer" "dahl"
   ask_value KZF_OUTPUT_DIR "Telepraxis-Ausgabeverzeichnis" "/srv/telepraxis/${KZF_CHANNEL}/inbox"
-  ask_yes_no KZF_DEMO_MODE \
-    "Demo-Modus mit unverschluesselter JSON-Ausgabe verwenden?" "n"
-  if [[ "$KZF_DEMO_MODE" == "y" ]]; then
-    printf '\nACHTUNG: Im Demo-Modus werden alle regulaeren und Fehler-JSONs unverschluesselt abgelegt.\n'
-    printf 'Diesen Modus AUF KEINEN FALL fuer echte Patientendaten verwenden.\n\n'
-    ask_yes_no demo_confirm \
-      "Demo-Modus trotz unverschluesselter Ausgabe wirklich aktivieren?" "n"
-    [[ "$demo_confirm" == "y" ]] || die "Demo-Modus wurde nicht bestaetigt."
-    printf 'Die Anonymisierung ersetzt id und telefon in ausgegebenen JSON-Dateien durch #anonymisiert demo#.\n'
-    printf 'Audiodateien und in Freitexten genannte Rufnummern bleiben unveraendert.\n'
-    ask_yes_no KZF_DEMO_ANONYMIZE \
-      "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" "j"
-  else
-    KZF_DEMO_ANONYMIZE="n"
-  fi
+  collect_delivery_configuration
+  collect_statistics_configuration
   collect_tts_configuration
   ask_value KZF_ANNOUNCEMENT_PAUSE_MS "Pause zwischen IVR-Ansagen in Millisekunden" "700"
   [[ "$KZF_ANNOUNCEMENT_PAUSE_MS" =~ ^[0-9]+$ ]] \
@@ -1244,6 +1460,7 @@ collect_configuration(){
     || die "Die IVR-Ansagepause darf hoechstens 10000 Millisekunden betragen."
   ask_value KZF_CPU_THREADS "Whisper CPU-Threads (0=automatisch)" "0"
   collect_whisper_models
+  collect_commander_configuration
   ask_value KZF_AREA_CODE "Ortsvorwahl der Praxis mit fuehrender Null" ""
   [[ "$KZF_AREA_CODE" =~ ^0[1-9][0-9]+$ ]] || die "Die Ortsvorwahl ist ungueltig."
   ask_value KZF_PRACTICE_NUMBER "Lokale Praxisrufnummer ohne Vorwahl" ""
@@ -1269,33 +1486,9 @@ collect_configuration(){
     || die "Die Prioritaet der Sonderqueue muss groesser als 10 sein."
   KZF_RED_PASSWORD="$(openssl rand -base64 24 | tr -d '\n')"
 
-  if [[ "$KZF_DEMO_MODE" != "y" ]]; then
-    if [[ -r "$PUBLIC_KEY_FILE" ]]; then
-      ask_yes_no reuse "Vorhandenen Telepraxis-Public-Key wiederverwenden?" "j"
-    else
-      reuse="n"
-    fi
-    if [[ "$reuse" != "y" ]]; then
-      ask_value key_source "Pfad zur Telepraxis-Public-Key-PEM-Datei" ""
-      [[ -r "$key_source" ]] || die "Public-Key-Datei ist nicht lesbar: ${key_source}"
-      openssl pkey -pubin -in "$key_source" -noout >/dev/null
-      install -d -m 0755 "$CONFIG_DIR"
-      install -m 0644 "$key_source" "$PUBLIC_KEY_FILE"
-    fi
-  fi
-
   collect_time_configuration
 
-  collect_sip_line KZF_QUEUE_LINE "die direkte Praxisqueue"
-  if [[ "$KZF_RED_ENABLED" == "y" ]]; then
-    collect_sip_line KZF_RED_LINE "das rote Telefon"
-  else
-    KZF_RED_LINE_AKTIV="n"; KZF_RED_LINE_DID=""; KZF_RED_LINE_USER=""
-    KZF_RED_LINE_PASSWORD=""; KZF_RED_LINE_DOMAIN=""; KZF_RED_LINE_PROXY=""
-    KZF_RED_LINE_EXPIRATION="300"; KZF_RED_LINE_OUTBOUND="n"
-    export KZF_RED_LINE_AKTIV KZF_RED_LINE_DID KZF_RED_LINE_USER KZF_RED_LINE_PASSWORD
-    export KZF_RED_LINE_DOMAIN KZF_RED_LINE_PROXY KZF_RED_LINE_EXPIRATION KZF_RED_LINE_OUTBOUND
-  fi
+  collect_direct_numbers
 
   if [[ "${KFX_PHONE_SEPARATE_OUTBOUND:-n}" == "y" ]]; then
     KZF_MAIN_ENDPOINT="kfx-phone-out-endpoint"
@@ -1395,16 +1588,19 @@ set_value("whisper", "cpu_threads", int(os.environ["KZF_CPU_THREADS"]))
 set_value("whisper", "modell_standard", os.environ["KZF_MODEL_STANDARD"])
 set_value("whisper", "modell_namen", os.environ["KZF_MODEL_NAMES"])
 set_value("whisper", "modell_medikamente", os.environ["KZF_MODEL_MEDICATIONS"])
+set_value("whisper", "commander_ip", os.environ.get("KZF_COMMANDER_IP", ""))
 set_value("telepraxis", "kanal", os.environ["KZF_CHANNEL"])
 set_value("telepraxis", "ausgabeverzeichnis", os.environ["KZF_OUTPUT_DIR"])
 demo_mode = os.environ["KZF_DEMO_MODE"] == "y"
 set_value("telepraxis", "demo", demo_mode)
+set_value("telepraxis", "audio_beilegen", os.environ.get("KZF_ATTACH_AUDIO") == "y")
+set_value("anrufstatistik", "pbx_id", os.environ.get("KZF_STATISTICS_PBX_ID", ""))
 set_value(
     "telepraxis",
     "anrufernummern_anonymisieren",
     demo_mode and os.environ["KZF_DEMO_ANONYMIZE"] == "y",
 )
-set_value("telepraxis", "public_key", "" if demo_mode else os.environ["PUBLIC_KEY_FILE"])
+set_value("telepraxis", "public_key", "" if demo_mode else os.environ.get("KZF_DELIVERY_PUBLIC_KEY", os.environ["PUBLIC_KEY_FILE"]))
 set_value("tts", "engine", os.environ["KZF_TTS_ENGINE"])
 set_value("tts", "stimme", os.environ["KZF_TTS_VOICE"])
 set_value("tts", "qwen_stimme", os.environ["KZF_QWEN_VOICE"])
@@ -1466,6 +1662,7 @@ PY
   chmod 0640 "$CONFIG_FILE"
   configure_additional_extensions
   configure_special_queue "$KZF_RED_ENABLED"
+  configure_provider_target_formats
   configure_ai_integration
 }
 
@@ -1764,9 +1961,13 @@ install_google_tts(){
   install -m 0755 "${SOURCE_TARGET}/scripts/google-tts/kienzlefon-google-tts-generate" "$GOOGLE_GENERATOR"
   (
     umask 077
-    printf 'API_KEY=%s\nVOICE=%s\nLANG=%s\nRATE=%s\n' \
-      "$KZF_GOOGLE_API_KEY" "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_LANG" "$KZF_GOOGLE_RATE" \
-      > "${GOOGLE_CONFIG}.new"
+    {
+      printf 'API_KEY=%s\nVOICE=%s\nLANG=%s\nRATE=%s\n' \
+        "$KZF_GOOGLE_API_KEY" "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_LANG" "$KZF_GOOGLE_RATE"
+      if [[ -n "${KZF_GOOGLE_ENDPOINT:-}" ]]; then
+        printf 'ENDPOINT=%s\n' "$KZF_GOOGLE_ENDPOINT"
+      fi
+    } > "${GOOGLE_CONFIG}.new"
   )
   chown root:root "${GOOGLE_CONFIG}.new"
   chmod 0600 "${GOOGLE_CONFIG}.new"
@@ -1920,7 +2121,7 @@ main(){
   "${VENV}/bin/kienzlefon-config" --config "$CONFIG_FILE"
   demo_mode="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("demo", False) else "n")' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
-    printf 'ACHTUNG: Demo-Modus aktiv; Telepraxis-Dateien werden unverschluesselt abgelegt.\n'
+    printf 'Lokale Ablage in der Praxis (unverschlüsselt).\n'
     printf 'Auf KEINEN FALL echte Patientendaten verwenden.\n'
   else
     openssl pkey -pubin -in "$PUBLIC_KEY_FILE" -noout >/dev/null
@@ -2008,7 +2209,7 @@ PY
   printf 'Interner SIP-Registrar: %s:%s\n' "${KFX_PHONE_BIND_IP:-unbekannt}" "${KFX_PHONE_INTERNAL_PORT:-5060}"
   printf 'Telepraxis-Ausgabe: %s\n' "$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["telepraxis"]["ausgabeverzeichnis"])' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
-    printf 'Telepraxis-Modus: DEMO, unverschluesselte JSON-Ausgabe; keine echten Patientendaten verwenden!\n'
+    printf 'Telepraxis-Modus: Lokale Ablage in der Praxis (unverschlüsselt).\n'
     "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:

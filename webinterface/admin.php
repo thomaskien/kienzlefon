@@ -674,7 +674,7 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
         </section>
 
         <section id="page-calltree" class="page" aria-labelledby="calltree-title">
-            <div class="toolbar"><div><h2 id="calltree-title">Anrufsbaum</h2><p class="muted">Fester Anrufablauf mit alternativem Zugriff auf Wiedergabemodi und vorhandene Ansagen.</p></div><button class="button" type="button" id="save-calltree">Anrufsbaum speichern</button></div>
+            <div class="toolbar"><div><h2 id="calltree-title">Anrufsbaum</h2><p class="muted">Tasten und Ansagen für den Anrufablauf. Eine leere Taste deaktiviert die Auswahl.</p></div><button class="button" type="button" id="save-calltree">Anrufsbaum speichern</button></div>
 
             <div class="tree-stage">
                 <h3>1 · Eingang</h3>
@@ -706,14 +706,23 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
                 </article>
                 <?php endforeach; ?>
                 <?php if ($groupLabel === 'Klassisches Hauptmenü'): ?>
-                <details open><summary>Tasten und feste Ziele</summary><div class="details-body tree-route">
-                    <div class="tree-route-row"><strong>Taste 0</strong><span>Kienzlefon AI lautlos erneut versuchen, sofern möglich; nach einer vorherigen AI-Übergabe keine Rekursion.</span></div>
-                    <div class="tree-route-row"><strong>Taste 1</strong><span>Praxisqueue innerhalb der bestehenden Telefonregel.</span></div>
-                    <div class="tree-route-row"><strong>Tasten 2–5</strong><span>Rezept, Überweisung, Termin sowie Rückruf oder sonstiges Anliegen.</span></div>
-                    <div class="tree-route-row"><strong>Taste 6</strong><span>Öffnungszeiten wiedergeben.</span></div>
-                    <div class="tree-route-row"><strong>Taste 8</strong><span>care_service: Apotheke, Pflegeheim oder Pflegedienst → bestehender Weg pharmacy_queue / 8803.</span></div>
-                    <div class="tree-route-row"><strong>Taste 9</strong><span>professional_urgent: Arzt oder Arztpraxis, Krankenhaus, Rettungsdienst oder Notarzt → bestehender Prioritätsweg super_priority / 8804 und gegebenenfalls rotes Telefon.</span></div>
-                    <div class="tree-route-row"><strong>Keine Taste</strong><span>Telefonzeiten offen: Ansage und Praxisqueue. Telefonzeiten geschlossen oder gesperrt: Ansage und bestehende Nachrichtenaufnahme.</span></div>
+                <details open><summary>Tasten und Ziele</summary><div class="details-body tree-route">
+                    <?php $keySections = [
+                        'Hauptmenü' => ['ki' => 'KI-Assistent', 'praxis' => 'Praxiswarteschlange',
+                            'rezept' => 'Rezept', 'ueberweisung' => 'Überweisung', 'termin' => 'Termin',
+                            'weitere' => 'Rückruf oder sonstiges Anliegen', 'oeffnungszeiten' => 'Öffnungszeiten',
+                            'apotheke' => 'Apotheke', 'rot' => 'ROT'],
+                        'Untermenü Rückruf oder Anliegen' => ['rueckruf' => 'Rückrufbitte', 'sonstiges' => 'Sonstiges Anliegen'],
+                        'Weitere Medikamente' => ['weiteres_medikament' => 'Weiteres Medikament', 'rezept_fertig' => 'Bestellung abschließen'],
+                    ]; ?>
+                    <?php foreach ($keySections as $section => $choices): ?>
+                    <h4><?= h($section) ?></h4>
+                    <?php foreach ($choices as $key => $label): if (!array_key_exists($key, $state['ivr_keys'] ?? [])) continue; ?>
+                    <label class="tree-route-row"><span><?= h($label) ?></span>
+                        <input data-ivr-key="<?= h($key) ?>" maxlength="1" pattern="[0-9*#]?" size="2" value="<?= h($state['ivr_keys'][$key]) ?>">
+                    </label>
+                    <?php endforeach; endforeach; ?>
+                    <div class="tree-route-row"><strong>Keine Taste</strong><span>Bei offenen Telefonzeiten folgt die Praxiswarteschlange, sonst die Nachrichtenaufnahme.</span></div>
                 </div></details>
                 <?php endif; ?>
             </div>
@@ -895,7 +904,10 @@ function sourceValues() { const sources = {}; document.querySelectorAll('[data-s
 function ttsValues() { return {engine:document.getElementById('tts-engine').value, qwen_voice:document.getElementById('qwen-voice').value}; }
 function validatePromptTexts(prompts) { for (const [name, value] of Object.entries(prompts)) { if (name !== 'phone_hours' && !value.trim()) throw new Error('Ansagetexte dürfen nicht leer gespeichert werden. Deaktivieren Sie die Ansage ausdrücklich im Anrufsbaum.'); } }
 async function savePrompts() { const prompts = promptValues(); validatePromptTexts(prompts); const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts, sources:sourceValues(), tts}); }
-async function saveCalltree() { await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues()}); }
+async function saveCalltree() {
+    const ivr_keys = Object.fromEntries([...document.querySelectorAll('[data-ivr-key]')].map(input => [input.dataset.ivrKey, input.value.trim()]));
+    await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues(), ivr_keys});
+}
 async function saveAssistant() { await queue({action:'save', config_hash:configHash, assistant:{enabled:document.getElementById('assistant-enabled').checked}}); }
 async function saveHoldMusic() { await queue({action:'save', config_hash:configHash, hold_music:{mode:document.getElementById('hold-music-mode').value}}); }
 function overridePresetValues() { const priority = Number(document.getElementById('override-preset-priority').value); if (!Number.isInteger(priority)) throw new Error('Bitte geben Sie eine ganzzahlige Priorität ein.'); return {preset_id:editingPresetId, name:document.getElementById('override-preset-name').value, announcement:document.getElementById('override-text').value, active:document.getElementById('override-preset-active').checked, priority, valid_from:document.getElementById('override-preset-valid-from').value, expires_at:document.getElementById('override-preset-expiry').value, block_phone_hours:document.getElementById('override-preset-block').checked, position:document.getElementById('override-preset-position').value, source:document.getElementById('override-preset-source').value}; }

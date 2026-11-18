@@ -26,6 +26,7 @@ from .errors import record_system_error
 from .health import worker_is_healthy
 from .models import CallType, FieldName
 from .spool import Spool, WorkingCall
+from .statistics import emit_agi_route
 
 LOGGER = logging.getLogger(__name__)
 ALL_DIGITS = "0123456789*#"
@@ -98,7 +99,8 @@ class IVR:
                 if digit is None:
                     attempts += 1
                     continue
-                if digit == "6":
+                if digit == self.config.ivr_keys["oeffnungszeiten"]:
+                    self._stat_route("opening_hours")
                     self._play("opening_hours")
                     digit = None
                     continue
@@ -179,14 +181,15 @@ class IVR:
         digit = self._stream(key, ALL_DIGITS)
         if digit:
             return digit
-        digit = self._stream("opening_hours_choice", ALL_DIGITS)
-        if digit:
-            return digit
-        if self.config.pharmacy_is_available():
+        if self.config.ivr_keys["oeffnungszeiten"]:
+            digit = self._stream("opening_hours_choice", ALL_DIGITS)
+            if digit:
+                return digit
+        if self.config.ivr_keys["apotheke"] and self.config.pharmacy_is_available():
             digit = self._stream("pharmacy_access", ALL_DIGITS)
             if digit:
                 return digit
-        if self.config.specialist_is_available():
+        if self.config.ivr_keys["rot"] and self.config.specialist_is_available():
             digit = self._stream("specialist_access", ALL_DIGITS)
             if digit:
                 return digit
@@ -200,38 +203,41 @@ class IVR:
         return self._wait_for_digit()
 
     def _handle_menu_digit(self, digit: str) -> bool:
-        if digit == "0":
+        keys = self.config.ivr_keys
+        if digit == keys["ki"]:
             self.channel.set_variable("KZF_IVR_AI_REQUESTED", "1")
             return True
-        if digit == "1" and self.config.phone_is_open():
+        if digit == keys["praxis"] and self.config.phone_is_open():
             self._goto_queue()
             return True
-        if digit == "2":
+        if digit == keys["rezept"]:
             self._record_structured(CallType.PRESCRIPTION, "rezept")
             return True
-        if digit == "3":
+        if digit == keys["ueberweisung"]:
             self._record_structured(CallType.REFERRAL, "ueberweisung")
             return True
-        if digit == "4":
+        if digit == keys["termin"]:
             self._record_structured(CallType.APPOINTMENT, "termin")
             return True
-        if digit == "5":
+        if digit == keys["weitere"]:
             return self._submenu_five()
-        if digit == "8" and self.config.pharmacy_is_available():
+        if digit == keys["apotheke"] and self.config.pharmacy_is_available():
             self.channel.goto("kienzlefon-pharmacy-queue,s,1")
             return True
-        if digit == "9" and self.config.specialist_is_available():
+        if digit == keys["rot"] and self.config.specialist_is_available():
             self.channel.goto("kienzlefon-specialist,s,1")
             return True
         return False
 
     def _submenu_five(self) -> bool:
-        for _ in range(self.config.ivr.attempts):
-            digit = self._get_option("submenu_five", "12")
-            if digit == "1":
+        keys = self.config.ivr_keys
+        available = keys["rueckruf"] + keys["sonstiges"]
+        for _ in range(self.config.ivr.attempts if available else 0):
+            digit = self._get_option("submenu_five", available)
+            if digit == keys["rueckruf"]:
                 self._record_structured(CallType.CALLBACK_DETAILS, "rueckruf")
                 return True
-            if digit == "2":
+            if digit == keys["sonstiges"]:
                 self._record_structured(CallType.OTHER, "sonstiges")
                 return True
             if digit is not None:
@@ -244,6 +250,13 @@ class IVR:
         return True
 
     def _record_structured(self, call_type: CallType, category: str) -> None:
+        self._stat_route({
+            CallType.PRESCRIPTION: "prescription",
+            CallType.REFERRAL: "referral",
+            CallType.APPOINTMENT: "appointment",
+            CallType.CALLBACK_DETAILS: "callback",
+            CallType.OTHER: "other",
+        }.get(call_type))
         self.call = self._create_call_if_admitted(call_type, category)
         if self.call is None:
             self._play("whisper_failure")
@@ -311,8 +324,9 @@ class IVR:
                 index=index,
             ):
                 return
-            digit = self._get_option("medication_choice", "12")
-            if digit != "1":
+            keys = self.config.ivr_keys
+            available = keys["weiteres_medikament"] + keys["rezept_fertig"]
+            if not available or self._get_option("medication_choice", available) != keys["weiteres_medikament"]:
                 return
             index += 1
 
@@ -400,7 +414,13 @@ class IVR:
             return self.spool.create_call(call_type, self.caller_id, category)
 
     def _goto_queue(self) -> None:
+        if self.config.statistics_pbx_id:
+            self.channel.set_variable("KF_LIVE_STAGE", "other")
         self.channel.goto(self.config.ivr.queue_context)
+
+    def _stat_route(self, route: str | None) -> None:
+        if route is not None and self.config.statistics_pbx_id:
+            emit_agi_route(self.channel, self.config.statistics_pbx_id, route)
 
     def _prompt(self, key: str) -> Path:
         return self.config.paths.prompts / key

@@ -255,7 +255,7 @@ def model_main() -> None:
         for model_name in config.whisper.models:
             WhisperModel(
                 model_name,
-                device=config.whisper.device,
+                device="cpu" if config.whisper.commander_ip else config.whisper.device,
                 compute_type=config.whisper.compute_type,
                 cpu_threads=config.whisper.cpu_threads,
                 num_workers=1,
@@ -417,7 +417,12 @@ def migrate_main() -> None:
     parser.add_argument("--standard-model")
     parser.add_argument("--name-model")
     parser.add_argument("--medication-model")
+    parser.add_argument("--commander-ip")
     parser.add_argument("--demo-anonymize", choices=("true", "false"))
+    parser.add_argument("--local-delivery", choices=("true", "false"))
+    parser.add_argument("--attach-audio", choices=("true", "false"))
+    parser.add_argument("--delivery-public-key")
+    parser.add_argument("--statistics-pbx-id")
     parser.add_argument("--tts-engine", choices=("kokoro", "piper", "qwen", "google"))
     parser.add_argument("--piper-voice")
     parser.add_argument("--qwen-voice")
@@ -430,6 +435,9 @@ def migrate_main() -> None:
         ("whisper", "modell_standard", arguments.standard_model),
         ("whisper", "modell_namen", arguments.name_model),
         ("whisper", "modell_medikamente", arguments.medication_model),
+        ("whisper", "commander_ip", arguments.commander_ip),
+        ("telepraxis", "public_key", arguments.delivery_public_key),
+        ("anrufstatistik", "pbx_id", arguments.statistics_pbx_id),
         ("tts", "engine", arguments.tts_engine),
         ("tts", "stimme", arguments.piper_voice),
         ("tts", "qwen_stimme", arguments.qwen_voice),
@@ -443,4 +451,7 @@ def migrate_main() -> None:
             "anrufernummern_anonymisieren",
             arguments.demo_anonymize == "true",
         )
+    for key, value in (("demo", arguments.local_delivery), ("audio_beilegen", arguments.attach_audio)):
+        if value is not None:
+            set_boolean(target, "telepraxis", key, value == "true")
     print(f"Konfiguration auf Version 2.5.5 ergaenzt: {target}")

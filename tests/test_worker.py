@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from kienzlefon.models import CallState, CallType, FieldName
 from kienzlefon.crypto import EncryptionError
 from kienzlefon.spool import Spool, WorkingCall
-from kienzlefon.worker import FasterWhisperTranscriber, Worker, clean_transcript
+from kienzlefon.worker import CommanderTranscriber, FasterWhisperTranscriber, Worker, clean_transcript
 
 
 class FakeTranscriber:
@@ -61,6 +61,30 @@ def test_transcript_cleanup_preserves_internal_punctuation() -> None:
     assert clean_transcript(" Seit gestern. Husten. ") == "Seit gestern. Husten"
     assert clean_transcript("Max") == "Max"
     assert clean_transcript("Text...") == "Text.."
+
+
+def test_worker_applies_transcripts_to_stable_concern_ids() -> None:
+    first = {"anliegen_id": "a-001", "typ": "rezeptbestellung", "medikamente": ""}
+    second = {"anliegen_id": "a-002", "typ": "rezeptbestellung", "medikamente": ""}
+    record = {
+        "typ": "mehrere_anliegen",
+        "anliegen_schema_version": 1,
+        "anliegen_liste": [second, first],
+        "vorname": "",
+        "_kienzlefon": {"audio": [
+            {"feld": "medikamente", "index": 2, "anliegen_id": "a-001", "transkript": "Test B.", "status": "transcribed"},
+            {"feld": "medikamente", "index": 1, "anliegen_id": "a-002", "transkript": "Test C.", "status": "transcribed"},
+            {"feld": "medikamente", "index": 1, "anliegen_id": "a-001", "transkript": "Test A.", "status": "transcribed"},
+            {"feld": "vorname", "transkript": "Beispiel.", "status": "transcribed"},
+        ]},
+    }
+
+    Worker._apply_transcripts(record)
+
+    assert first["medikamente"] == "Test A\nTest B"
+    assert second["medikamente"] == "Test C"
+    assert record["vorname"] == "Beispiel"
+    assert "medikamente" not in record
 
 
 def test_failed_person_field_does_not_block_fallback_text(app_config) -> None:
@@ -268,3 +292,16 @@ def test_faster_whisper_routes_fields_and_loads_unique_models_once(app_config) -
         "Wirkstärke und Packungsgröße."
     )
     assert models["large-v3-turbo"].calls[1]["initial_prompt"] is None
+def test_commander_outage_falls_back_with_the_original_audio_and_field(app_config, tmp_path, monkeypatch):
+    wav = tmp_path / "namen.wav"
+    wav.write_bytes(b"synthetischer test")
+    local = SimpleNamespace(transcribe=lambda path, field: f"{path.name}:{field.value}")
+    transcriber = CommanderTranscriber(app_config, local)
+    monkeypatch.setattr(transcriber, "_transcribe", lambda path: "Commander-Text")
+    assert transcriber.transcribe(wav, FieldName.FIRST_NAME) == "Commander-Text"
+
+    def timeout(path):
+        raise TimeoutError
+
+    monkeypatch.setattr(transcriber, "_transcribe", timeout)
+    assert transcriber.transcribe(wav, FieldName.FIRST_NAME) == "namen.wav:vorname"

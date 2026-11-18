@@ -57,6 +57,22 @@ rotes_telefon_klingeldauer_sekunden = 20
 rotes_telefon_queue_prioritaet = 100
 fachstellen_ansage = false
 
+[ivr_tasten]
+# "" deaktiviert eine Funktion. Tasten muessen pro Menue eindeutig sein.
+ki = "0"
+praxis = "1"
+rezept = "2"
+ueberweisung = "3"
+termin = "4"
+weitere = "5"
+oeffnungszeiten = "6"
+apotheke = "8"
+rot = "9"
+rueckruf = "1"
+sonstiges = "2"
+weiteres_medikament = "1"
+rezept_fertig = "2"
+
 [aufnahme]
 format = "wav"
 stille_kurz_sekunden = 3
@@ -66,6 +82,9 @@ maximum_lang_sekunden = 180
 verwaist_sekunden = 7200
 
 [whisper]
+# Optionaler ASR-Dienst im Praxisnetz auf Port 8185. CPU-Whisper bleibt bereit.
+commander_ip = ""
+commander_timeout_sekunden = 15
 modell_standard = "large-v3-turbo"
 modell_namen = "large-v3"
 modell_medikamente = "large-v3-turbo"
@@ -84,6 +103,7 @@ heartbeat_veraltet_sekunden = 20
 maximale_versuche = 3
 
 [telepraxis]
+audio_beilegen = false
 kanal = "dahl"
 ausgabeverzeichnis = "/srv/telepraxis/dahl/inbox"
 demo = false
@@ -351,6 +371,10 @@ greeting_closed = "zu"
 emergency = "immer"
 
 # Optionaler Zugang fuer die separat betriebene Middleware. Secret liegt separat.
+[anrufstatistik]
+# Leer deaktiviert Ereignisse. Dieselbe stabile Anlagenkennung in der Middleware verwenden.
+pbx_id = ""
+
 [middleware]
 aktiv = false
 # Exakte Middleware-IP oder "*" fuer alle Clients an der VPN-Zieladresse.

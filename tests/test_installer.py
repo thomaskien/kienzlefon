@@ -395,14 +395,14 @@ def test_installer_pins_the_tested_qwen_v15_bootstrap() -> None:
     assert 'prompt_arguments+=(--all)' in installer
 
 
-def test_installer_contains_explicit_demo_warning_and_confirmation() -> None:
+def test_installer_offers_local_and_remote_delivery_separately_from_audio() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
-    assert "AUF KEINEN FALL fuer echte Patientendaten" in installer
-    assert "Demo-Modus trotz unverschluesselter Ausgabe wirklich aktivieren?" in installer
+    assert "Lokale Ablage in der Praxis (unverschlüsselt)" in installer
+    assert "Verschlüsselte Ablage zur Abholung" in installer
+    assert "In der Praxis muss ein lokaler Abholer eingerichtet werden." in installer
+    assert "Audio beilegen? Bei Nein wird nur JSON ausgegeben." in installer
     assert "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" in installer
     assert "configure_demo_anonymization" in installer
-    assert "Audiodateien und in Freitexten genannte Rufnummern" in installer
-    assert 'if [[ "$KZF_DEMO_MODE" != "y" ]]; then' in installer
 
 
 def test_demo_anonymization_update_skips_non_demo_with_success(tmp_path: Path) -> None:

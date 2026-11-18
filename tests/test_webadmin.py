@@ -903,6 +903,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     state = {
         "config_hash": "a" * 64,
         "practice": "Praxis Test",
+        "ivr_keys": {"ki": "7", "rot": ""},
         "product": {
             "name": "kienzlefon.de",
             "version": "2.5.5",
@@ -1050,7 +1051,8 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert "Zeiten care_service" in result.stdout
     assert "Zeiten professional_urgent" in result.stdout
     assert "Anrufsbaum" in result.stdout
-    assert "Taste 0" in result.stdout
+    assert 'data-ivr-key="ki" maxlength="1" pattern="[0-9*#]?" size="2" value="7"' in result.stdout
+    assert 'data-ivr-key="rot"' in result.stdout
     assert "Keine Taste" in result.stdout
     assert "Kienzlefon 2.5.5" in result.stdout
     assert "kienzlefon.de" in result.stdout

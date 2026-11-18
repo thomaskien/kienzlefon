@@ -41,6 +41,7 @@ from .queue_dialplan import (
 )
 from .queue_dispatch import member_interface, render_member_context
 from .queue_prompts import ASTERISK_QUEUE_LANGUAGE, QUEUE_PHRASES, phrase_path
+from .statistics import entry_statement, patch_external_ingress, patch_queue_statements, render_hooks, route_statement
 from .transfer_dialplan import decorate_calls, render_transfer
 from .transfer_features import DEFAULT_TRANSFER_FEATURES, resolve_transfer_features
 
@@ -436,7 +437,7 @@ exten => s,1,NoOp(Kienzlefon vollstaendiger Eingang 8800)
  same => n,GotoIf($["${{KZF_AI_HANDOFF_DONE}}"="1"]?classic-full)
  same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-agi,--config,/etc/kienzlefon/kienzlefon.toml,--phase,opening)
  same => n,GotoIf($["${{KZF_IVR_OPENING_OK}}"!="1"]?done)
- same => n,GotoIf($["${{KZF_IVR_INITIAL_DIGIT}}"="0"]?ai-shortcut)
+ same => n,GotoIf($["${{KZF_IVR_INITIAL_DIGIT}}"="{config.ivr_keys['ki'] or 'disabled'}"]?ai-shortcut)
  same => n,GotoIf($["${{KZF_IVR_INITIAL_DIGIT}}"!="none"]?classic-menu)
  same => n,GotoIf($["{ai_enabled}"="1"]?admission:classic-menu)
  same => n(ai-shortcut),Set(KZF_IVR_INITIAL_DIGIT=none)
@@ -565,6 +566,7 @@ exten => s,1,Playback(kienzlefon/specialist_agent)
  same => n,Return()
 
 [kienzlefon-direct-queue-in]
+exten => _+X.,1,Goto(${{EXTEN:1}},1)
 exten => _X.,1,Gosub(kfx_external_capacity,primary-phone,1)
  same => n,GotoIf($[\"${{KFX_CAPACITY_OK}}\"=\"1\"]?accepted)
  same => n,Hangup(17)
@@ -575,6 +577,7 @@ exten => s,1,Goto(kienzlefon-direct-queue-in,{config.asterisk.direct_queue.did o
 exten => inbound-calls,1,Goto(kienzlefon-direct-queue-in,{config.asterisk.direct_queue.did or "inbound-calls"},1)
 
 [kienzlefon-direct-red-in]
+exten => _+X.,1,Goto(${{EXTEN:1}},1)
 exten => _X.,1,Gosub(kfx_external_capacity,primary-phone,1)
  same => n,GotoIf($[\"${{KFX_CAPACITY_OK}}\"=\"1\"]?accepted)
  same => n,Hangup(17)
@@ -609,6 +612,28 @@ exten => _+X.,1,Set(KZF_OUT_ENDPOINT={config.asterisk.main_outbound_endpoint})
 {render_middleware(config)}
 """
     rendered += render_member_context()
+    if config.statistics_pbx_id:
+        capacity = "Gosub(kfx_external_capacity,primary-phone,1)"
+        entry = entry_statement(config.statistics_pbx_id)
+        rendered = rendered.replace(f"exten => _X.,1,{capacity}", f"exten => _X.,1,{entry}\n same => n,{capacity}")
+        for anchor, route in (("NoOp(Kienzlefon IVR)", "ivr"),
+                              ("NoOp(Kienzlefon vollstaendiger Eingang 8800)", "ivr"),
+                              ("NoOp(Kienzlefon klassisches Hauptmenue)", "ivr"),
+                              ("NoOp(Kienzlefon Apotheke in bestehende Praxisqueue)", "pharmacy"),
+                              (f"NoOp({specialist_description})", "specialist")):
+            stage = "\n same => n,Set(KF_LIVE_STAGE=ivr)" if route == "ivr" else ""
+            rendered = rendered.replace(anchor, f"{anchor}{stage}\n same => n,{route_statement(route)}", 1)
+        stage = "\n same => n,Set(KF_LIVE_STAGE=other)"
+        marker = 'same => n,Set(KZF_AI_PREVIOUS_DYNAMIC_FEATURES='
+        rendered = rendered.replace(f"\n {marker}", f"{stage}\n {marker}", 1)
+        for label in ("dtmf", "result"):
+            marker = f" same => n({label}),"
+            rendered = rendered.replace(marker, f" same => n({label}),{route_statement('ai')}\n same => n,", 1)
+        rendered = rendered.replace(
+            "\n same => n,Answer()\n" + specialist_route,
+            "\n same => n,Answer()\n same => n," + route_statement("specialist") + "\n" + specialist_route,
+        )
+        rendered = patch_queue_statements(rendered, config.statistics_pbx_id) + "\n" + render_hooks()
     rendered = decorate_entries(rendered, config, timing)
     rendered += render_transfer(config, features or DEFAULT_TRANSFER_FEATURES)
     return decorate_calls(rendered, enabled=config.middleware.enabled)
@@ -671,6 +696,10 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
         if phone.is_file():
             phone.write_text(unwrap(decorate_calls(phone.read_text(), enabled=False)), encoding="utf-8")
         _install_asterisk_config(config, staging, features, etc / "features-kienzlefon.conf")
+        phone.write_text(patch_queue_statements(
+            patch_external_ingress(phone.read_text(), config.statistics_pbx_id),
+            config.statistics_pbx_id,
+        ), encoding="utf-8")
         phone.write_text(decorate_calls(decorate_entries(phone.read_text(), config,
                                         practice_timing(staging / "queues-kfx.conf", config.ivr.queue_name)),
                                         enabled=config.middleware.enabled, foreign=True), encoding="utf-8")
@@ -987,8 +1016,11 @@ def _patch_direct_did_routes(config: AppConfig, path: Path, context: str) -> Non
         (config.asterisk.direct_queue, "kienzlefon-direct-queue-in"),
         (config.asterisk.direct_red, "kienzlefon-direct-red-in"),
     ):
-        if line.enabled and f"exten => {line.did},1,Goto({target},{line.did},1)" not in text:
-            routes.append(f"exten => {line.did},1,Goto({target},{line.did},1)")
+        if line.enabled:
+            for incoming in (line.did, f"+{line.did}"):
+                route = f"exten => {incoming},1,Goto({target},{line.did},1)"
+                if route not in text:
+                    routes.append(route)
     if not routes:
         if text != original_text:
             _atomic_install(path, text)

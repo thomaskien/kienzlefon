@@ -110,7 +110,7 @@ def test_render_decorates_queue_internal_outbound_direct_and_click_to_dial_flows
     assert "; original:  same => n,Queue(praxis,r,,kienzlefon/pharmacy_agent)" in queue
     assert "Queue(praxis,r${KF_TRANSFER_CALLER_OPTION}tb(" in queue
     assert "kienzlefon/pharmacy_agent" in queue
-    assert "; original:  same => n,Dial(PJSIP/${KZF_DIAL_NUMBER}" in outbound
+    assert "; original:  same => n,Dial(PJSIP/${KZF_SIP_TARGET}" in outbound
     assert "${KF_TRANSFER_CALLER_OPTION}b(kienzlefon-transfer-prepare^s^1)" in outbound
     assert "${KF_TRANSFER_CALLER_OPTION}tb(" not in outbound
     assert "Goto(kienzlefon-outbound,${KF_C2D_NUMBER},1)" in click_to_dial
@@ -123,7 +123,7 @@ def test_external_progress_is_on_dial_channel_after_checks_and_capacity(app_conf
     validation = 'GotoIf($["${KZF_DIAL_ALLOWED}"="1"]?capacity)'
     capacity = 'GotoIf($["${KFX_CAPACITY_OK}"="1"]?dial)'
     progress = "Gosub(kienzlefon-transfer-progress,s,1(dialing_target))"
-    dial = "\n same => n,Dial(PJSIP/${KZF_DIAL_NUMBER}@${KZF_OUT_ENDPOINT},120"
+    dial = "\n same => n,Dial(PJSIP/${KZF_SIP_TARGET}@${KZF_OUT_ENDPOINT},120"
     assert outbound.index(validation) < outbound.index(capacity)
     assert outbound.index(capacity) < outbound.index(progress) < outbound.index(dial)
     assert outbound.count(progress) == 1
@@ -134,7 +134,7 @@ def test_failed_is_only_emitted_for_rejection_not_normal_dial_results(app_config
     outbound = context(rendered, "kienzlefon-outbound")
     progress = context(rendered, "kienzlefon-transfer-progress")
 
-    dial_tail = outbound.split("Dial(PJSIP/${KZF_DIAL_NUMBER}", 1)[1]
+    dial_tail = outbound.split("Dial(PJSIP/${KZF_SIP_TARGET}", 1)[1]
     assert "kienzlefon-transfer-progress,s,1(failed)" not in dial_tail
     assert "DIALSTATUS" not in outbound
     assert 'GotoIf($["${ARG1}"="failed"]?failed)' in progress

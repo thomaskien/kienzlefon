@@ -44,8 +44,8 @@ Changelog:
 
 `kienzlefon` ist ein konfigurationsgesteuertes Asterisk-Telefonsystem fuer
 Arztpraxen. Es setzt auf der Telefoniebasis von Kienzlefax auf, nimmt Angaben
-feldweise als WAV auf, transkribiert lokal mit Whisper und legt jeden Vorgang
-im Produktivmodus als verschluesselte Telepraxis-Datei ab.
+feldweise als WAV auf und transkribiert sie mit Whisper. Die Vorgänge werden
+direkt in der Praxis abgelegt oder verschlüsselt zur Abholung bereitgestellt.
 
 Demo-Server: https://kienzlefon.de
 
@@ -67,8 +67,8 @@ Version: **2.5.5**
   Medikamente und alle uebrigen Felder
 - dateibasierter, atomarer Ordner-Spool ohne Datenbank
 - OpenSSL-kompatible `AES-256-CBC`/RSA-Ausgabe als `*.json.enc`
-- ausdruecklich zu bestaetigender Demomodus mit unverschluesselter `*.json`-Ausgabe
-- optionale Anonymisierung von `id` und `telefon` in Demo-JSONs
+- unverschlüsselte JSON-Ablage für den Betrieb direkt in der Praxis
+- optionale WAV-Beilage im Vorgangsverzeichnis der Inbox
 - lokale Kokoro-Thorsten-Ansagen (Standard), alternativ Piper oder Qwen3-TTS,
   in WAV, SLN16, G.722, A-law und mu-law
 - gezielte neue Qwen-Variante fuer einzelne Ansagen bei unerwuenschten Sprach-Artefakten
@@ -281,14 +281,18 @@ sudo ./kienzlefon-installer.sh
 Fehlt Kienzlefax, bietet der Installer zuerst dessen offizielle Installation
 an. Die Kienzlefax-Telefoniequeue muss aktiviert sein. Der Installer fragt
 Praxisname, Zeitprofile, Telepraxis-Kanal, Ausgabemodus, die Nutzung eines roten
-Telefons und optionale direkte externe Rufnummern interaktiv ab. Im normalen
-Produktivmodus wird zusaetzlich der Public Key abgefragt. Der Demo-Modus legt
-alle Daten unverschluesselt ab und darf auf keinen Fall mit echten
-Patientendaten verwendet werden. Optional ersetzt Version 1.9 in den
-ausgegebenen Demo-JSONs die Felder `id` und `telefon` durch `#anonymisiert demo#`.
-Audiodateien und in Freitexten genannte Rufnummern werden dadurch nicht
-veraendert. Seit Version 1.6 werden die
-Whisper-Modelle fuer Namen, Medikamente und alle uebrigen Aufnahmen getrennt ab.
+Telefons und optionale Direktnummern für die Warteschlange und ROT ab.
+
+Für den Betrieb direkt in der Praxis kann Kienzlefon unverschlüsselt in die
+lokale Inbox schreiben. Für den Betrieb auf einem Root-Server im Rechenzentrum
+wählt man die verschlüsselte Ablage mit dem öffentlichen Empfängerschlüssel.
+Der Abholer und die Bearbeitung laufen in der Praxis.
+
+Bei Installation, Update und Neukonfiguration fragt der Installer nach **Nur
+JSON** oder **Audio beilegen** sowie nach der optionalen IP-Adresse des
+Kienzledoku-Commanders. Bei einem Ausfall des Commanders übernimmt lokales
+CPU-Whisper. Für Namen, Medikamente und andere Angaben lassen sich getrennte
+Whisper-Modelle verwenden.
 
 Bei aktivierter Kienzlefon-AI-Anbindung fragt der Installer die Anzahl der
 anzulegenden KI-Nebenstellen und die konkrete Listener-Bindung ab. Der Listener
@@ -599,11 +603,13 @@ recording -> queue -> processing -> ready
 
 Der gesamte Vorgangsordner wird atomar zwischen den Zustaenden verschoben.
 Die Telepraxis-Ausgabe liegt im abgefragten Kanalverzeichnis, beispielsweise
-`/srv/telepraxis/dahl/inbox`. Produktivdateien enden auf `.json.enc`,
-unverschluesselte Demodateien auf `.json`.
-Beide Varianten erhalten Modus `0660`. Bei Root-Ausfuehrung entspricht ihre
-Gruppe der Gruppe des Ausgabeverzeichnisses; interne Spooldateien bleiben
-restriktiver geschuetzt.
+`/srv/telepraxis/dahl/inbox`. Die verschlüsselte JSON-Ausgabe verwendet
+`.json.enc`, die lokale Praxisablage `.json`. Mit Audio-Beilage liegen die WAVs
+in der lokalen Inbox unter `<vorgang_id>/audio/` oder werden als verschlüsseltes
+`.kienzlepaket` vom App-Abholer in die Praxis übernommen. Nach gesicherter
+Ausgabe bzw. bestätigter Ablage entfernt Kienzlefon die temporären WAVs aus
+dem Spool. Anschließend verwaltet die App die Tonaufnahmen in der Inbox.
+[Gemeinsamer Audiovertrag](docs/vorgang-v1/AUDIO.md)
 
 ## Entwicklung
 

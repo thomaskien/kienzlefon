@@ -97,17 +97,20 @@ def migrate_config(target: Path, template: Path) -> bool:
     updated = _migrate_queue_position_prompts(updated, template_text, target.parent)
     for section, keys in REMOVED_KEYS.items():
         updated = _remove_keys(updated, section, keys)
+    current = tomllib.loads(updated)
     for section, body in _sections(template_text):
+        existing = current.get(section, {})
         current_match = re.search(
             rf"^\[{re.escape(section)}\]\n(?P<body>.*?)(?=^\[|\Z)", updated, re.M | re.S
         )
         if current_match is None:
+            if isinstance(existing, dict):
+                body = "\n".join(line for line in body.splitlines() if _key(line) not in existing)
             updated = updated.rstrip() + f"\n\n[{section}]\n{body.rstrip()}\n"
             continue
-        existing_keys = set(re.findall(r"^([A-Za-z0-9_]+)\s*=", current_match["body"], re.M))
-        missing = [line for line in body.splitlines() if _key(line) not in existing_keys]
+        missing = [line for line in body.splitlines() if _key(line) not in existing]
         missing = [line for line in missing if _key(line) is not None]
-        if section == "wartemusik" and tomllib.loads(updated).get(section, {}).get("installiert") is False:
+        if section == "wartemusik" and existing.get("installiert") is False:
             # A partial older configuration must not become musik + installiert=false.
             missing = ['modus = "klingelzeichen"' if _key(line) == "modus" else line
                        for line in missing]
@@ -116,6 +119,7 @@ def migrate_config(target: Path, template: Path) -> bool:
             updated = updated[:insertion].rstrip() + "\n" + "\n".join(missing) + "\n\n" + updated[insertion:].lstrip("\n")
     if updated == text:
         return False
+    tomllib.loads(updated)
     temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
     try:
         temporary.write_text(updated, encoding="utf-8")
@@ -210,6 +214,40 @@ def set_boolean(target: Path, section: str, key: str, value: bool) -> None:
     updated, count = pattern.subn(rf"\g<1>{literal}", text, count=1)
     if count != 1:
         raise ValueError(f"TOML-Feld fehlt nach Migration: [{section}].{key}")
+    temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
+    try:
+        temporary.write_text(updated, encoding="utf-8")
+        os.chmod(temporary, target.stat().st_mode & 0o777)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def set_provider_target_defaults(target: Path, endpoints: list[str]) -> None:
+    if not endpoints:
+        return
+    text = target.read_text(encoding="utf-8")
+    values = tomllib.loads(text)["wahlregeln"].get("sip_zielformate", {})
+    missing = sorted(set(endpoints) - values.keys())
+    if not missing:
+        return
+    if not all(re.fullmatch(r"[A-Za-z0-9_-]+", endpoint) for endpoint in missing):
+        raise ValueError("Ungueltiger SIP-Endpunkt")
+    additions = "".join(f'{json.dumps(endpoint)} = "national"\n' for endpoint in missing)
+    header = re.search(r"^\[wahlregeln\.sip_zielformate\]\s*\n", text, re.M)
+    if header:
+        updated = text[:header.end()] + additions + text[header.end():]
+    else:
+        values = {**values, **dict.fromkeys(missing, "national")}
+        literal = "{ " + ", ".join(
+            f"{json.dumps(endpoint)} = {json.dumps(value)}" for endpoint, value in values.items()
+        ) + " }"
+        pattern = r"(^\[wahlregeln\]\n(?:(?!^\[).)*?^sip_zielformate\s*=\s*)[^\n]*$"
+        updated, count = re.subn(pattern, lambda match: match[1] + literal, text,
+                                 count=1, flags=re.M | re.S)
+        if count != 1:
+            raise ValueError("SIP-Zielformate nach Migration nicht gefunden")
+    tomllib.loads(updated)
     temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
     try:
         temporary.write_text(updated, encoding="utf-8")

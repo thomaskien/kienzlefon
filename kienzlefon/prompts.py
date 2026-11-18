@@ -142,6 +142,8 @@ def phone_hours_text(schedule: WeeklySchedule, prefix: str, closed_template: str
 
 
 def rendered_prompts(config: AppConfig) -> dict[str, str]:
+    from .ivr_keys import DEFAULTS, generated_texts
+
     values = {
         key: value.replace("{praxisname}", config.practice.name)
         for key, value in config.prompts.values.items()
@@ -166,6 +168,8 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
     if additional_phone_hours:
         rendered_phone_hours = f"{rendered_phone_hours} {additional_phone_hours}"
     values["phone_hours"] = rendered_phone_hours
+    if config.ivr_keys != DEFAULTS:
+        values.update(generated_texts(config.ivr_keys))
     names = set(PROMPT_CATALOG) | {entry.prompt_name for entry in config.scheduled_overrides}
     return {key: value for key, value in values.items() if key in names}
 
@@ -1143,7 +1147,10 @@ class PromptGenerator:
             raise RuntimeError(
                 f"Google-TTS-Konfiguration fehlt: {self.config.tts.google_config}"
             )
-        return [str(generator), "--text", text, "--output", str(output)]
+        return [
+            str(generator), "--config", str(self.config.tts.google_config),
+            "--text", text, "--output", str(output),
+        ]
 
     def _qwen_command(
         self, text: str, output: Path, *, seed: int | None = None

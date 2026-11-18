@@ -22,6 +22,17 @@ from pathlib import Path
 from kienzlefon.migration import migrate_config, set_boolean, set_string
 
 
+def test_migration_preserves_explicit_sip_target_subtable(tmp_path: Path) -> None:
+    template = Path("config/kienzlefon.toml.example")
+    source = template.read_text().replace("sip_zielformate = {}\n", "")
+    target = tmp_path / "kienzlefon.toml"
+    target.write_text(source + '\n[wahlregeln.sip_zielformate]\n"kfx-phone-in-endpoint" = "e164_plus"\n')
+    migrate_config(target, template)
+    assert tomllib.loads(target.read_text())["wahlregeln"]["sip_zielformate"] == {
+        "kfx-phone-in-endpoint": "e164_plus",
+    }
+
+
 def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> None:
     template = Path("config/kienzlefon.toml.example")
     source = template.read_text(encoding="utf-8")

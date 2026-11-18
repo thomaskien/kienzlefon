@@ -64,10 +64,11 @@ def test_relative_google_paths_rejected(app_config, key):
         load_config(app_config.source)
 
 
-def test_google_command_has_only_text_and_output(installed_google, tmp_path):
+def test_google_command_uses_configured_file_without_exposing_key(installed_google, tmp_path):
     output = tmp_path / "ansage.wav"
     command = PromptGenerator(installed_google)._tts_command("Taste 6 ab 08:30 Uhr.", output)
     assert command[0] == str(installed_google.tts.google_generator)
+    assert command[command.index("--config") + 1] == str(installed_google.tts.google_config)
     assert command[command.index("--text") + 1] == "Taste sechs ab acht Uhr dreißig."
     assert command[command.index("--output") + 1] == str(output)
     assert "secret-one" not in " ".join(command)
@@ -168,7 +169,7 @@ def test_generator_script_refuses_missing_key_and_remote_http(tmp_path):
 INSTALLER = Path(__file__).resolve().parents[1] / "kienzlefon-installer.sh"
 
 
-def _installer_run(tmp_path, answers, *, existing_key=None):
+def _installer_run(tmp_path, answers, *, existing_key=None, endpoint=None):
     """Fuehrt die Google-Funktionen des Installers in einer Sandbox aus."""
     bin_dir = tmp_path / "venv" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -180,9 +181,13 @@ def _installer_run(tmp_path, answers, *, existing_key=None):
     config = tmp_path / "google-tts.conf"
     if existing_key:
         config.write_text(f"API_KEY={existing_key}\nVOICE=old\nRATE=1.0\n")
+        if endpoint:
+            with config.open("a") as handle:
+                handle.write(f"ENDPOINT={endpoint}\n")
     script = f"""
 set -euo pipefail
 die(){{ echo "DIE: $*" >&2; exit 1; }}
+chown(){{ test "$1" = root:root && test -f "$2"; }}
 for f in ask_yes_no ask_value google_conf_value collect_google_tts_configuration install_google_tts; do
   eval "$(sed -n "/^${{f}}(){{/,/^}}/p" '{INSTALLER}')"
 done
@@ -211,6 +216,10 @@ def test_installer_writes_private_config_and_validates_input(tmp_path):
 
 def test_installer_keeps_existing_key(tmp_path):
     key = "AIzaSyKEEPKEEPKEEPKEEPKEEP1234567"
-    result, config = _installer_run(tmp_path, "j\nneueStimme\n1.1\n", existing_key=key)
+    endpoint = "eu-texttospeech.googleapis.com"
+    result, config = _installer_run(
+        tmp_path, "j\nneueStimme\n1.1\n", existing_key=key, endpoint=endpoint,
+    )
     assert result.returncode == 0, result.stderr
     assert config.read_text().startswith(f"API_KEY={key}\nVOICE=neueStimme\n")
+    assert f"ENDPOINT={endpoint}\n" in config.read_text()
