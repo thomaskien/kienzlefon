@@ -2,7 +2,7 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.6.0
+# Version: 2.6.1
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -41,7 +41,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.6.0"
+VERSION="2.6.1"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -471,8 +471,80 @@ configure_demo_anonymization(){
     --demo-anonymize "$value"
 }
 
+validated_public_key(){
+  # Read only the supplied file or pipe, never read ahead on the dialog terminal.
+  "${VENV}/bin/python" -c '
+import sys
+from pathlib import Path
+from cryptography.hazmat.primitives import serialization
+from kienzlefon.crypto import EncryptionError, parse_rsa_public_key
+
+try:
+    pem = Path(sys.argv[1]).read_bytes() if len(sys.argv) > 1 else sys.stdin.buffer.read()
+    key = parse_rsa_public_key(pem)
+except OSError as exc:
+    sys.exit(f"Die PEM-Datei konnte nicht gelesen werden: {exc.strerror}.")
+except EncryptionError as exc:
+    sys.exit(str(exc))
+sys.stdout.buffer.write(key.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+' "$@"
+}
+
+collect_delivery_public_key() (
+  local method source line first pem verified temporary
+  printf '\nBenötigt wird der RSA-Public-Key des Praxisservers.\n'
+  printf 'Der App-Installer gibt ihn bei der Einrichtung der App mit Abholer aus.\n'
+  while true; do
+    printf '\nWie möchtest du den RSA-Public-Key angeben?\n'
+    printf '  1  PEM-Block hier einfügen\n  2  Vorhandene PEM-Datei auf diesem Server auswählen\n'
+    ask_value method "Auswahl" "1"
+    case "$method" in
+      1)
+        printf 'Bitte den vollständigen RSA-Public-Key einfügen,\n'
+        printf 'von -----BEGIN PUBLIC KEY----- bis einschließlich -----END PUBLIC KEY-----.\n'
+        IFS= read -r first || die "Die Schlüsseleingabe wurde beendet."
+        first="${first%$'\r'}"
+        if [[ "$first" != "-----BEGIN "*----- ]]; then
+          printf 'Die erste Zeile muss -----BEGIN PUBLIC KEY----- sein. Bitte erneut eingeben.\n' >&2
+          continue
+        fi
+        pem="$first"
+        while true; do
+          IFS= read -r line || die "Der PEM-Block endet vor der END-Zeile."
+          line="${line%$'\r'}"
+          pem+=$'\n'"$line"
+          [[ "$line" != "-----END "* ]] || break
+        done
+        if [[ "$first" != "-----BEGIN PUBLIC KEY-----" || "$line" != "-----END PUBLIC KEY-----" ]]; then
+          printf 'Erwartet wird ein öffentlicher PEM-Block mit BEGIN PUBLIC KEY und END PUBLIC KEY.\n' >&2
+          continue
+        fi
+        verified="$(printf '%s\n' "$pem" | validated_public_key)" || continue
+        ;;
+      2)
+        ask_value source "Pfad zur Telepraxis-Public-Key-PEM-Datei" ""
+        if [[ ! -f "$source" || ! -r "$source" ]]; then
+          printf 'Die angegebene PEM-Datei fehlt oder ist nicht lesbar.\n' >&2
+          continue
+        fi
+        verified="$(validated_public_key "$source")" || continue
+        ;;
+      *) printf 'Bitte 1 oder 2 eingeben.\n' >&2; continue ;;
+    esac
+    break
+  done
+
+  [[ -d "$CONFIG_DIR" ]] || install -d -m 0755 "$CONFIG_DIR"
+  [[ ! -d "$PUBLIC_KEY_FILE" ]] || die "Der Zielpfad für den RSA-Public-Key ist ein Verzeichnis."
+  temporary="$(mktemp "${PUBLIC_KEY_FILE}.XXXXXX")"
+  trap 'rm -f -- "$temporary"' EXIT
+  printf '%s\n' "$verified" > "$temporary"
+  chmod 0644 "$temporary"
+  mv -f -- "$temporary" "$PUBLIC_KEY_FILE"
+)
+
 collect_delivery_configuration(){
-  local default="2" choice="" audio_default="n" key_source="" keep_key="n"
+  local default="2" choice="" audio_default="n" keep_key="n"
   local -a current=()
   if [[ -r "$CONFIG_FILE" ]]; then
     mapfile -t current < <("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
@@ -509,12 +581,8 @@ PY
     KZF_DEMO_MODE="y"
     KZF_DELIVERY_PUBLIC_KEY=""
     [[ "${current[3]:-n}" != "j" ]] || KZF_DEMO_ANONYMIZE="y"
-  elif [[ ! -r "$KZF_DELIVERY_PUBLIC_KEY" ]]; then
-    ask_value key_source "Pfad zur Telepraxis-Public-Key-PEM-Datei" ""
-    [[ -r "$key_source" ]] || die "Public-Key-Datei ist nicht lesbar."
-    openssl pkey -pubin -in "$key_source" -noout >/dev/null
-    install -d -m 0755 "$CONFIG_DIR"
-    install -m 0644 "$key_source" "$PUBLIC_KEY_FILE"
+  elif [[ ! -f "$KZF_DELIVERY_PUBLIC_KEY" ]] || ! validated_public_key "$KZF_DELIVERY_PUBLIC_KEY" >/dev/null; then
+    collect_delivery_public_key
     KZF_DELIVERY_PUBLIC_KEY="$PUBLIC_KEY_FILE"
   fi
   ask_yes_no KZF_ATTACH_AUDIO "Audio beilegen? Bei Nein wird nur JSON ausgegeben." "$audio_default"

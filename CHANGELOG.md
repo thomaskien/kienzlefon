@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.6.0
+Version: 2.6.1
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,12 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.6.1
+
+Der Installer für verschlüsselte Ablage akzeptiert den RSA-Public-Key des
+Praxisservers als mehrzeiligen PEM-Block oder als Datei. Er prüft neue und
+vorhandene Schlüssel mit derselben RSA-Prüfung wie die Vorgangsverschlüsselung.
 
 ## 2.6.0
 

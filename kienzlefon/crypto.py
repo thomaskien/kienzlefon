@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import padding, serialization
 from cryptography.hazmat.primitives.asymmetric import padding as asymmetric_padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
@@ -30,6 +31,18 @@ from . import __version__
 
 class EncryptionError(RuntimeError):
     pass
+
+
+def parse_rsa_public_key(pem: bytes) -> RSAPublicKey:
+    try:
+        key = serialization.load_pem_public_key(pem)
+    except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+        raise EncryptionError("Die Eingabe enthält keinen gültigen öffentlichen PEM-Schlüssel.") from exc
+    if not isinstance(key, RSAPublicKey):
+        raise EncryptionError("Der öffentliche Schlüssel ist kein RSA-Schlüssel.")
+    if key.key_size < 2048:
+        raise EncryptionError("Der RSA-Public-Key muss mindestens 2048 Bit haben.")
+    return key
 
 
 class TelepraxisEncryptor:
@@ -53,14 +66,9 @@ class TelepraxisEncryptor:
         if self.public_key_path is None:
             raise EncryptionError("Telepraxis-Public-Key fehlt im Produktivmodus")
         try:
-            key = serialization.load_pem_public_key(self.public_key_path.read_bytes())
-        except Exception as exc:
+            return parse_rsa_public_key(self.public_key_path.read_bytes())
+        except OSError as exc:
             raise EncryptionError(f"Ungueltiger Telepraxis-Public-Key: {exc}") from exc
-        if not isinstance(key, RSAPublicKey):
-            raise EncryptionError("Telepraxis-Public-Key ist kein RSA-Schluessel")
-        if key.key_size < 2048:
-            raise EncryptionError("Telepraxis-Public-Key muss mindestens 2048 Bit haben")
-        return key
 
     def build_plaintext_record(self, payload: dict[str, Any]) -> bytes:
         output_payload = copy.deepcopy(payload)

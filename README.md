@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.6.0
+Version: 2.6.1
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ direkt in der Praxis abgelegt oder verschlüsselt zur Abholung bereitgestellt.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.6.0**
+Version: **2.6.1**
 
 ## Eigenschaften
 
@@ -100,6 +100,13 @@ Version: **2.6.0**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.6.1
+
+Bei verschlüsselter Ablage übernimmt der Installer den öffentlichen RSA-Schlüssel
+des Praxisservers aus einem eingefügten PEM-Block oder einer Datei. Beim Einfügen
+schließt die Zeile `-----END PUBLIC KEY-----` die Eingabe ab. Bei Updates
+verwendet der Installer den bereits eingerichteten gültigen Schlüssel weiter.
 
 ## Neu in 2.6.0
 
