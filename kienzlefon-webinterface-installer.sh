@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.5.5
+# Kienzlefon-Version: 2.6.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -32,7 +32,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.5.5"
+VERSION="2.6.0"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"
@@ -260,6 +260,11 @@ finally:
 PY
 }
 
+install_web_files() {
+  install -o root -g root -m 0644 "$SOURCE_DIR/webinterface/admin.php" "$PHP_FILE"
+  install -o root -g root -m 0444 "$SOURCE_DIR/config/kienzlefon.toml.example" "$DEFAULTS_FILE"
+}
+
 install_runtime_layout() {
   local asterisk_process web_group_gid live_groups
   getent group "$WEB_GROUP" >/dev/null 2>&1 || groupadd --system "$WEB_GROUP"
@@ -299,8 +304,6 @@ install_runtime_layout() {
   install -d -o root -g "$WEB_GROUP" -m 0770 "$RUNTIME_DIR/status"
   install -d -o root -g "$WEB_GROUP" -m 0750 "$RUNTIME_DIR/audio"
   install -d -o root -g root -m 0755 "$WEB_ROOT"
-  install -o root -g root -m 0644 "$SOURCE_DIR/webinterface/admin.php" "$PHP_FILE"
-  install -o root -g root -m 0444 "$SOURCE_DIR/config/kienzlefon.toml.example" "$DEFAULTS_FILE"
 
   cat >/usr/lib/tmpfiles.d/kienzlefon-webinterface.conf <<EOF
 d ${RUNTIME_DIR} 0750 root ${WEB_GROUP} -
@@ -534,6 +537,19 @@ EOF
   systemctl restart nginx
 }
 
+check_prerequisites() {
+  [[ ${EUID} -eq 0 ]] || die "Dieser Installer muss als root ausgefuehrt werden."
+  [[ -f "$CONFIG_FILE" ]] || die "Kienzlefon-Konfiguration fehlt: ${CONFIG_FILE}"
+  [[ -f "$SOURCE_DIR/webinterface/admin.php" ]] || die "PHP-Datei fehlt im Quellverzeichnis."
+  need_command systemctl
+  need_command install
+  need_command php
+  need_command awk
+  need_command find
+  need_command getent
+  [[ -x "${VENV}/bin/python" ]] || die "Kienzlefon-Virtualenv fehlt."
+}
+
 main() {
   local confirmed="n"
   while (( $# > 0 )); do
@@ -549,16 +565,7 @@ main() {
   done
 
   printf 'Kienzlefon %s · Webinterface-Installation\n' "$VERSION"
-  [[ ${EUID} -eq 0 ]] || die "Dieser Installer muss als root ausgefuehrt werden."
-  [[ -f "$CONFIG_FILE" ]] || die "Kienzlefon-Konfiguration fehlt: ${CONFIG_FILE}"
-  [[ -f "$SOURCE_DIR/webinterface/admin.php" ]] || die "PHP-Datei fehlt im Quellverzeichnis."
-  need_command systemctl
-  need_command install
-  need_command php
-  need_command awk
-  need_command find
-  need_command getent
-  [[ -x "${VENV}/bin/python" ]] || die "Kienzlefon-Virtualenv fehlt."
+  check_prerequisites
   if [[ "$confirmed" != "y" ]]; then
     ask_yes_no confirmed "Kienzlefon-Webinterface jetzt installieren?" n
   fi
@@ -588,6 +595,7 @@ main() {
   printf 'Webinterface-Dateien und Laufzeitrechte werden eingerichtet.\n'
   write_web_config
   install_runtime_layout
+  install_web_files
   printf 'Systemd-Einheiten werden eingerichtet.\n'
   install_worker_units
   generate_certificate

@@ -437,3 +437,74 @@ def test_install_disconnects_existing_session_when_source_policy_changes(
     assert not any("sip" in " ".join(command).lower() for command in commands)
     assert socket_calls == [(('10.88.0.1', 5038), 5)]
     assert read_connection(app_config.source.parent)["allowed_source_ip"] == new_source
+
+
+@pytest.mark.parametrize("local", [True, False], ids=["lokal", "separat"])
+def test_kombi_configures_exports_and_updates_same_ami_credentials(app_config, tmp_path, monkeypatch, local):
+    etc = tmp_path / "asterisk"
+    etc.mkdir()
+    export = app_config.source.parent / "middleware-connection.toml"
+    secret_file = export.with_name("middleware-secret")
+    source = "127.0.0.1" if local else "192.0.2.9"
+    server = "127.0.0.1" if local else "192.0.2.1"
+    locations = []
+    logins = []
+
+    def yes(prompt, default):
+        if prompt.startswith("Laeuft die Middleware"):
+            if export.exists():
+                assert default is local
+            locations.append(local)
+            return local
+        if prompt.startswith(("Vorhandenes AMI-Secret", "Middleware-Schnittstelle")):
+            pytest.fail(f"Unerwartete Frage im Kombi-Lauf: {prompt}")
+        return default
+
+    def ask(prompt, default):
+        if prompt == "AMI-Benutzer":
+            logins.append(prompt)
+            return "praxis-connector"
+        if prompt.startswith("Exakte Quell-IP"):
+            return source
+        if prompt.startswith("Erreichbare IP"):
+            return server
+        return default
+
+    def run(argv, **kwargs):
+        if argv[:4] == ["ip", "-j", "route", "get"]:
+            return SimpleNamespace(stdout='[{"prefsrc":"192.0.2.1"}]')
+        assert argv == ["asterisk", "-rx", "manager reload"]
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(setup, "yes", yes)
+    monkeypatch.setattr(setup, "ask", ask)
+    monkeypatch.setattr(setup, "application_available", lambda _: True)
+    monkeypatch.setattr(setup.shutil, "which", lambda _: None)
+    monkeypatch.setattr(setup, "verify_listener", lambda _: None)
+    monkeypatch.setattr(setup.subprocess, "run", run)
+    monkeypatch.setattr(setup.subprocess, "check_output", lambda *a, **kw:
+                        '[{"addr_info":[{"local":"127.0.0.1"},{"local":"192.0.2.1"}]}]')
+
+    def cli(action):
+        monkeypatch.setattr(setup.sys, "argv", ["kienzlefon-middleware", action, "--kombi",
+                            "--config", str(app_config.source), "--asterisk-dir", str(etc)])
+        setup.main()
+
+    cli("configure")
+    cli("install")
+    first = tomllib.loads(export.read_text())
+    assert first["enabled"] is True
+    assert first["allowed_source_ip"] == source
+    assert first["ami"]["username"] == "praxis-connector" and first["ami"]["host"] == server
+    secret = secret_file.read_text().strip()
+    assert first["ami"]["secret"] == secret and len(secret) >= 32
+    assert stat.S_IMODE(export.stat().st_mode) == 0o600
+
+    # Repeat with T2med, then without it (install only), even after an interrupted rotation.
+    cli("configure")
+    for _ in range(2):
+        export.with_name(".middleware-rotate").write_text("rotate\n")
+        cli("install")
+        assert tomllib.loads(export.read_text()) == first
+        assert secret_file.read_text().strip() == secret
+    assert locations == [local, local] and logins == ["AMI-Benutzer"]

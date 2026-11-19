@@ -2,7 +2,7 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.5.5
+# Version: 2.6.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -41,7 +41,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.5.5"
+VERSION="2.6.0"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -51,13 +51,16 @@ QWEN_GENERATOR="/usr/local/bin/kienzlefon-qwen3-tts-generate"
 GOOGLE_GENERATOR="/usr/local/bin/kienzlefon-google-tts-generate"
 GOOGLE_CONFIG="/etc/kienzlefon/google-tts.conf"
 KFX_ENV="/etc/kienzlefax-installer.env"
+ASTERISK_DIR="/etc/asterisk"
 CONFIG_DIR="/etc/kienzlefon"
 CONFIG_FILE="${CONFIG_DIR}/kienzlefon.toml"
 PUBLIC_KEY_FILE="${CONFIG_DIR}/telepraxis-public.pem"
 INSTALL_ROOT="/opt/kienzlefon"
 SOURCE_TARGET="${INSTALL_ROOT}/src"
 VENV="${INSTALL_ROOT}/venv"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+KOMBI="n"
+MIT_T2MED="n"
 REPORTING_ERROR="n"
 EXISTING_INSTALL="n"
 KZF_INSTALL_QWEN="n"
@@ -416,8 +419,13 @@ update_existing_tts(){
 install_qwen_tts(){
   local installer checksum
   [[ "$KZF_INSTALL_QWEN" == "y" ]] || return 0
-  installer="$(mktemp /tmp/kienzlefon-qwen3-tts-v1.5.XXXXXX.sh)"
-  if ! download "$QWEN_INSTALLER_URL" "$installer"; then
+  installer="$(mktemp /tmp/kienzlefon-qwen3-tts-v1.5.XXXXXX)"
+  if [[ "$KOMBI" == "y" ]]; then
+    if ! cp -- "${SOURCE_TARGET}/install-kienzlefon-qwen3-tts-v1.5.sh" "$installer"; then
+      rm -f -- "$installer"
+      die "Qwen3-TTS-Installer v1.5 fehlt im Fon-Paket."
+    fi
+  elif ! download "$QWEN_INSTALLER_URL" "$installer"; then
     rm -f -- "$installer"
     die "Qwen3-TTS-Installer v1.5 konnte nicht geladen werden."
   fi
@@ -431,8 +439,7 @@ install_qwen_tts(){
     die "Qwen3-TTS-Installer v1.5 stimmt nicht mit der freigegebenen SHA-256-Pruefsumme ueberein."
   fi
   printf 'Qwen3-TTS-Installer v1.5 verifiziert (SHA-256: %s).\n' "$checksum"
-  chmod 0700 "$installer"
-  if ! "$installer" --offline-only; then
+  if ! bash "$installer" --offline-only; then
     rm -f -- "$installer"
     die "Qwen3-TTS-Installation v1.5 ist fehlgeschlagen."
   fi
@@ -454,9 +461,9 @@ configure_demo_anonymization(){
     'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb"))["telepraxis"].get("anrufernummern_anonymisieren", False) else "n")' \
     "$CONFIG_FILE")"
   [[ "$current" == "y" ]] && default="j"
-  printf '\nDie optionale Anonymisierung ersetzt in ausgegebenen Demo-JSONs id und telefon durch #anonymisiert demo#.\n'
+  printf '\nDie optionale Anonymisierung ersetzt in der lokalen JSON-Ablage id und telefon durch #anonymisiert demo#.\n'
   printf 'Audiodateien und in Freitexten genannte Rufnummern werden dadurch nicht veraendert.\n'
-  ask_yes_no choice "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" "$default"
+  ask_yes_no choice "Anrufernummern in der lokalen JSON-Ablage anonymisieren?" "$default"
   [[ "$choice" == "y" ]] && value="true"
   "${VENV}/bin/kienzlefon-migration" \
     --config "$CONFIG_FILE" \
@@ -657,7 +664,8 @@ asterisk_supports_music_on_hold(){
 
 ensure_kienzlefax(){
   local install_kfx=""
-  if [[ ! -r "$KFX_ENV" ]]; then
+  if [[ ! -f "$KFX_ENV" || ! -r "$KFX_ENV" ]]; then
+    [[ "$KOMBI" != "y" ]] || die "Kienzlefax-Grundinstallation fehlt: ${KFX_ENV}"
     ask_yes_no install_kfx "Kienzlefax-Grundinstallation fehlt. Jetzt installieren?" "j"
     [[ "$install_kfx" == "y" ]] || die "Kienzlefon setzt eine Kienzlefax-Telefoniebasis voraus."
     local installer
@@ -668,9 +676,11 @@ ensure_kienzlefax(){
     rm -f "$installer"
   fi
 
+  unset KFX_PHONE_QUEUE_ENABLED
   # shellcheck disable=SC1090
   source "$KFX_ENV"
   if [[ "${KFX_PHONE_QUEUE_ENABLED:-n}" != "y" ]]; then
+    [[ "$KOMBI" != "y" ]] || die "Kienzlefax-Praxisqueue ist in ${KFX_ENV} nicht aktiviert."
     ask_yes_no install_kfx "Kienzlefax-Praxisqueue ist nicht aktiv. Kienzlefax erneut konfigurieren?" "j"
     [[ "$install_kfx" == "y" ]] || die "Die bestehende Queue 'praxis' ist erforderlich."
     local installer
@@ -684,15 +694,44 @@ ensure_kienzlefax(){
   fi
 
   [[ "${KFX_PHONE_QUEUE_ENABLED:-n}" == "y" ]] || die "Kienzlefax-Praxisqueue ist weiterhin deaktiviert."
-  [[ -r /etc/asterisk/extensions-kfx-telefonie.conf ]] || die "Kienzlefax-Telefoniedialplan fehlt."
-  [[ -r /etc/asterisk/pjsip-kfx-telefonie.conf ]] || die "Kienzlefax-PJSIP-Konfiguration fehlt."
-  grep -q '^\[praxis\]' /etc/asterisk/queues-kfx.conf || die "Kienzlefax-Queue [praxis] fehlt."
-  grep -q '^\[kfx_external_capacity\]' /etc/asterisk/extensions.conf \
-    || grep -q '^\[kfx_external_capacity\]' /etc/asterisk/extensions-kfx-telefonie.conf \
+  local dialplan="${ASTERISK_DIR}/extensions-kfx-telefonie.conf"
+  local pjsip="${ASTERISK_DIR}/pjsip-kfx-telefonie.conf"
+  local queues="${ASTERISK_DIR}/queues-kfx.conf"
+  [[ -f "$dialplan" && -r "$dialplan" && -s "$dialplan" ]] || die "Kienzlefax-Telefoniedialplan fehlt oder ist leer: ${dialplan}"
+  [[ -f "$pjsip" && -r "$pjsip" && -s "$pjsip" ]] || die "Kienzlefax-PJSIP-Konfiguration fehlt oder ist leer: ${pjsip}"
+  [[ -f "$queues" && -r "$queues" ]] || die "Kienzlefax-Queue-Konfiguration fehlt: ${queues}"
+  grep -q '^[[:space:]]*\[praxis\]' "$queues" || die "Kienzlefax-Queue [praxis] fehlt in ${queues}."
+  grep -qs '^[[:space:]]*\[kfx_external_capacity\]' "${ASTERISK_DIR}/extensions.conf" \
+    || grep -q '^[[:space:]]*\[kfx_external_capacity\]' "$dialplan" \
     || die "Gemeinsamer Kienzlefax-Kapazitaetsguard fehlt; mindestens Stand 3.3.19 ist erforderlich."
+  if [[ "$KOMBI" == "y" ]]; then
+    # install_asterisk_config adds includes to these existing Asterisk files.
+    local name context
+    for name in extensions.conf pjsip.conf queues.conf features.conf; do
+      [[ -f "${ASTERISK_DIR}/${name}" && -r "${ASTERISK_DIR}/${name}" ]] \
+        || die "Asterisk-Grundkonfiguration fehlt: ${ASTERISK_DIR}/${name}"
+    done
+    for context in kfx-phone-in kfx-phone-queue; do
+      grep -Fxq "[${context}]" "$dialplan" || die "Kienzlefax-Dialplankontext [${context}] fehlt: ${dialplan}"
+    done
+  fi
 }
 
 prepare_source(){
+  if [[ "$KOMBI" == "y" ]]; then
+    SOURCE_DIR="$SCRIPT_DIR"
+    local inventory="${SOURCE_DIR}/scripts/package-files.txt" file path
+    [[ -f "$inventory" && -r "$inventory" && -s "$inventory" ]] \
+      || die "Fon-Paket unvollstaendig: Dateiliste fehlt: ${inventory}"
+    while IFS= read -r file || [[ -n "$file" ]]; do
+      path="${SOURCE_DIR}/${file}"
+      [[ -n "$file" && "$file" != /* && "/$file/" != */../* && -f "$path" && -r "$path" \
+         && ( -s "$path" || "${file##*/}" == __init__.py ) && "$(readlink -f "$path")" == "$path" ]] \
+        || die "Fon-Paket unvollstaendig oder ungueltig: ${file}"
+    done < "$inventory"
+    bash -n "${SOURCE_DIR}/kienzlefon-webinterface-installer.sh" || die "Webinterface-Installer enthaelt einen Syntaxfehler."
+    return 0
+  fi
   if [[ -f "${SCRIPT_DIR}/pyproject.toml" && -d "${SCRIPT_DIR}/kienzlefon" ]]; then
     SOURCE_DIR="$SCRIPT_DIR"
     return
@@ -708,8 +747,10 @@ prepare_source(){
 
 install_packages(){
   export DEBIAN_FRONTEND=noninteractive
+  local packages=(python3 python3-venv python3-pip ffmpeg curl wget openssl rsync acl libgomp1)
+  [[ "${KOMBI:-n}" != "y" ]] || packages+=(php-cli)
   apt-get update
-  apt-get -o DPkg::Lock::Timeout=300 install -y python3 python3-venv python3-pip ffmpeg curl wget openssl rsync acl libgomp1
+  apt-get -o DPkg::Lock::Timeout=300 install -y "${packages[@]}"
   ffmpeg_supports_filter loudnorm \
     || die "Das installierte FFmpeg unterstuetzt den erforderlichen loudnorm-Filter nicht."
   python3 - <<'PY'
@@ -722,7 +763,7 @@ PY
 copy_and_install_project(){
   install -d -m 0755 "$INSTALL_ROOT" "$SOURCE_TARGET"
   if [[ "$(readlink -f "$SOURCE_DIR")" != "$(readlink -f "$SOURCE_TARGET")" ]]; then
-    rsync -a --delete --exclude '.git/' --exclude '.venv/' --exclude '__pycache__/' \
+    rsync -a --checksum --delete --exclude '.git/' --exclude '.venv/' --exclude '__pycache__/' \
       "${SOURCE_DIR}/" "${SOURCE_TARGET}/"
   fi
   if [[ ! -x "${VENV}/bin/python" ]]; then
@@ -1155,11 +1196,10 @@ configure_special_queue(){
   local preset_red="${1-}" red_enabled="" default_red="j"
   local known="" current="" selected="" use_additional="" default_additional="n"
 
-  printf '\nDie priorisierte Sonderqueue klingelt alle normalen Queue-Telefone,\n'
-  printf 'bei Nutzung auch das rote Telefon und die hier gewaehlten zusaetzlichen\n'
-  printf 'Nebenstellen gleichzeitig. Sie wird\n'
-  printf 'verwendet, wenn kein rotes Telefon vorhanden ist oder das rote Telefon\n'
-  printf 'besetzt, nicht erreichbar oder nicht angenommen ist.\n'
+  printf '\nIm Rufweg ROT klingelt zuerst das separate rote Telefon, sofern eingerichtet.\n'
+  printf 'Ist es besetzt, nicht erreichbar oder nicht angenommen, klingelt die Rufgruppe ROT gemeinsam.\n'
+  printf 'Ohne separates rotes Telefon beginnt der Gruppenruf sofort. Bei aktiver Rufgruppensteuerung\n'
+  printf 'gelten die ROT-Mitgliedschaften aus der Administration.\n'
   if [[ -n "$preset_red" ]]; then
     red_enabled="$preset_red"
   else
@@ -1167,7 +1207,7 @@ configure_special_queue(){
       'import sys,tomllib; print("j" if tomllib.load(open(sys.argv[1],"rb"))["ivr"].get("rotes_telefon_aktiv", True) else "n")' \
       "$CONFIG_FILE")"
     ask_yes_no red_enabled \
-      "Wird ein rotes Telefon verwendet? Wenn nein, fuehrt Taste 9 direkt zur priorisierten Sonderqueue." \
+      "Wird ein rotes Telefon verwendet? Ohne rotes Telefon klingelt die Rufgruppe ROT sofort." \
       "$default_red"
   fi
 
@@ -1468,7 +1508,7 @@ collect_configuration(){
 
   suggested_red=$((${KFX_PHONE_FIRST_EXTENSION:-201} + ${KFX_PHONE_COUNT:-1}))
   ask_yes_no KZF_RED_ENABLED \
-    "Wird ein rotes Telefon verwendet? Wenn nein, fuehrt Taste 9 direkt zur priorisierten Sonderqueue." \
+    "Wird ein rotes Telefon verwendet? Ohne rotes Telefon klingelt die Rufgruppe ROT sofort." \
     "j"
   KZF_RED_EXTENSION="$suggested_red"
   KZF_RED_RING_SECONDS="20"
@@ -1541,7 +1581,10 @@ from pathlib import Path
 
 template = Path(os.environ["SOURCE_TARGET"]) / "config/kienzlefon.toml.example"
 target = Path(os.environ["CONFIG_FILE"])
-text = template.read_text(encoding="utf-8")
+# Migration has filled missing fields before any reconfiguration. Preserve
+# settings owned by the admin UI and by the middleware and web installers.
+base = target if target.exists() else template
+text = base.read_text(encoding="utf-8")
 
 def toml(value):
     if isinstance(value, bool):
@@ -1606,7 +1649,9 @@ set_value("tts", "stimme", os.environ["KZF_TTS_VOICE"])
 set_value("tts", "qwen_stimme", os.environ["KZF_QWEN_VOICE"])
 set_value("tts", "length_scale", float(os.environ["KZF_TTS_LENGTH_SCALE"]))
 set_value("tts", "sentence_silence", float(os.environ["KZF_TTS_SENTENCE_SILENCE"]))
-set_value("asterisk", "rotes_telefon_passwort", os.environ["KZF_RED_PASSWORD"])
+red_password = tomllib.loads(text)["asterisk"]["rotes_telefon_passwort"]
+if not red_password or red_password == "CHANGE_ME_RED_PHONE_SECRET":
+    set_value("asterisk", "rotes_telefon_passwort", os.environ["KZF_RED_PASSWORD"])
 set_value("asterisk", "hauptausgang_endpoint", os.environ["KZF_MAIN_ENDPOINT"])
 set_value("asterisk", "hauptausgang_nummer", os.environ["KZF_MAIN_NUMBER"])
 set_value("asterisk", "ausgehend_zaehlt_kanalgrenze", os.environ["KZF_OUT_COUNTS"] == "y")
@@ -2111,7 +2156,9 @@ start_and_verify(){
 install_or_update_webinterface(){
   local choice="n"
   local installer="${SOURCE_TARGET}/kienzlefon-webinterface-installer.sh"
-  if [[ -f /etc/kienzlefon/webinterface.json \
+  if [[ "${KOMBI:-n}" == "y" ]]; then
+    choice="y"
+  elif [[ -f /etc/kienzlefon/webinterface.json \
      || -f /usr/share/kienzlefon-webinterface/admin.php \
      || -f /etc/systemd/system/kienzlefon-webinterface-worker.service ]]; then
     choice="y"
@@ -2131,32 +2178,58 @@ install_or_update_webinterface(){
     || die "PHP-Datei des Webinterfaces fehlt im installierten Quellstand."
   bash -n "$installer" \
     || die "Webinterface-Installer enthaelt einen Syntaxfehler."
-  "$installer" --from-main-installer \
-    || die "Webinterface-Installation oder -Aktualisierung ist fehlgeschlagen."
+  local status
+  bash "$installer" --from-main-installer || {
+    status=$?
+    printf 'ERROR: Webinterface-Installation oder -Aktualisierung ist fehlgeschlagen (Status %s).\n' "$status" >&2
+    return "$status"
+  }
 }
 
 main(){
-  local install_now="" demo_mode=""
+  local install_now="" demo_mode="" option
+  for option in "$@"; do
+    case "$option" in
+      --kombi) KOMBI="y" ;;
+      --mit-t2med) MIT_T2MED="y" ;;
+      -h|--help) printf 'Aufruf: bash kienzlefon-installer.sh [--kombi [--mit-t2med]]\n'; return 0 ;;
+      *) die "Unbekannte Option: ${option}" ;;
+    esac
+  done
+  [[ "$MIT_T2MED" == "n" || "$KOMBI" == "y" ]] || die "--mit-t2med setzt --kombi voraus."
   printf 'Kienzlefon Installer\nVersion: %s\n\n' "$VERSION"
-  ask_yes_no install_now "Kienzlefon jetzt installieren?" "n"
-  if [[ "$install_now" != "y" ]]; then
-    trap - ERR
-    printf 'Installation nicht gestartet.\n'
-    return 0
+  if [[ "$KOMBI" == "n" ]]; then
+    ask_yes_no install_now "Kienzlefon jetzt installieren?" "n"
+    if [[ "$install_now" != "y" ]]; then
+      trap - ERR
+      printf 'Installation nicht gestartet.\n'
+      return 0
+    fi
   fi
   require_root
   [[ -r "$CONFIG_FILE" ]] && EXISTING_INSTALL="y"
+  if [[ "$KOMBI" == "y" ]]; then
+    sep "Lokales Fon-Paket und Kienzlefax-Grundlage pruefen"
+    prepare_source
+    ensure_kienzlefax
+  fi
   sep "Systempakete installieren"
   install_packages
-  sep "Kienzlefax-Grundlage pruefen"
-  ensure_kienzlefax
-  sep "Kienzlefon-Quellstand vorbereiten"
-  prepare_source
+  if [[ "$KOMBI" == "n" ]]; then
+    sep "Kienzlefax-Grundlage pruefen"
+    ensure_kienzlefax
+    sep "Kienzlefon-Quellstand vorbereiten"
+    prepare_source
+  fi
   copy_and_install_project
   sep "Konfiguration erfassen"
   collect_configuration
   sep "Optionale Middleware-Anbindung"
-  "${VENV}/bin/kienzlefon-middleware" configure --config "$CONFIG_FILE"
+  local middleware_args=(--config "$CONFIG_FILE")
+  [[ "$KOMBI" == "n" ]] || middleware_args+=(--kombi)
+  if [[ "$KOMBI" == "n" || "$MIT_T2MED" == "y" ]]; then
+    "${VENV}/bin/kienzlefon-middleware" configure "${middleware_args[@]}"
+  fi
   configure_hold_music
   collect_regeneration_choice
   "${VENV}/bin/kienzlefon-config" --config "$CONFIG_FILE"
@@ -2164,7 +2237,7 @@ main(){
   if [[ "$demo_mode" == "y" ]]; then
     printf 'Lokale Ablage in der Praxis (unverschlüsselt).\n'
   else
-    openssl pkey -pubin -in "$PUBLIC_KEY_FILE" -noout >/dev/null
+    openssl pkey -pubin -in "$KZF_DELIVERY_PUBLIC_KEY" -noout >/dev/null
   fi
   sep "Asterisk-Vorpruefung"
   "${VENV}/bin/kienzlefon-transfer-setup" preflight --config "$CONFIG_FILE"
@@ -2186,13 +2259,13 @@ main(){
   sep "Optionale Wartemusik"
   install_hold_music
   sep "Asterisk integrieren"
-  "${VENV}/bin/kienzlefon-middleware" install --config "$CONFIG_FILE"
+  "${VENV}/bin/kienzlefon-middleware" install "${middleware_args[@]}"
   configure_asterisk
   start_and_verify
   sep "Administrations-Webinterface"
   install_or_update_webinterface
   trap - ERR
-  sep "Kienzlefon 2.5.5 ist installiert"
+  sep "Kienzlefon ${VERSION} ist installiert"
   printf 'Konfiguration: %s\n' "$CONFIG_FILE"
   printf 'Ansagen neu erzeugen: sudo kienzlefon-ansagen\n'
   printf 'Status: sudo kienzlefon-status\n'
@@ -2204,7 +2277,7 @@ if values["ivr"]["rotes_telefon_aktiv"]:
     print(f'Rote Nebenstelle: {values["ivr"]["rote_nebenstelle"]}')
     print(f'Passwort rote Nebenstelle: {values["asterisk"]["rotes_telefon_passwort"]}')
 else:
-    print("Rotes Telefon: nicht verwendet; Taste 9 fuehrt direkt zur Sonderqueue")
+    print("Rufweg ROT: Die Rufgruppe klingelt sofort.")
 print(f'Sonderqueue: {values["sonderqueue"]["name"]}')
 PY
   if [[ -r "${CONFIG_DIR}/middleware-secret" ]]; then
@@ -2254,11 +2327,13 @@ PY
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:
     anonymous = tomllib.load(handle)["telepraxis"].get("anrufernummern_anonymisieren", False)
-print("Demo-Anrufernummern: #anonymisiert demo#" if anonymous else "Demo-Anrufernummern: unveraendert")
+print("Anrufernummern: anonymisiert" if anonymous else "Anrufernummern: unveraendert")
 PY
   else
-    printf 'Telepraxis-Modus: Produktiv, verschluesselte JSON-Ausgabe\n'
+    printf 'Telepraxis-Modus: Verschlüsselte Ablage zur Abholung in der Praxis.\n'
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

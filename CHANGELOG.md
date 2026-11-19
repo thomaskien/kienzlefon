@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.5
+Version: 2.6.0
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,13 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.6.0
+
+- Direktnummern und frei belegbare IVR-Tasten, Rufgruppensteuerung und Anrufstatistik.
+- Mehrfach-Anliegen aus IVR und KI, vorgangsbezogene WAV-Beilage und verschlüsselte Übergabe mit Quittung.
+- Optionaler Whisper-Commander mit lokalem CPU-Fallback, Google Cloud TTS und konfigurierbare SIP-Zielformate.
+- Gemeinsamer Paketbau für eigenständige und kombinierte Installationen.
 
 ## 2.5.5
 

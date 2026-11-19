@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.5.5
+Version: 2.6.0
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,7 @@ direkt in der Praxis abgelegt oder verschlüsselt zur Abholung bereitgestellt.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.5.5**
+Version: **2.6.0**
 
 ## Eigenschaften
 
@@ -100,6 +100,18 @@ Version: **2.5.5**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.6.0
+
+Der Installer fragt nach den Direktnummern für Praxisqueue und ROT, dem optionalen
+Whisper-Commander und der Übergabe an die App. Für lokale und verschlüsselte
+Ablage lässt sich die WAV-Beilage getrennt wählen. Der CPU-Fallback bleibt verfügbar.
+Das klassische IVR kann weitere Anliegen aufnehmen. Seine Menütasten sind im
+Adminbereich konfigurierbar. Der geschützte Anlagendienst steuert die Rufgruppen
+Normal und ROT und liefert den Live-Status. Die Tagesstatistik verwendet
+Anrufereignisse. Details stehen in der [Anlagensteuerung](docs/ANLAGENSTEUERUNG.md)
+im [Vertrag für Anliegen und Audio](docs/vorgang-v1/README.md) und im
+[Prüfbericht für 2.6.0](docs/TESTS-2.6.0.md).
 
 ## Neu in 2.5.5
 
@@ -270,6 +282,62 @@ Details, Exportformat und Testfaelle: [Middleware-Anbindung](docs/MIDDLEWARE.md)
 
 ## Installation
 
+### Als zweite Komponente nach Kienzlefax
+
+Das Fon-Paket auf macOS oder Linux im gewuenschten Arbeitsbaum mit Bash und
+Python 3 erstellen. Das Zielverzeichnis muss existieren.
+
+```bash
+bash scripts/pack.sh --output /absoluter/pfad/kienzlefon.tar.gz
+```
+
+Auf dem Linux-Ziel das Paket in ein frisches Verzeichnis entpacken. Der
+Kombi-Installer ruft dort als root eine der beiden Varianten auf.
+
+```bash
+tar -xzf /absoluter/pfad/kienzlefon.tar.gz
+cd kienzlefon
+bash kienzlefon-installer.sh --kombi
+```
+
+Fuer die Anbindung an die T2med-Middleware lautet der letzte Befehl
+
+```bash
+bash kienzlefon-installer.sh --kombi --mit-t2med
+```
+
+Der Kombi-Aufruf gilt als Startbestaetigung. Die fachlichen Einstellungen
+bleiben interaktiv. Vor APT prueft Fon die Paketdateiliste, die Fax-Umgebung
+`/etc/kienzlefax-installer.env`, die aktivierte Queue `[praxis]`, Telefoniedialplan,
+PJSIP-Konfiguration und den Kontext `[kfx_external_capacity]`. Bei einem Fehler
+nennt es die Voraussetzung und beendet den Komponentenschritt mit Fehlerstatus.
+
+Anwendung und Webinstaller kommen aus dem entpackten Ordner. Bei Erstinstallation
+und Update richtet der Webinstaller die Administration verbindlich ein. Sein
+Fehlerstatus geht an den Kombi-Installer zurueck. Bei Wahl von Qwen prueft Fon
+den mitgelieferten v1.5-Helfer vor der Ausfuehrung gegen die fest hinterlegte
+SHA-256-Summe. Systempakete, Python-/TTS-Abhaengigkeiten und Sprachmodelle
+nutzen weiterhin ihre regulaeren Bezugsquellen.
+
+Mit `--mit-t2med` richtet Fon die Asterisk-Seite der Verbindung ein. Im
+AMI-Dialog den lokalen oder den separaten Middleware-Rechner waehlen. Fuer
+den separaten Rechner werden Quelle und erreichbare Zieladresse abgefragt.
+Die Uebergabedatei liegt unter `/etc/kienzlefon/middleware-connection.toml`
+(root, Modus `0600`). Bei Updates bleiben AMI-Benutzer und Secret erhalten.
+Ohne das Flag behaelt ein Update die konfigurierte Anbindung bei. Die
+Installation des T2med-Dienstes erfolgt in einem eigenen Schritt.
+
+Die Pflichtdateien stehen in `scripts/package-files.txt`. Der Packer liest sie
+direkt aus dem Arbeitsbaum und ergaenzt neue Python-Module unter `kienzlefon/`,
+Webprogrammdateien und Assets, Shell- und Python-Helfer in `scripts/` und
+`scripts/kokoro/` sowie Beispielvorlagen in `config/`. Die Dateiliste im
+Archiv enthaelt die tatsaechlich gepackten Pfade. Neue benoetigte Dateien
+ausserhalb dieser Auswahl in die Pflichtliste aufnehmen. Lokale Konfiguration,
+Schluessel, virtuelle Umgebungen, Laufzeitdaten und die separate
+Telepraxis-Demowebseite bleiben ausserhalb des Pakets.
+
+### Eigenstaendige Installation
+
 Auf einem unterstuetzten Kienzlefax-Linux-System oder einem frischen Server:
 
 ```bash
@@ -350,6 +418,10 @@ leeres Whisper-Transkript keinen Telepraxis-Eintrag. Caller-ID, IVR-Kategorie
 und leere WAV-Dateien gelten dabei nicht als Inhalt.
 
 ## Konfiguration
+
+Fuer ein Fonial-IP-Endgeraet ueber Plusnet stehen eine
+[PJSIP-Vorlage](config/pjsip-fonial.conf.example) und
+[Hinweise zur Einbindung und zu `\;lr`](docs/FONIAL.md) bereit.
 
 Die zentrale, von Menschen editierbare Konfiguration liegt unter:
 
@@ -536,9 +608,9 @@ systemctl status kienzlefon-worker
 
 Das Webinterface gehoert ab Version 2.4.0 zur Kienzlefon-Hauptversion und fuehrt
 keine eigene Produktversion mehr. Eine vorhandene Installation wird vom
-Hauptinstaller automatisch mitaktualisiert; bei einer Erstinstallation bleibt
-die Aktivierung optional. Der technische Installationshelfer kann weiterhin
-direkt ausgefuehrt werden:
+Hauptinstaller automatisch mitaktualisiert. Bei einer eigenstaendigen
+Erstinstallation bleibt die Aktivierung optional. Der technische
+Installationshelfer laesst sich auch direkt starten.
 
 ```bash
 sudo ./kienzlefon-webinterface-installer.sh
@@ -650,6 +722,29 @@ python3 -m venv .venv
 .venv/bin/ruff check kienzlefon tests
 bash -n kienzlefon-installer.sh
 ```
+
+### Abnahme des Kombi-Pakets am 18.11.2026
+
+```bash
+python -m pytest -q tests/test_installer.py tests/test_kombi_installer.py \
+  tests/test_webadmin.py tests/test_middleware.py tests/test_middleware_sources.py
+```
+
+Auf macOS bestanden alle 160 Tests dieses Laufs. Fehlende Fax- und
+Paketbestandteile fuehrten vor APT und vor jedem Download zum Abbruch.
+Eine nur im Test-Arbeitsbaum markierte `webinterface/admin.php` kam nach
+Packen, Entpacken und Aufruf des Webinstallers bytegleich am Installationsziel
+an. Das galt auch beim Update mit gleicher Dateigroesse und gleichem Zeitstempel.
+Die simulierten Webinstaller-Fehler 17 und 23 erreichten den Aufrufer mit
+demselben Status. Lokale und separate AMI-Anbindungen behielten Benutzer und
+Secret bei weiteren Laeufen mit und ohne `--mit-t2med`.
+
+Der Packer lief mit der macOS-System-Bash 3.2. Aus dem entpackten Archiv liess
+sich das Python-Wheel mit Python 3.11 ohne Netzwerkzugriff bauen. Alle 33
+Python-Module stimmten in Arbeitsbaum, Archiv und Wheel byteweise ueberein.
+Die Installertests verwenden temporaere Zielpfade und simulieren APT, Asterisk
+und systemd. Der vollstaendige Lauf mit `python -m pytest -q` bestand mit
+647 Tests und 34 Untertests, einschliesslich der lokalen Loopback-Testserver.
 
 Weitere Einzelheiten stehen in [Architektur](docs/ARCHITEKTUR.md),
 [IVR-Ablauf](docs/IVR.md) und [Telepraxis-Format](docs/TELEPRAXIS.md).

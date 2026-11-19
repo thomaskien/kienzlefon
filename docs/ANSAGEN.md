@@ -18,6 +18,9 @@ auf CPU. Piper und Qwen bleiben im Installer und Webinterface waehlbar.
 Manuelle Aufnahmen und Pausenmarker bleiben erhalten. Installation und
 Konfigurationsbeispiele stehen in der [README](../README.md).
 
+Für Installer mit der Auswahl **Google Cloud TTS Chirp 3 HD** gibt es eine
+[Anleitung zum API-Schlüssel und zu den Kosten der Ansagenerzeugung](GOOGLE-TTS-API-SCHLUESSEL.md).
+
 Seit 2.4.2 schreibt der gemeinsame Generator Zahlen und Uhrzeiten vor der
 Spracherzeugung deutsch aus. Dies gilt fuer Kokoro, Piper und Qwen, auch fuer
 Vorschauen und Sonderansagen. Beispiele:

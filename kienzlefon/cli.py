@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.5
+# Version: 2.6.0
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -410,7 +410,7 @@ def callerid_main() -> None:
 
 def migrate_main() -> None:
     _logging()
-    parser = _parser("Kienzlefon Konfiguration auf 2.5.5 ergaenzen")
+    parser = _parser(f"Kienzlefon Konfiguration auf {__version__} ergaenzen")
     parser.add_argument("--template", required=True)
     parser.add_argument("--area-code")
     parser.add_argument("--practice-number")
@@ -454,4 +454,4 @@ def migrate_main() -> None:
     for key, value in (("demo", arguments.local_delivery), ("audio_beilegen", arguments.attach_audio)):
         if value is not None:
             set_boolean(target, "telepraxis", key, value == "true")
-    print(f"Konfiguration auf Version 2.5.5 ergaenzt: {target}")
+    print(f"Konfiguration auf Version {__version__} ergaenzt: {target}")

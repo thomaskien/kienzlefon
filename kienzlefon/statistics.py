@@ -21,12 +21,20 @@ exten => s,1,GotoIf($["${KF_STATS_CALL_ID}"!=""]?done)
  same => n,GotoIf($["${KF_STATS_CALL_ID}"=""]?done)
  same => n,Set(KF_LIVE_OWNER=1)
  same => n,Set(KF_LIVE_STAGE=other)
+ same => n,Set(CHANNEL(hangup_handler_push)=kienzlefon-statistics-ai-end,s,1)
  same => n,UserEvent(KienzlefonCallEntered,SchemaVersion: 1,PbxId: ${KF_STATS_PBX_ID},CallId: ${KF_STATS_CALL_ID},EnteredAt: ${KF_STATS_ENTERED_AT})
  same => n(done),Return()
 
 [kienzlefon-statistics-route]
 exten => s,1,GotoIf($["${KF_STATS_CALL_ID}"=""]?done)
  same => n,UserEvent(KienzlefonCallRoute,SchemaVersion: 1,PbxId: ${KF_STATS_PBX_ID},CallId: ${KF_STATS_CALL_ID},EnteredAt: ${KF_STATS_ENTERED_AT},Route: ${ARG1})
+ same => n(done),Return()
+
+[kienzlefon-statistics-ai-end]
+exten => s,1,GotoIf($["${KF_STATS_AI_DIAL}"!="1"]?done)
+ same => n,Set(KF_STATS_AI_DIAL=0)
+ same => n,GotoIf($["${ANSWEREDTIME_MS}"=""]?done)
+ same => n,Gosub(kienzlefon-statistics-route,s,1(ai))
  same => n(done),Return()
 """
 

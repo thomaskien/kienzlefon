@@ -91,12 +91,12 @@ def raw_telephones(raw: dict) -> dict[str, str]:
     return result
 
 
-def configure(path: Path, etc: Path) -> None:
+def configure(path: Path, etc: Path, *, kombi: bool = False) -> None:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     old = raw.get("middleware", {})
     values = dict(old)
-    established = (path.parent / "middleware-secret").exists()
-    enabled = yes("Middleware-Schnittstelle ueber AMI aktivieren?", old.get("aktiv", False))
+    established = (path.parent / "middleware-secret").exists() or read_connection(path.parent) is not None
+    enabled = kombi or yes("Middleware-Schnittstelle ueber AMI aktivieren?", old.get("aktiv", False))
     values["aktiv"] = enabled
     candidates = raw_telephones(raw)
     values["nebenstellen"] = [x for x in values.get("nebenstellen", []) if x in candidates]
@@ -136,7 +136,8 @@ def configure(path: Path, etc: Path) -> None:
         values["transport"] = ask("Transport (tcp oder vorhandenes tls)", old.get("transport", "tcp"))
         default_port = general.get("port", "5038") if values["transport"] == "tcp" else "5039"
         values["port"] = int(ask("AMI-Port", str(old.get("port", default_port))))
-        values["benutzer"] = ask("AMI-Benutzer", old.get("benutzer", "kienzlefon-middleware"))
+        username = old.get("benutzer", "kienzlefon-middleware")
+        values["benutzer"] = username if kombi and established else ask("AMI-Benutzer", username)
         values["namensaufloesung"] = yes("Namensaufloesung vor dem Klingeln aktivieren?",
                                          (old.get("namensaufloesung", True) if established else True))
         available = application_available("WaitForCondition") and application_available("UserEvent")
@@ -164,7 +165,7 @@ def configure(path: Path, etc: Path) -> None:
     else:
         options = MiddlewareConfig.parse(values)
     save_options(path, options)
-    if enabled and (path.parent / "middleware-secret").exists():
+    if enabled and not kombi and (path.parent / "middleware-secret").exists():
         rotate = yes("Vorhandenes AMI-Secret erneuern? (Middleware danach aktualisieren)", False)
         # Root-owned marker contains no secret; consumed only by the installation step.
         marker = path.parent / ".middleware-rotate"
@@ -255,7 +256,7 @@ def verify_listener(options: MiddlewareConfig) -> None:
         pass
 
 
-def install(path: Path, etc: Path, rotate: bool = False) -> None:
+def install(path: Path, etc: Path, rotate: bool = False, *, kombi: bool = False) -> None:
     config = load_config(path)
     previous = read_connection(path.parent)
     # A prerequisite can have changed since an earlier installer run.
@@ -267,7 +268,7 @@ def install(path: Path, etc: Path, rotate: bool = False) -> None:
             save_options(path, options)
             config = load_config(path)
     marker = path.parent / ".middleware-rotate"
-    rotate = rotate or marker.exists()
+    rotate = rotate or (not kombi and marker.exists())
     export = provision(config, etc, rotate=rotate)
     marker.unlink(missing_ok=True)
     if config.middleware.enabled or previous:
@@ -304,12 +305,16 @@ def main() -> None:
     parser.add_argument("action", choices=["configure", "install", "show-secret", "rotate-secret"])
     parser.add_argument("--config", type=Path, default=Path("/etc/kienzlefon/kienzlefon.toml"))
     parser.add_argument("--asterisk-dir", type=Path, default=Path("/etc/asterisk"))
+    parser.add_argument("--kombi", action="store_true",
+                        help="Im Kombi-Installer AMI bei configure aktivieren und Zugangsdaten behalten")
     args = parser.parse_args()
+    if args.kombi and args.action not in {"configure", "install"}:
+        parser.error("--kombi gilt fuer configure und install")
     try:
         if args.action == "configure":
-            configure(args.config, args.asterisk_dir)
+            configure(args.config, args.asterisk_dir, kombi=args.kombi)
         elif args.action in {"install", "rotate-secret"}:
-            install(args.config, args.asterisk_dir, rotate=args.action == "rotate-secret")
+            install(args.config, args.asterisk_dir, rotate=args.action == "rotate-secret", kombi=args.kombi)
         else:
             # Deliberately bypass stdout/tee installer logs; requires a controlling terminal.
             with open("/dev/tty", "w", encoding="utf-8") as terminal:

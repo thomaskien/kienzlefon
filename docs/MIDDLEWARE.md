@@ -1,5 +1,9 @@
 # AMI-Middleware ab Kienzlefon 2.5.4
 
+[Telefonievertrag v1](telefonie-v1/README.md): verbindliche Umsetzungsgrundlage
+für Live-Zähler, Normal-/ROT-Steuerung und App-Zugriff. Die Anlagenseite gehört
+zu Kienzlefon 2.6.0. Einrichtung und Rechte beschreibt die [Anlagensteuerung](ANLAGENSTEUERUNG.md).
+
 Ab 2.5.4 ist die Vermittlungsuebergabe umgesetzt: direkte Vermittlung und native
 Rueckfrage intern/extern, Mitarbeiter-Kanalvorbereitung, eigener privater
 Zielkontext und Fortschrittsereignisse. Einrichtung, Vertrag und Live-Abnahme
@@ -9,6 +13,20 @@ Die Middleware wird separat entwickelt. Kienzlefon stellt den AMI-Zugang,
 Lookup-Ereignisse und den validierenden Click-to-Dial-Einstieg bereit. Die
 vollstaendige fachliche Uebergabe steht in
 [AMI-Callmonitor-Uebergabe](../KIENZLEFON_INSTALLER_UEBERGABE_AMI_Callmonitor.md).
+
+## Rufgruppen und Anrufstatistik ab 2.6.0
+
+Kienzlefon stellt den geschützten Anlagenzustand und die Rufgruppenaufträge
+gemäß [Telefonievertrag](telefonie-v1/README.md) bereit. Der Dienst prüft die
+Rechte je Nebenstelle und Gruppe und schützt das letzte konfigurierte Mitglied.
+Ein Anlagenneustart stellt die administrativen Grundeinstellungen wieder her.
+Die [ursprüngliche Abstimmung](RUFGRUPPEN-ABSTIMMUNG.md) dokumentiert die
+projektübergreifenden Entscheidungen.
+
+Für konfigurierte externe Eingänge und erreichte Wege erzeugt Kienzlefon die
+UserEvents `KienzlefonCallEntered` und `KienzlefonCallRoute`. Tageszählung
+und dauerhafte Speicherung gehören zur T2med-Middleware. Die Anlagenseite ist
+im [Prüfbericht](TESTS-2.6.0.md) beschrieben.
 
 ## Installation und Update
 

@@ -1,5 +1,5 @@
 # kienzlefon tests
-# Version: 2.5.5
+# Version: 2.6.0
 # Changelog:
 # - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
 # - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
@@ -256,12 +256,22 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
 
     environment["KZF_DEMO_MODE"] = "y"
     environment["KZF_DEMO_ANONYMIZE"] = "y"
+    environment["KZF_RED_PASSWORD"] = "neuer-zufallswert"
+    # Reconfiguration can go through the full installation form.
+    # Retain settings owned by the middleware and web installers.
+    configured = target.read_text().replace('[middleware]\naktiv = false', '[middleware]\naktiv = true')
+    configured = configured.replace('benutzer = "kienzlefon-middleware"', 'benutzer = "praxis-ami"')
+    target.write_text(configured + '\n[webinterface]\npasswort = "test-kennwort"\n')
     subprocess.run([os.sys.executable, str(writer)], check=True, env=environment)
     with target.open("rb") as handle:
         demo_result = tomllib.load(handle)
     assert demo_result["telepraxis"]["demo"] is True
     assert demo_result["telepraxis"]["anrufernummern_anonymisieren"] is True
     assert demo_result["telepraxis"]["public_key"] == ""
+    assert demo_result["middleware"]["aktiv"] is True
+    assert demo_result["middleware"]["benutzer"] == "praxis-ami"
+    assert demo_result["webinterface"]["passwort"] == "test-kennwort"
+    assert demo_result["asterisk"]["rotes_telefon_passwort"] == "a#b;c"
 
 
 def test_installer_requires_explicit_start_confirmation() -> None:
@@ -275,7 +285,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.5.5" in result.stdout
+    assert "Version: 2.6.0" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -367,7 +377,7 @@ def test_installer_updates_existing_webinterface_without_separate_prompt(
 
 def test_main_installer_always_reaches_webinterface_offer() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
-    main = installer[installer.index("main(){") : installer.rindex('\nmain "$@"')]
+    main = installer[installer.index("main(){") :]
 
     assert 'sep "Administrations-Webinterface"' in main
     assert "install_or_update_webinterface" in main
@@ -401,7 +411,7 @@ def test_installer_offers_local_and_remote_delivery_separately_from_audio() -> N
     assert "Verschlüsselte Ablage zur Abholung" in installer
     assert "In der Praxis muss ein lokaler Abholer eingerichtet werden." in installer
     assert "Audio beilegen? Bei Nein wird nur JSON ausgegeben." in installer
-    assert "Anrufernummern in den Demo-JSON-Dateien anonymisieren?" in installer
+    assert "Anrufernummern in der lokalen JSON-Ablage anonymisieren?" in installer
     assert "configure_demo_anonymization" in installer
 
 
@@ -610,9 +620,9 @@ def test_installer_explains_model_choices_and_ram_warning() -> None:
 def test_installer_asks_for_red_phone_and_explains_special_queue() -> None:
     installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
     assert "Wird ein rotes Telefon verwendet?" in installer
-    assert "Wenn nein, fuehrt Taste 9 direkt zur priorisierten Sonderqueue" in installer
+    assert "Ohne rotes Telefon klingelt die Rufgruppe ROT sofort" in installer
     assert "besetzt, nicht erreichbar oder nicht angenommen" in installer
-    assert "bei Nutzung auch das rote Telefon" in installer
+    assert "gelten die ROT-Mitgliedschaften aus der Administration" in installer
     assert "Sollen zusaetzliche Nebenstellen in der Sonderqueue mitklingeln?" in installer
 
 
@@ -690,3 +700,74 @@ def test_music_installer_defaults_and_existing_choices(tmp_path, installed, mode
         prompts = [line for line in result.stdout.splitlines() if line.startswith(('install:', 'mode:'))]
         assert prompts == expected_prompts
         assert tomllib.loads(config.read_text())['wartemusik'] == {'installiert': installed, 'modus': mode}
+
+
+@pytest.mark.parametrize("mode", ["neu", "update", "neukonfiguration"])
+def test_configuration_dialog_always_offers_direct_lines_commander_and_audio(app_config, tmp_path, mode):
+    import shlex
+
+    root = Path.cwd()
+    cfg = app_config.source
+    if mode == "neu":
+        cfg.unlink()
+    else:
+        text = cfg.read_text().replace('audio_beilegen = false', 'audio_beilegen = true')
+        # Use a working, existing second registration.
+        text = text.replace('[sip_rotes_telefon]\naktiv = false\nrufnummer = ""\nbenutzer = ""\npasswort = ""\ndomain = ""',
+                            '[sip_rotes_telefon]\naktiv = true\nrufnummer = "491234"\nbenutzer = "test"\npasswort = "old-rot"\ndomain = "sip.example.test"')
+        cfg.write_text(text)
+        assert tomllib.loads(text)["sip_rotes_telefon"]["passwort"] == "old-rot"
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    python = shlex.quote(os.sys.executable)
+    for name, cmd in {"python": python, "kienzlefon-migration": python + " -c 'from kienzlefon.cli import migrate_main; migrate_main()'"}.items():
+        wrapper = binary / name
+        wrapper.write_text(f'#!/bin/sh\nexec {cmd} "$@"\n')
+        wrapper.chmod(0o755)
+    script = r"""
+source "$1"
+CONFIG_DIR="$2"; CONFIG_FILE="$3"; VENV="$2"; SOURCE_TARGET="$4"; MODE="$5"; PUBLIC_KEY_FILE="$6"
+KFX_PHONE_IN_SIP_NUMBER=4912345
+chown(){ :; }
+ask_yes_no(){
+  printf 'Frage %s | %s\n' "$2" "$3"
+  local answer=n
+  case "$2" in
+    Vorhandene*Kienzlefon-Konfiguration*) [[ "$MODE" != update ]] || answer=y ;;
+    Audio\ beilegen*) [[ "$MODE" != neu ]] || answer=y ;;
+    Der\ lokale\ Praxis-Abholer*|Beide\ Modelle*) answer=y ;;
+    *) [[ "$3" != j ]] || answer=y ;;
+  esac
+  printf -v "$1" '%s' "$answer"
+}
+ask_value(){
+  printf 'Frage %s | %s\n' "$2" "${3-}"
+  local answer="${3-}"
+  case "$2" in
+    "Auswahl (1 oder 2)") [[ "$MODE" == neu ]] || answer=1 ;;
+    IP-Adresse*Commanders*) answer=192.0.2.42 ;;
+    Ortsvorwahl*) answer=02331 ;;
+    Lokale\ Praxisrufnummer*) answer=123456 ;;
+    Gemeinsame\ Vormittagsoeffnungszeit*) answer=08:00-12:00 ;;
+  esac
+  printf -v "$1" '%s' "$answer"
+}
+collect_configuration
+"""
+    result = subprocess.run(
+        ["bash", "-c", script, "dialog", root / "kienzlefon-installer.sh", tmp_path, cfg,
+         root, mode, app_config.telepraxis.public_key],
+        env={**os.environ, "PYTHONPATH": str(root)}, capture_output=True, text=True, timeout=40,
+    )
+    assert result.returncode == 0, result.stderr
+    for label in ("die direkte Praxisqueue", "den Rufweg ROT"):
+        assert result.stdout.count(f"Frage Separate externe Rufnummer fuer {label} einrichten oder aendern?") == 1
+    assert result.stdout.count("Frage IP-Adresse des kienzledoku-Commanders") == 1
+    assert f"Audio beilegen? Bei Nein wird nur JSON ausgegeben. | {'n' if mode == 'neu' else 'j'}" in result.stdout
+    data = tomllib.loads(cfg.read_text())
+    assert data["whisper"]["commander_ip"] == "192.0.2.42"
+    assert data["telepraxis"]["demo"] is (mode != "neu")
+    assert data["telepraxis"]["audio_beilegen"] is (mode == "neu")
+    assert ("Frage Der lokale Praxis-Abholer" in result.stdout) is (mode == "neu")
+    if mode != "neu":
+        assert data["sip_rotes_telefon"]["passwort"] == "old-rot"

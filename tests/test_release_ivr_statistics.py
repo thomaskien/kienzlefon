@@ -53,3 +53,16 @@ def test_agi_reports_route_only_for_an_identified_external_call():
     values["KF_STATS_CALL_ID"] = ""
     emit_agi_route(channel, "synthetic-pbx", "prescription")
     channel.exec.assert_not_called()
+
+
+def test_ai_route_uses_the_same_bridge_result_on_return_and_caller_hangup(app_config):
+    dialplan = render_extensions(replace(app_config, statistics_pbx_id="synthetic-pbx"))
+    assert "Set(CHANNEL(hangup_handler_push)=kienzlefon-statistics-ai-end,s,1)" in dialplan
+    dial = dialplan.partition("[kienzlefon-ai-dial]\n")[2].partition("\n[")[0]
+    assert dial.index("Set(ANSWEREDTIME_MS=)") < dial.index("Set(KF_STATS_AI_DIAL=1)") < dial.index("Dial(PJSIP/")
+    assert dial.index("Dial(PJSIP/") < dial.index("Gosub(kienzlefon-statistics-ai-end,s,1)") < dial.index("n(result)")
+    handler = dialplan.partition("[kienzlefon-statistics-ai-end]\n")[2].partition("\n[")[0]
+    assert handler.index('"${KF_STATS_AI_DIAL}"!="1"') < handler.index("Set(KF_STATS_AI_DIAL=0)")
+    assert handler.index('"${ANSWEREDTIME_MS}"=""') < handler.index("Gosub(kienzlefon-statistics-route,s,1(ai))")
+    assert dialplan.count("Gosub(kienzlefon-statistics-route,s,1(ai))") == 1
+    assert "kienzlefon-statistics-ai-end" not in render_extensions(replace(app_config, statistics_pbx_id=""))

@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.5.5
+# Version: 2.6.0
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -151,7 +151,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.5.5
+; Version: 2.6.0
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -383,6 +383,15 @@ def render_extensions(config: AppConfig, features: dict[str, str] | None = None,
         )
     )
     ai_enabled = "1" if config.ai_integration.admission_enabled else "0"
+    # Dial sets ANSWEREDTIME_MS when its bridge ends. Its next priority only
+    # runs if the caller is still present; the ingress hangup handler covers
+    # the other exit using the same, once-consumed marker.
+    before_ai = after_ai = ""
+    if config.statistics_pbx_id:
+        before_ai = (" same => n,Set(KF_LIVE_STAGE=other)\n"
+                     " same => n,Set(ANSWEREDTIME_MS=)\n"
+                     " same => n,Set(KF_STATS_AI_DIAL=1)\n")
+        after_ai = " same => n,Gosub(kienzlefon-statistics-ai-end,s,1)\n"
     ai_dtmf_features = "#".join(name for name, _activation, _digit in AI_DTMF_FEATURES)
     queue_failure_checks = "\n".join(
         f' same => n,GotoIf($["${{QUEUESTATUS}}"="{status}"]?fallback)'
@@ -477,8 +486,8 @@ exten => s,1,NoOp(Kienzlefon AI Lease ${{KZF_AI_SLOT_ID}})
  same => n,Set(KZF_AI_DTMF_DIGIT=)
  same => n,Set(KZF_AI_PREVIOUS_DYNAMIC_FEATURES=${{DYNAMIC_FEATURES}})
  same => n,Set(DYNAMIC_FEATURES={ai_dtmf_features})
- same => n,Dial(PJSIP/${{KZF_AI_EXTENSION}},120,gb(kienzlefon-ai-headers^s^1))
- same => n,Set(DYNAMIC_FEATURES=${{KZF_AI_PREVIOUS_DYNAMIC_FEATURES}})
+{before_ai} same => n,Dial(PJSIP/${{KZF_AI_EXTENSION}},120,gb(kienzlefon-ai-headers^s^1))
+{after_ai} same => n,Set(DYNAMIC_FEATURES=${{KZF_AI_PREVIOUS_DYNAMIC_FEATURES}})
  same => n,GotoIf($["${{KZF_AI_DTMF_DIGIT}}"!=""]?dtmf)
  same => n,GotoIf($["${{DIALSTATUS}}"="ANSWER"]?result)
  same => n,AGI(/opt/kienzlefon/venv/bin/kienzlefon-admission,--config,/etc/kienzlefon/kienzlefon.toml,--selection,release,--request-id,${{KZF_AI_REQUEST_ID}},--lease-id,${{KZF_AI_LEASE_ID}})
@@ -644,12 +653,6 @@ exten => s,1,Set(KF_CONTROL_WAIT=0)
                               (f"NoOp({specialist_description})", "specialist")):
             stage = "\n same => n,Set(KF_LIVE_STAGE=ivr)" if route == "ivr" else ""
             rendered = rendered.replace(anchor, f"{anchor}{stage}\n same => n,{route_statement(route)}", 1)
-        stage = "\n same => n,Set(KF_LIVE_STAGE=other)"
-        marker = 'same => n,Set(KZF_AI_PREVIOUS_DYNAMIC_FEATURES='
-        rendered = rendered.replace(f"\n {marker}", f"{stage}\n {marker}", 1)
-        for label in ("dtmf", "result"):
-            marker = f" same => n({label}),"
-            rendered = rendered.replace(marker, f" same => n({label}),{route_statement('ai')}\n same => n,", 1)
         rendered = rendered.replace(
             "\n same => n,Answer()\n" + specialist_route,
             "\n same => n,Answer()\n same => n," + route_statement("specialist") + "\n" + specialist_route,
