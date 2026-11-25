@@ -319,8 +319,8 @@ Details, Exportformat und Testfaelle: [Middleware-Anbindung](docs/MIDDLEWARE.md)
 Auf dem Linux-Server in einem eigenen Installationsverzeichnis den Universalinstaller herunterladen und im Terminal starten. Im Menü die gewünschten Rollen für Fax, Fon, Praxis-App oder T2med wählen.
 
 ```bash
-wget -O kienzle-installieren.sh https://kienzlefon.de/kienzle-installieren.sh &&
-sudo bash ./kienzle-installieren.sh
+wget -O kienzlefon-installieren.sh https://kienzlefon.de/kienzlefon-installieren.sh &&
+sudo bash ./kienzlefon-installieren.sh
 ```
 
 Für die aktuellen Testversionen die Modularchive (`.tar.gz`) vor dem Start in `pakete/` neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Modularchiven auf GitHub.

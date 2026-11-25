@@ -827,10 +827,10 @@ setInterval(updateCpuWidget, 5000);
     <section id="installation" class="installer-section" aria-labelledby="installation-title">
       <h2 id="installation-title">Installation auf dem eigenen Server</h2>
       <p>Im Terminal des Linux-Servers den Universalinstaller laden und starten. Im Menü die gewünschten Rollen auswählen.</p>
-      <pre><code>wget -O kienzle-installieren.sh https://kienzlefon.de/kienzle-installieren.sh &amp;&amp;
-sudo bash ./kienzle-installieren.sh</code></pre>
+      <pre><code>wget -O kienzlefon-installieren.sh https://kienzlefon.de/kienzlefon-installieren.sh &amp;&amp;
+sudo bash ./kienzlefon-installieren.sh</code></pre>
       <p>Für die aktuellen Testversionen die Modularchive vor dem Start in <code>pakete/</code> neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Paketen.</p>
-      <a href="https://kienzlefon.de/kienzle-installieren.sh" download>Universalinstaller herunterladen (.sh)</a>
+      <a href="https://kienzlefon.de/kienzlefon-installieren.sh" download>Universalinstaller herunterladen (.sh)</a>
     </section>
   </main>
 
