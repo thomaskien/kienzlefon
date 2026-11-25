@@ -18,6 +18,7 @@ import subprocess
 import tempfile
 import time
 import tomllib
+import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -72,6 +73,7 @@ LOCAL_DATETIME = re.compile(
 )
 
 STATUS_LABELS = {
+    "hoerprobe_bereit": "Google-Hörprobe bereit",
     "konfiguration_wird_geprueft": "Konfiguration wird geprüft",
     "einstellungen_gespeichert": "Einstellungen gespeichert",
     "einstellungen_aktuell": "Einstellungen aktuell",
@@ -395,7 +397,8 @@ def _copy_audio_preview(source: Path, target: Path) -> bool:
 def _web_settings(path: Path) -> dict[str, Any]:
     value = _read_json(path) if path.is_file() else {}
     return {
-        "passwordless": bool(value.get("passwordless", False)),
+        "passwordless": value.get("passwordless") is True,
+        "wireguard_interface": str(value.get("wireguard_interface") or ""),
         "listen": str(value.get("listen", "")),
         "port": int(value.get("port", 0)),
         "server": str(value.get("server", "")),
@@ -411,6 +414,19 @@ def _kokoro_generator_available(config: AppConfig) -> bool:
         generator.is_file() and os.access(generator, os.X_OK)
         and all((config.tts.kokoro_model_directory / name).is_file() for name in MODEL_FILES)
     )
+
+
+def _google_settings(config: AppConfig) -> tuple[str, str]:
+    rate, voice = "0.93", "de-DE-Chirp3-HD-Enceladus"
+    path = config.tts.google_config
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "RATE":
+                rate = value.strip().strip("\"'")
+            if key.strip() == "VOICE":
+                voice = value.strip().strip("\"'") or voice
+    return (str(config.tts.google_rate) if config.tts.google_rate is not None else rate), voice
 
 
 def _google_generator_available(config: AppConfig) -> bool:
@@ -477,6 +493,28 @@ def _php_password_hash(password: str, php_binary: str, existing_hash: str = "") 
     return password_hash
 
 
+def _routing_participation(config: AppConfig) -> dict | None:
+    from .control_api import STATE_DIR
+
+    path = STATE_DIR / "members-confirmed.json"
+    return _read_json(path) if config.control_api.enabled and path.is_file() else None
+
+
+def _routing_policy_view(config: AppConfig) -> dict | None:
+    from .control_api import credentials
+    from .telephony_policy import managed_phones, policy_for
+
+    if not config.control_api.enabled:
+        return None
+    try:
+        identities = credentials(config.control_api.credentials_file)
+    except (OSError, ValueError):
+        identities = {}
+    access = {key: None if clients is None else sorted(clients) for key, (_, clients) in identities.items()
+              if key != "admin-lokal" and clients != set()}
+    return {**policy_for(config).export(), "labels": managed_phones(config), "writing_access": access}
+
+
 def export_state(
     config_path: Path,
     defaults_path: Path,
@@ -487,7 +525,6 @@ def export_state(
     php_binary: str = "/usr/bin/php",
 ) -> dict[str, Any]:
     config = load_config(config_path)
-    from .telephony_policy import managed_phones, policy_for
 
     raw = _read_toml(config_path)
     defaults = _read_toml(defaults_path)
@@ -631,14 +668,17 @@ def export_state(
             DEFAULT_BROWSER_WAV,
             preview_directory / "hold-music.wav",
         )
+    google_rate, google_voice = _google_settings(config)
     state = {
         "version": 1,
         "generated_at": datetime.now(config.practice.timezone).isoformat(timespec="seconds"),
         "config_hash": _config_hash(config_path),
         "practice": config.practice.name,
+        "menu_order": list(config.menu_order),
+        "menu_choices": list(config.menu_choices),
         "ivr_keys": dict(config.ivr_keys),
-        "routing_policy": ({**policy_for(config).export(), "labels": managed_phones(config)}
-                           if config.control_api.enabled else None),
+        "routing_participation": _routing_participation(config),
+        "routing_policy": _routing_policy_view(config),
         "product": {
             "name": "kienzlefon.de",
             "version": __version__,
@@ -661,6 +701,8 @@ def export_state(
             "engine": config.tts.engine,
             "kokoro_available": _kokoro_generator_available(config),
             "google_available": _google_generator_available(config),
+            "google_rate": google_rate,
+            "google_voice": google_voice,
             "qwen_voice": config.tts.qwen_voice,
             "qwen_available": _qwen_generator_available(config),
             "qwen_voices": list(QWEN_SPEAKERS),
@@ -740,7 +782,7 @@ def _set_toml_value(text: str, section: str, key: str, value: Any) -> str:
     section_end = header.end() + (next_header.start() if next_header else len(text) - header.end())
     body = text[header.end() : section_end]
     pattern = re.compile(rf"^(?P<prefix>{re.escape(key)}\s*=\s*).*$", re.M)
-    updated, count = pattern.subn(rf"\g<prefix>{literal}", body, count=1)
+    updated, count = pattern.subn(lambda match: match["prefix"] + literal, body, count=1)
     if count == 0:
         updated = body.rstrip() + f"\n{key} = {literal}\n"
     return text[: header.end()] + updated + text[section_end:]
@@ -765,10 +807,10 @@ def _validate_schedule(section: str, value: Any) -> dict[str, list[str]]:
 
 
 def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[str, Any]:
-    from .ivr_keys import validate_keys
+    from .ivr_keys import MENU_CHOICES, MENU_PROMPTS, validated_order, validate_keys
 
     allowed_top = {
-        "action",
+        "action", "practice_name", "menu_order", "menu_choices",
         "id",
         "config_hash",
         "schedules",
@@ -786,6 +828,20 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
     config_hash = str(job.get("config_hash", ""))
     if not re.fullmatch(r"[a-f0-9]{64}", config_hash):
         raise WebAdminError("Konfigurationsstand fehlt oder ist ungültig")
+
+    practice_name = job.get("practice_name", config.practice.name)
+    if "practice_name" in job and (not isinstance(practice_name, str) or not practice_name.strip() or len(practice_name) > 160
+            or not practice_name.isprintable()):
+        raise WebAdminError("Bitte einen Praxisnamen mit 1 bis 160 druckbaren Zeichen eingeben")
+    orders = {}
+    try:
+        for key, allowed in (("menu_order", MENU_PROMPTS), ("menu_choices", MENU_CHOICES)):
+            if key in job:
+                proposed = validated_order(job[key], allowed)
+                if proposed != getattr(config, key):
+                    orders[key] = list(proposed)
+    except ValueError as exc:
+        raise WebAdminError(str(exc)) from exc
 
     schedule_payload = job.get("schedules", {})
     if not isinstance(schedule_payload, Mapping) or set(schedule_payload) - set(EDITABLE_SCHEDULES):
@@ -972,6 +1028,8 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
 
     return {
         "config_hash": config_hash,
+        "practice_name": practice_name.strip() if "practice_name" in job and practice_name.strip() != config.practice.name else "",
+        **orders,
         "schedules": schedules,
         "prompts": prompts,
         "prompt_modes": prompt_modes,
@@ -986,6 +1044,11 @@ def _validate_save_request(job: Mapping[str, Any], config: AppConfig) -> dict[st
 
 def _render_updated_config(text: str, values: Mapping[str, Any]) -> str:
     updated = text
+    if values.get("practice_name"):
+        updated = _set_toml_value(updated, "praxis", "name", values["practice_name"])
+    for key, field in (("menu_order", "ansagenreihenfolge"), ("menu_choices", "auswahlreihenfolge")):
+        if key in values:
+            updated = _set_toml_value(updated, "ivr", field, values[key])
     for key, digit in values.get("ivr_keys", {}).items():
         updated = _set_toml_value(updated, "ivr_tasten", key, digit)
     for section, days in values["schedules"].items():
@@ -1244,6 +1307,10 @@ class WebAdminWorker:
             action = job.get("action")
             if action == "save":
                 self._apply_save(job_id, job)
+            elif action in {"preview_google_rate", "save_google_rate"}:
+                self._google_rate(job_id, job)
+            elif action == "set_local_member":
+                self._set_local_member(job_id, job)
             elif action == "save_routing_policy":
                 self._save_routing_policy(job_id, job)
             elif action == "record":
@@ -1275,19 +1342,97 @@ class WebAdminWorker:
         finally:
             path.unlink(missing_ok=True)
 
+    def _google_rate(self, job_id: str, job: Mapping[str, Any]) -> None:
+        if set(job) != {"id", "action", "config_hash", "rate", "previous_rate", "voice"}:
+            raise WebAdminError("Ungültiger Auftrag für das Sprechtempo")
+        config = load_config(self.config_path)
+        if (job["config_hash"] != _config_hash(self.config_path)
+                or (job["previous_rate"], job["voice"]) != _google_settings(config)):
+            raise WebAdminError("Die Google-Einstellungen wurden geändert. Bitte neu laden.")
+        if not _google_generator_available(config):
+            raise WebAdminError("Google-TTS ist noch nicht eingerichtet")
+        rate = job["rate"]
+        if type(rate) not in (float, int) or not 0.25 <= rate <= 2.0:
+            raise WebAdminError("Bitte ein Sprechtempo zwischen 0,25 und 2,0 wählen")
+        if job["action"] == "preview_google_rate":
+            sample = "Willkommen in unserer Praxis. Für ein Rezept drücken Sie bitte die Zwei."
+            directory = self.runtime_path / "audio"
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(dir=directory) as temporary:
+                audio = Path(temporary) / "probe.wav"
+                command = PromptGenerator(config)._google_command(sample, audio, rate=rate)
+                result = _run_command(command, timeout=90)
+                if result.returncode:
+                    raise WebAdminError("Google konnte die Hörprobe nicht erzeugen. Bitte Verbindung und Stimme prüfen.")
+                with wave.open(str(audio)) as stream:
+                    if not stream.getnframes():
+                        raise WebAdminError("Die Google-Hörprobe ist leer")
+                target = directory / f"google-{job_id}.wav"
+                _copy_audio_preview(audio, target)
+                for old in directory.glob("google-*.wav"):
+                    if old != target:
+                        old.unlink(missing_ok=True)
+            self._status(job_id, "hoerprobe_bereit")
+            return
+        text = self.config_path.read_text(encoding="utf-8")
+        updated = _set_toml_value(text, "tts", "google_sprechtempo", str(rate))
+        temporary = self._temporary_config(updated)
+        try:
+            self._validate_temporary(temporary)
+            self._replace_config(temporary)
+        finally:
+            temporary.unlink(missing_ok=True)
+        self.export()
+        self._status(job_id, "einstellungen_aktuell",
+                     detail="Tempo gespeichert. Über „Ansagen speichern“ können Sie die Telefonansagen aktualisieren.")
+
+    def _set_local_member(self, job_id: str, job: Mapping[str, Any]) -> None:
+        from .control_api import STATE_DIR, read_ami
+        from .telephony_ami import AsteriskPlant
+        from .telephony_control import Controller, Journal
+
+        if set(job) != {"id", "action", "config_hash", "revision", "route", "extension", "member"}:
+            raise WebAdminError("Unvollständige Rufgruppenänderung")
+        config = load_config(self.config_path)
+        if not config.control_api.enabled or job["config_hash"] != _config_hash(self.config_path):
+            raise WebAdminError("Die Rufgruppen-Konfiguration hat sich geändert. Bitte neu laden.")
+        plant = AsteriskPlant(read_ami(config.source.parent / "control-ami.json"))
+        try:
+            plant.connect()
+            Controller(Journal(STATE_DIR), plant).set_local_member(
+                config, job["revision"], job["route"], job["extension"], job["member"],
+            )
+        finally:
+            if plant.connection:
+                plant.connection.close()
+            self.export()
+        self._status(job_id, "einstellungen_aktuell", detail="Teilnahme von Asterisk bestätigt.")
+
     def _save_routing_policy(self, job_id: str, job: Mapping[str, Any]) -> None:
         from .control_setup import write_policy
         from .telephony_policy import RoutingPolicy, policy_for
 
-        if set(job) != {"id", "action", "config_hash", "policy"} or job["config_hash"] != _config_hash(self.config_path):
+        if set(job) - {"names"} != {"id", "action", "config_hash", "policy"} or job["config_hash"] != _config_hash(self.config_path):
             raise WebAdminError("Konfigurationsstand hat sich geändert. Bitte neu laden.")
         config = load_config(self.config_path)
         if not config.control_api.enabled:
             raise WebAdminError("Anlagensteuerung ist nicht eingerichtet")
-        policy = RoutingPolicy.parse(job["policy"])
+        data = job["policy"]
+        if not isinstance(data, dict):
+            raise WebAdminError("Ungültige Rufgruppenrichtlinie")
+        # An already open admin tab from an older version sends neither field.
+        policy = RoutingPolicy.parse({"workplace_mode": config.routing_policy.workplace_mode,
+                                     "workplace_ids": list(config.routing_policy.workplace_ids), **data})
         if policy.members.keys() != policy_for(config).members.keys():
             raise WebAdminError("Rufgruppen müssen für alle verwalteten Telefone angegeben werden")
-        write_policy(config, policy)
+        names = None
+        if "names" in job:
+            from .middleware import phone_names
+            updates = phone_names(job["names"])
+            if updates.keys() - policy.members.keys():
+                raise WebAdminError("Gerätename gehört zu keiner verwalteten Nebenstelle")
+            names = {**config.phone_names, **updates}
+        write_policy(config, policy, names=names, expected_hash=job["config_hash"])
         self.export()
         self._status(job_id, "einstellungen_aktuell", detail="Rufgruppen-Grundeinstellungen gespeichert.")
 
@@ -1510,7 +1655,8 @@ class WebAdminWorker:
         self._status(job_id, "konfiguration_wird_geprueft")
         text = self.config_path.read_text(encoding="utf-8")
         keys_changed = bool(values["ivr_keys"])
-        original_config_stat = self.config_path.stat() if keys_changed else None
+        rollback_audio = keys_changed or bool(values.get("menu_choices") or values["practice_name"])
+        original_config_stat = self.config_path.stat() if rollback_audio else None
         temporary: Path | None = None
         active_manual: Path | None = None
         previous_manual: bytes | None = None
@@ -1569,7 +1715,7 @@ class WebAdminWorker:
                 "ivr_keys",
             )
         )
-        assistant_only = assistant_changed and not has_other_changes
+        assistant_only = assistant_changed and not (has_other_changes or values.get("menu_choices") or values["practice_name"] or values.get("menu_order"))
         prompts_ready = False
         try:
             if not assistant_only:
@@ -1583,7 +1729,7 @@ class WebAdminWorker:
             elif assistant_changed or keys_changed:
                 self._update_dialplan()
         except Exception:
-            if keys_changed:
+            if rollback_audio:
                 _write_bytes_atomic(self.config_path, text.encode("utf-8"), original_config_stat)
                 if prompts_ready:
                     self._generate_prompts(job_id, final_status=False)

@@ -19,6 +19,7 @@ from .middleware import (
     MiddlewareConfig,
     listener_plan,
     manager_inventory,
+    phone_names,
     private_write,
     provision,
     read_connection,
@@ -88,7 +89,8 @@ def raw_telephones(raw: dict) -> dict[str, str]:
     if ai.get("aktiv", False):
         result.update({str(n): "KI-Nebenstelle" for n in
                        range(8810, 8810 + int(ai.get("anzahl_nebenstellen", 0)))})
-    return result
+    names = phone_names(raw.get("nebenstellennamen", {}))
+    return {extension: names.get(extension, label) for extension, label in result.items()}
 
 
 def configure(path: Path, etc: Path, *, kombi: bool = False) -> None:

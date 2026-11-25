@@ -1,5 +1,5 @@
 # kienzlefon
-# Version: 2.6.1
+# Version: 2.7
 # Changelog:
 # - 2.4.4: KI-Endpunkte dauerhaft auf G.722 mit lokaler Codec-Praeferenz festgelegt.
 # - 2.4.0: Lautlosen AI-Neuversuch ueber Taste 0 im klassischen Hauptmenue ergaenzt.
@@ -27,7 +27,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from .config import AppConfig, SipLineConfig
+from .config import AppConfig, SipLineConfig, did_variants
 from .hold_music import MUSIC_CLASS
 from .middleware_dialplan import render_middleware
 from .queue_dialplan import (
@@ -62,7 +62,7 @@ def _asterisk_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace(";", "\\;")
 
 
-def _registration(name: str, context: str, line: SipLineConfig) -> str:
+def _registration(name: str, context: str, line: SipLineConfig, stable_domains: set[str]) -> str:
     if not line.enabled:
         return f"; {name}: keine separate externe Rufnummer konfiguriert.\n"
     proxy = ""
@@ -71,6 +71,7 @@ def _registration(name: str, context: str, line: SipLineConfig) -> str:
         if not value.startswith("sip:"):
             value = f"sip:{value}"
         proxy = f"outbound_proxy={value}\\;lr\n"
+    routing = "" if line.domain.lower() in stable_domains else f"line=yes\nendpoint={name}-endpoint\n"
     return (
         f"""
 [{name}-registration]
@@ -83,9 +84,7 @@ contact_user={line.did}
 retry_interval=60
 forbidden_retry_interval=600
 expiration={line.expiration}
-line=yes
-endpoint={name}-endpoint
-{proxy}
+{routing}{proxy}
 [{name}-auth]
 type=auth
 auth_type=userpass
@@ -119,7 +118,46 @@ trust_id_outbound=yes
     )
 
 
-def render_pjsip(config: AppConfig) -> str:
+def stable_registration_domains(etc: Path) -> set[str]:
+    """Use DID routing only with a matching installed 1&1 UDP source endpoint."""
+    main = etc / "pjsip.conf"
+    if not main.is_file():
+        return set()
+    text = main.read_text()
+    phone = etc / "pjsip-kfx-telefonie.conf"
+    include = r'^\s*#(?:try)?include\s+["<]?(?:/etc/asterisk/)?pjsip-kfx-telefonie\.conf[">]?\s*$'
+    if phone.is_file() and re.search(include, text, re.M):
+        text += "\n" + phone.read_text()
+    sections = {}
+    for block in re.split(r"^\s*\[", text, flags=re.M)[1:]:
+        name, _, body = block.partition("]")
+        fields = {}
+        matches = []
+        for line in body.splitlines():
+            key, separator, value = line.partition(";")[0].partition("=")
+            if separator:
+                fields[key.strip()] = value.strip()
+                if key.strip() == "match":
+                    matches.extend(address.strip() for address in value.split(","))
+        sections[name] = fields, matches
+    contexts = {"kfx-provider-in": "extensions.conf", "kfx-phone-in": "extensions-kfx-telefonie.conf"}
+    stable = set()
+    for identify, matches in sections.values():
+        if identify.get("type") != "identify" or not {"sip.1und1.de", "212.227.0.0/16"}.intersection(matches):
+            continue
+        endpoint, _ = sections.get(identify.get("endpoint"), ({}, []))
+        context = endpoint.get("context")
+        plan = contexts.get(context)
+        if (not plan or endpoint.get("type") != "endpoint" or not (etc / plan).is_file()
+                or f"[{context}]" not in (etc / plan).read_text().splitlines()):
+            return set()
+        if endpoint.get("transport") == "transport-udp" and endpoint.get("from_domain", "").lower() == "sip.1und1.de":
+            stable.add("sip.1und1.de")
+    return stable
+
+
+def render_pjsip(config: AppConfig, stable_domains: set[str] | None = None) -> str:
+    stable_domains = stable_domains or set()
     red = config.ivr.red_extension
     red_endpoint = ""
     if config.ivr.red_enabled:
@@ -151,7 +189,7 @@ def render_pjsip(config: AppConfig) -> str:
         )
     )
     return f"""; kienzlefon
-; Version: 2.6.1
+; Version: 2.7
 ; Changelog:
 ; - 2.4.4: Nur KI-Endpunkte nutzen G.722 und local_first fuer beide Anrufrichtungen.
 ; - 2.3: PJSIP-Endpunkte fuer den lokalen Handoff-Pfad freigegeben.
@@ -173,8 +211,8 @@ def render_pjsip(config: AppConfig) -> str:
 
 {ai_endpoints}
 
-{_registration("kienzlefon-direct-queue", "kienzlefon-direct-queue-in", config.asterisk.direct_queue)}
-{_registration("kienzlefon-direct-red", "kienzlefon-direct-red-in", config.asterisk.direct_red)}
+{_registration("kienzlefon-direct-queue", "kienzlefon-direct-queue-in", config.asterisk.direct_queue, stable_domains)}
+{_registration("kienzlefon-direct-red", "kienzlefon-direct-red-in", config.asterisk.direct_red, stable_domains)}
 """
 
 
@@ -719,7 +757,7 @@ def install_asterisk_config(config: AppConfig, etc: Path = Path("/etc/asterisk")
         phone = staging / "extensions-kfx-telefonie.conf"
         if phone.is_file():
             phone.write_text(unwrap(decorate_calls(phone.read_text(), enabled=False)), encoding="utf-8")
-        _install_asterisk_config(config, staging, features, etc / "features-kienzlefon.conf")
+        _install_asterisk_config(config, staging, features, etc / "features-kienzlefon.conf", stable_registration_domains(etc))
         phone.write_text(patch_queue_statements(
             patch_external_ingress(phone.read_text(), config.statistics_pbx_id),
             config.statistics_pbx_id,
@@ -764,7 +802,7 @@ def _validate_transfer_plan(config: AppConfig, planned: dict[str, str]) -> None:
 
 
 def _install_asterisk_config(config: AppConfig, etc: Path,
-                             features: dict[str, str] | None, features_include: Path) -> None:
+                             features: dict[str, str] | None, features_include: Path, stable_domains: set[str]) -> None:
     from .hold_music import install_config as install_hold_music_config
 
     pjsip_target = etc / "pjsip-kienzlefon.conf"
@@ -772,7 +810,7 @@ def _install_asterisk_config(config: AppConfig, etc: Path,
     queues_target = etc / "queues-kienzlefon.conf"
     features_target = etc / "features-kienzlefon.conf"
     timing = practice_timing(etc / "queues-kfx.conf", config.ivr.queue_name)
-    _atomic_install(pjsip_target, render_pjsip(config))
+    _atomic_install(pjsip_target, render_pjsip(config, stable_domains))
     _atomic_install(extensions_target, render_extensions(config, features, timing))
     _atomic_install(queues_target, render_queues(config))
     _atomic_install(etc / "queuerules-kienzlefon.conf", render_rules(config, timing))
@@ -1035,16 +1073,23 @@ def _patch_direct_did_routes(config: AppConfig, path: Path, context: str) -> Non
         text,
         flags=re.S,
     )
+    section = text.split(heading, 1)[1].split("\n[", 1)[0]
+    occupied = set()
+    for number in re.findall(r"^\s*exten\s*=>\s*(\+?\d+)\s*,\s*1\s*,", section, re.M):
+        occupied.update(did_variants(number, config.dial_rules.area_code))
     routes: list[str] = []
     for line, target in (
         (config.asterisk.direct_queue, "kienzlefon-direct-queue-in"),
         (config.asterisk.direct_red, "kienzlefon-direct-red-in"),
     ):
         if line.enabled:
+            variants = did_variants(line.did, config.dial_rules.area_code)
+            if variants & occupied:
+                raise AsteriskConfigError(f"Rufnummer {line.did} in [{context}] bereits belegt")
+            occupied.update(variants)
             for incoming in (line.did, f"+{line.did}"):
                 route = f"exten => {incoming},1,Goto({target},{line.did},1)"
-                if route not in text:
-                    routes.append(route)
+                routes.append(route)
     if not routes:
         if text != original_text:
             _atomic_install(path, text)

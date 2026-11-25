@@ -32,8 +32,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from .ivr_keys import MENU_CHOICES, MENU_PROMPTS, validated_order
 from .ivr_keys import DEFAULTS as IVR_KEY_DEFAULTS, FOLLOWUP_PROMPTS, GENERATED_PROMPTS, validate_keys
-from .middleware import MiddlewareConfig, telephone_extensions
+from .middleware import MiddlewareConfig, phone_names, telephone_extensions
 from .models import CallType, FieldName
 from .queue_prompts import QUEUE_NUMBER_PROMPTS
 from .telephony_policy import ControlConfig, RoutingPolicy, policy_for
@@ -246,6 +247,7 @@ class TTSConfig:
     sentence_silence: float
     target_loudness_lufs: float
     max_true_peak_db: float
+    google_rate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -384,8 +386,11 @@ class AppConfig:
     middleware: MiddlewareConfig = MiddlewareConfig()
     statistics_pbx_id: str = ""
     ivr_keys: Mapping[str, str] = field(default_factory=lambda: IVR_KEY_DEFAULTS.copy())
+    menu_order: tuple[str, ...] = MENU_PROMPTS
+    menu_choices: tuple[str, ...] = MENU_CHOICES
     control_api: ControlConfig = ControlConfig()
     routing_policy: RoutingPolicy = field(default_factory=RoutingPolicy)
+    phone_names: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def local_extensions(self) -> tuple[str, ...]:
@@ -692,30 +697,39 @@ def _scheduled_overrides(
     return tuple(entries)
 
 
+def parse_time_windows(values: object, label: str) -> tuple[TimeWindow, ...]:
+    if not isinstance(values, list):
+        raise ConfigError(f"{label} muss eine Liste von Zeitraeumen sein")
+    windows: list[TimeWindow] = []
+    for value in values:
+        match = TIME_RANGE.fullmatch(str(value))
+        if not match:
+            raise ConfigError(f"Ungueltiger Zeitraum {label}: {value!r}")
+        try:
+            start = time(int(match[1]), int(match[2]))
+            end = time(int(match[3]), int(match[4]))
+        except ValueError as exc:
+            raise ConfigError(f"Ungueltige Uhrzeit {label}: {value!r}") from exc
+        if start >= end:
+            raise ConfigError(f"Zeitraum muss am selben Tag enden {label}: {value!r}")
+        if windows and start < windows[-1].end:
+            raise ConfigError(f"Ueberlappende Zeitraeume {label}")
+        windows.append(TimeWindow(start, end))
+    return tuple(windows)
+
+
+def parse_schedule_input(text: str, label: str) -> list[str]:
+    text = text.strip()
+    values = [item.strip() for item in text.split(",")] if text else []
+    parse_time_windows(values, label)
+    return values
+
+
 def _schedule(raw: Mapping[str, Any], name: str) -> WeeklySchedule:
     section = _section(raw, name)
-    days: list[tuple[TimeWindow, ...]] = []
-    for day in WEEKDAYS:
-        values = section.get(day, [])
-        if not isinstance(values, list):
-            raise ConfigError(f"[{name}].{day} muss eine Liste von Zeitraeumen sein")
-        windows: list[TimeWindow] = []
-        for value in values:
-            match = TIME_RANGE.fullmatch(str(value))
-            if not match:
-                raise ConfigError(f"Ungueltiger Zeitraum [{name}].{day}: {value!r}")
-            try:
-                start = time(int(match[1]), int(match[2]))
-                end = time(int(match[3]), int(match[4]))
-            except ValueError as exc:
-                raise ConfigError(f"Ungueltige Uhrzeit [{name}].{day}: {value!r}") from exc
-            if start >= end:
-                raise ConfigError(f"Zeitraum muss am selben Tag enden [{name}].{day}: {value!r}")
-            if windows and start < windows[-1].end:
-                raise ConfigError(f"Ueberlappende Zeitraeume [{name}].{day}")
-            windows.append(TimeWindow(start, end))
-        days.append(tuple(windows))
-    return WeeklySchedule(tuple(days))
+    return WeeklySchedule(tuple(
+        parse_time_windows(section.get(day, []), f"[{name}].{day}") for day in WEEKDAYS
+    ))
 
 
 def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConfig:
@@ -914,8 +928,11 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     if statistics_pbx_id and not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", statistics_pbx_id):
         raise ConfigError("[anrufstatistik].pbx_id ist ungueltig")
     try:
+        menu_order = validated_order(ivr.get("ansagenreihenfolge", MENU_PROMPTS), MENU_PROMPTS)
+        menu_choices = validated_order(ivr.get("auswahlreihenfolge", MENU_CHOICES), MENU_CHOICES)
         ivr_keys = validate_keys(raw.get("ivr_tasten", {}))
         control_api = ControlConfig.parse(raw.get("control_api", {}))
+        names = phone_names(raw.get("nebenstellennamen", {}))
         routing_policy = RoutingPolicy.parse(raw.get("routing_policy", {}))
         if control_api.enabled:
             if statistics_pbx_id and statistics_pbx_id != control_api.pbx_id:
@@ -926,8 +943,11 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
     config = AppConfig(
         control_api=control_api,
         routing_policy=routing_policy,
+        phone_names=names,
         statistics_pbx_id=statistics_pbx_id,
         ivr_keys=ivr_keys,
+        menu_order=menu_order,
+        menu_choices=menu_choices,
         middleware=middleware,
         source=source,
         paths=paths_config,
@@ -1010,6 +1030,7 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
                     "/usr/local/bin/kienzlefon-qwen3-tts-generate",
                 ),
             ),
+            google_rate=(None if tts.get("google_sprechtempo", "") == "" else float(tts["google_sprechtempo"])),
             google_generator=Path(tts.get(
                 "google_generator", "/usr/local/bin/kienzlefon-google-tts-generate"
             )),
@@ -1107,18 +1128,28 @@ def load_config(path: str | Path = "/etc/kienzlefon/kienzlefon.toml") -> AppConf
         and not override_manual_selected
     ):
         raise ConfigError("Aktiver Override benoetigt Text oder eine manuelle Override-Ansage")
-    if config.ivr_keys != IVR_KEY_DEFAULTS:
-        for name in GENERATED_PROMPTS:
+    generated = set(GENERATED_PROMPTS) if config.ivr_keys != IVR_KEY_DEFAULTS else set()
+    if config.menu_choices != MENU_CHOICES:
+        generated.update(("menu_open", "menu_closed"))
+    if generated:
+        for name in sorted(generated):
             source = config.prompt_sources.get(name)
             if source == "manuell" or (source != "tts" and any(
                 (config.tts.upload_directory / f"{name}.{suffix}").is_file()
                 for suffix in ("wav16", "wav")
             )):
                 raise ConfigError(f"Für geänderte IVR-Tasten zuerst die Tastenansage {name} auf TTS stellen")
+    queue, red = config.asterisk.direct_queue, config.asterisk.direct_red
+    if queue.enabled and red.enabled and (
+        did_variants(queue.did, config.dial_rules.area_code) & did_variants(red.did, config.dial_rules.area_code)
+    ):
+        raise ConfigError("Direkte Praxisqueue und ROT benötigen verschiedene eingehende Rufnummern")
     if config.recording.format != "wav":
         raise ConfigError("[aufnahme].format ist fuer Version 1.7 verbindlich auf 'wav' festgelegt")
     if config.tts.engine not in SUPPORTED_TTS_ENGINES:
         raise ConfigError("[tts].engine muss kokoro, piper, qwen oder google sein")
+    if config.tts.google_rate is not None and not 0.25 <= config.tts.google_rate <= 2:
+        raise ConfigError("Google-Sprechtempo muss zwischen 0,25 und 2 liegen")
     if not config.tts.google_generator.is_absolute():
         raise ConfigError("[tts].google_generator muss ein absoluter Pfad sein")
     if not config.tts.google_config.is_absolute():
@@ -1304,6 +1335,19 @@ def _standalone_extensions(section: Mapping[str, Any]) -> tuple[StandaloneExtens
         if not re.fullmatch(r"[1-9][0-9]{1,5}", entry.extension) or not entry.password:
             raise ConfigError("Ungueltige zusaetzliche Nebenstelle oder leeres Passwort")
     return result
+
+
+def did_variants(value: str, area_code: str) -> set[str]:
+    if not value or not re.fullmatch(r"\+?[0-9]+", value):
+        return set()
+    number = value.removeprefix("+")
+    if number.startswith("00"):
+        return {number, number[2:]}
+    if number.startswith("0"):
+        return {number, "49" + number[1:]}
+    if value.startswith("+") or number.startswith("49") or not area_code:
+        return {number}
+    return {number, "49" + area_code.lstrip("0") + number}
 
 
 def _sip_line(section: Mapping[str, Any], name: str) -> SipLineConfig:

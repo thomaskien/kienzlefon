@@ -1,5 +1,5 @@
 # kienzlefon tests
-# Version: 2.6.1
+# Version: 2.7
 # Changelog:
 # - 2.4.0: Integriertes Webinterface und einheitliche Versionsfuehrung getestet.
 # - 2.3.2: Patchrelease fuer die sofortige AI-Medienbridge freigegeben.
@@ -168,6 +168,7 @@ def test_embedded_config_writer_preserves_secrets_and_schedules(tmp_path: Path) 
     environment.update(
         {
             "SOURCE_TARGET": str(Path.cwd()),
+            "PYTHONPATH": str(Path.cwd()),
             "CONFIG_FILE": str(target),
             "PUBLIC_KEY_FILE": str(tmp_path / "public.pem"),
             "KZF_PRACTICE_NAME": "Praxis Test",
@@ -285,7 +286,7 @@ def test_installer_requires_explicit_start_confirmation() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "Version: 2.6.1" in result.stdout
+    assert "Version: 2.7" in result.stdout
     assert "Installation nicht gestartet." in result.stdout
 
 
@@ -479,48 +480,178 @@ def test_worker_uses_output_directory_group_and_restrictive_umask() -> None:
     assert "UMask=0007" in installer
 
 
-def test_update_writer_changes_only_schedules(tmp_path: Path) -> None:
-    installer = Path("kienzlefon-installer.sh").read_text(encoding="utf-8")
-    marker = "# kienzlefon installer time updater"
-    start = installer.index(marker)
-    end = installer.index("\nPY\n", start)
-    updater = tmp_path / "updater.py"
-    updater.write_text(installer[start:end] + "\n", encoding="utf-8")
+@pytest.mark.parametrize("asterisk_user", ["root", "asterisk"])
+def test_prepare_directories_probes_inbox_for_worker_and_asterisk(tmp_path, asterisk_user):
+    inbox = tmp_path / "Praxis Inbox"
+    inbox.mkdir()
+    existing = inbox / "vorhanden.json.enc"
+    existing.write_bytes(b"Bestand")
+    config = tmp_path / "kienzlefon.toml"
+    config.write_text(Path("config/kienzlefon.toml.example").read_text().replace(
+        "/srv/telepraxis/dahl/inbox", str(inbox)))
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    script = r'''
+source "$1"
+VENV="$2"
+CONFIG_FILE="$2/kienzlefon.toml"
+ps(){ printf '%s asterisk\n' "$AST_USER"; }
+getent(){ [[ "$1" != group ]] || echo 'tp-dahl:x:1234:'; }
+stat(){ printf '1234\n'; }
+id(){ printf '%s\n' "$AST_USER"; }
+install(){ :; }
+setfacl(){ :; }
+runuser(){
+    [[ "$1" == -u ]] || exit 90
+    local user="$2" group=''
+    shift 2
+    if [[ "$1" == -g ]]; then group="$2"; shift 2; fi
+    [[ "$1" == -- ]] || exit 91
+    shift
+    printf '%s:%s\n' "$user" "$group"
+    # Reproduce the false negative of the external test -w on Ubuntu.
+    if [[ "$1" == test && "$2" == -w ]]; then return 1; fi
+    "$@"
+}
+prepare_directories
+'''
+    result = subprocess.run(
+        ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), tmp_path],
+        env={**os.environ, "AST_USER": asterisk_user}, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    expected = ["root:tp-dahl"]
+    if asterisk_user != "root":
+        expected.append("asterisk:")
+    assert result.stdout.splitlines() == expected
+    assert list(inbox.iterdir()) == [existing] and existing.read_bytes() == b"Bestand"
 
-    target = tmp_path / "kienzlefon.toml"
-    source = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
-    source = source.replace('name = "Praxisname"', 'name = "Praxis Unveraendert"')
-    target.write_text(source, encoding="utf-8")
-    environment = dict(os.environ)
-    environment["CONFIG_FILE"] = str(target)
-    for prefix in ("KZF_OPEN", "KZF_PHONE", "KZF_PHARMACY", "KZF_SPECIALIST"):
-        for day in (
-            "MONTAG",
-            "DIENSTAG",
-            "MITTWOCH",
-            "DONNERSTAG",
-            "FREITAG",
-            "SAMSTAG",
-            "SONNTAG",
-        ):
-            environment[f"{prefix}_{day}"] = ""
-    for day in ("MONTAG", "DIENSTAG", "MITTWOCH", "DONNERSTAG", "FREITAG"):
-        environment[f"KZF_OPEN_{day}"] = "08:00-12:00"
-        environment[f"KZF_PHONE_{day}"] = "08:00-10:00"
-        environment[f"KZF_PHARMACY_{day}"] = "08:00-12:00"
-        environment[f"KZF_SPECIALIST_{day}"] = "08:00-12:00"
 
-    subprocess.run([os.sys.executable, str(updater)], check=True, env=environment)
-    with target.open("rb") as handle:
-        result = tomllib.load(handle)
-    assert result["praxis"]["name"] == "Praxis Unveraendert"
-    assert result["oeffnungszeiten"]["montag"] == ["08:00-12:00"]
-    assert result["telefonzeiten"]["freitag"] == ["08:00-10:00"]
-    assert result["apothekenzeiten"] == result["oeffnungszeiten"]
-    assert result["fachstellenzeiten"] == result["oeffnungszeiten"]
-    assert "Zeitprofile jetzt neu konfigurieren?" in installer
-    assert "copy_schedule KZF_OPEN KZF_PHARMACY" in installer
-    assert "copy_schedule KZF_OPEN KZF_SPECIALIST" in installer
+@pytest.mark.parametrize(("kind", "error"), [
+    pytest.param("read-only-permissions", 13, marks=pytest.mark.skipif(
+        os.geteuid() == 0, reason="root kann lokale Modusbits übergehen")),
+    ("not-directory", 20),
+])
+def test_inbox_probe_reports_real_filesystem_error(tmp_path, kind, error):
+    inbox = tmp_path / "inbox"
+    if kind == "not-directory":
+        inbox.write_text("Bestand")
+    else:
+        inbox.mkdir(mode=0o500)
+    script = r'''
+source "$1"
+runuser(){ shift 5; "$@"; }
+check_inbox_write "$2" root tp-dahl
+'''
+    try:
+        result = subprocess.run(
+            ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), inbox],
+            capture_output=True, text=True, timeout=10,
+        )
+    finally:
+        if inbox.is_dir():
+            inbox.chmod(0o700)
+    assert result.returncode != 0
+    assert f"Errno {error}" in result.stderr and str(inbox) in result.stderr
+    assert "root:tp-dahl" in result.stderr
+    if inbox.is_dir():
+        assert list(inbox.iterdir()) == []
+    else:
+        assert inbox.read_text() == "Bestand"
+
+
+@pytest.mark.parametrize("copy_specialist", [False, True])
+def test_update_writer_changes_only_schedules(tmp_path: Path, copy_specialist: bool) -> None:
+    target = tmp_path / "Konfiguration mit Leerzeichen.toml"
+    template = Path("config/kienzlefon.toml.example").read_text(encoding="utf-8")
+    # These existing weekend hours must be cleared by the empty answers.
+    target.write_text(template.replace('samstag = []', 'samstag = ["10:00-12:00"]'))
+    expected = tomllib.loads(target.read_text())
+    opening = ["08:00-12:00", "14:00-17:00"]
+    for day in expected["oeffnungszeiten"]:
+        weekday = day not in ("samstag", "sonntag")
+        expected["oeffnungszeiten"][day] = opening if weekday else []
+        expected["telefonzeiten"][day] = ["08:00-10:00"] if weekday else []
+        expected["apothekenzeiten"][day] = expected["oeffnungszeiten"][day]
+        expected["fachstellenzeiten"][day] = ["09:00-11:00"] if day == "montag" else []
+    if copy_specialist:
+        expected["fachstellenzeiten"] = expected["oeffnungszeiten"].copy()
+
+    answers = ["n", "08:", "25:00-26:00", "12:00-08:00", *([",".join(opening)] * 5),
+               "", "", "j", "08:00-10:00", "", "", "j"]
+    answers += ["j"] if copy_specialist else ["n", "09:00-11:00", *([""] * 6)]
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    script = r"""
+unset CONFIG_FILE
+source "$1"
+VENV="$2"
+CONFIG_FILE="$3"
+collect_time_configuration
+update_existing_times
+"""
+    result = subprocess.run(
+        ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), tmp_path, target],
+        input="\n".join(answers) + "\n", text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "08:" in result.stderr and "25:00-26:00" in result.stderr and "12:00-08:00" in result.stderr
+    assert tomllib.loads(target.read_text()) == expected
+
+
+def test_overlapping_afternoon_repeats_only_that_question(tmp_path):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    script = 'source "$1"; VENV="$2"; collect_opening_schedule; echo "$KZF_OPEN_MONTAG|$KZF_OPEN_DIENSTAG"'
+    answers = ["j", "", "08:00-12:00", "11:00-13:00", "14:00-17:00", *([""] * 6)]
+    result = subprocess.run(
+        ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), tmp_path],
+        input="\n".join(answers) + "\n", text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Ueberlappende Zeitraeume" in result.stderr
+    assert "08:00-12:00,14:00-17:00|08:00-12:00" in result.stdout
+
+
+def test_interrupted_repair_preserves_configuration(tmp_path):
+    target = tmp_path / "zeiten.toml"
+    original = Path("config/kienzlefon.toml.example").read_text().replace('montag = []', 'montag = ["08:"]')
+    target.write_text(original)
+    result = subprocess.run(
+        [os.sys.executable, "-m", "kienzlefon.installer_times", "repair", target],
+        input="08:00-12:00\n", text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode != 0
+    assert target.read_text() == original
+
+
+def test_queue_number_dialog_after_repair_of_saved_monday(app_config, tmp_path):
+    target = app_config.source
+    target.write_text(target.read_text().replace('[oeffnungszeiten]\nmontag = []',
+                                                 '[oeffnungszeiten]\nmontag = ["08:"]'))
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    script = r"""
+source "$1"
+VENV="$2"
+CONFIG_FILE="$3"
+update_existing_times repair
+collect_direct_numbers
+update_existing_direct_numbers
+"""
+    answers = ["08:00-12:00", "j", "49233190001", "test-queue", "test-secret-queue",
+               "sip.example.test", "", "", "", "n"]
+    result = subprocess.run(
+        ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), tmp_path, target],
+        input="\n".join(answers) + "\n", text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    data = tomllib.loads(target.read_text())
+    assert data["oeffnungszeiten"]["montag"] == ["08:00-12:00"]
+    queue = data["sip_direkte_queue"]
+    assert queue["aktiv"] and queue["rufnummer"] == "49233190001"
+    assert queue["expiration"] == 300 and queue["outbound_proxy"] == ""
+    assert not queue["ausgehend_verwenden"] and not data["sip_rotes_telefon"]["aktiv"]
 
 
 def test_installer_checks_wav16_and_loudnorm_support() -> None:
@@ -702,7 +833,7 @@ def test_music_installer_defaults_and_existing_choices(tmp_path, installed, mode
         assert tomllib.loads(config.read_text())['wartemusik'] == {'installiert': installed, 'modus': mode}
 
 
-@pytest.mark.parametrize("mode", ["neu", "update", "neukonfiguration"])
+@pytest.mark.parametrize("mode", ["neu", "update", "update-defekte-zeit", "neukonfiguration"])
 def test_configuration_dialog_always_offers_direct_lines_commander_and_audio(app_config, tmp_path, mode):
     import shlex
 
@@ -715,6 +846,9 @@ def test_configuration_dialog_always_offers_direct_lines_commander_and_audio(app
         # Use a working, existing second registration.
         text = text.replace('[sip_rotes_telefon]\naktiv = false\nrufnummer = ""\nbenutzer = ""\npasswort = ""\ndomain = ""',
                             '[sip_rotes_telefon]\naktiv = true\nrufnummer = "491234"\nbenutzer = "test"\npasswort = "old-rot"\ndomain = "sip.example.test"')
+        if mode == "update-defekte-zeit":
+            text = text.replace('[oeffnungszeiten]\nmontag = []', '[oeffnungszeiten]\nmontag = ["08:"]')
+            assert tomllib.loads(text)["oeffnungszeiten"]["montag"] == ["08:"]
         cfg.write_text(text)
         assert tomllib.loads(text)["sip_rotes_telefon"]["passwort"] == "old-rot"
     binary = tmp_path / "bin"
@@ -733,7 +867,8 @@ ask_yes_no(){
   printf 'Frage %s | %s\n' "$2" "$3"
   local answer=n
   case "$2" in
-    Vorhandene*Kienzlefon-Konfiguration*) [[ "$MODE" != update ]] || answer=y ;;
+    Vorhandene*Kienzlefon-Konfiguration*) [[ "$MODE" != update* ]] || answer=y ;;
+    Zeitprofile\ jetzt*) [[ "$MODE" == update-defekte-zeit ]] || answer=y ;;
     Audio\ beilegen*) [[ "$MODE" != neu ]] || answer=y ;;
     Der\ lokale\ Praxis-Abholer*|Beide\ Modelle*) answer=y ;;
     *) [[ "$3" != j ]] || answer=y ;;
@@ -758,6 +893,7 @@ collect_configuration
         ["bash", "-c", script, "dialog", root / "kienzlefon-installer.sh", tmp_path, cfg,
          root, mode, app_config.telepraxis.public_key],
         env={**os.environ, "PYTHONPATH": str(root)}, capture_output=True, text=True, timeout=40,
+        input="08:\n08:00-12:00\n" if mode == "update-defekte-zeit" else "",
     )
     assert result.returncode == 0, result.stderr
     for label in ("die direkte Praxisqueue", "den Rufweg ROT"):
@@ -765,9 +901,76 @@ collect_configuration
     assert result.stdout.count("Frage IP-Adresse des kienzledoku-Commanders") == 1
     assert f"Audio beilegen? Bei Nein wird nur JSON ausgegeben. | {'n' if mode == 'neu' else 'j'}" in result.stdout
     data = tomllib.loads(cfg.read_text())
+    if mode == "update-defekte-zeit":
+        assert result.stdout.count("[oeffnungszeiten].montag korrigieren") == 2
+        assert data["oeffnungszeiten"]["montag"] == ["08:00-12:00"]
     assert data["whisper"]["commander_ip"] == "192.0.2.42"
     assert data["telepraxis"]["demo"] is (mode != "neu")
     assert data["telepraxis"]["audio_beilegen"] is (mode == "neu")
     assert ("Frage Der lokale Praxis-Abholer" in result.stdout) is (mode == "neu")
     if mode != "neu":
         assert data["sip_rotes_telefon"]["passwort"] == "old-rot"
+
+
+def test_endpoint_credentials_are_separate_from_provider_configuration(app_config, capsys, tmp_path, monkeypatch):
+    from kienzlefon.installer_sip import print_accounts
+    path = tmp_path / "pjsip.conf"
+    path.write_text("[201-auth]\nusername=201\npassword=alpha\\;beta; Kommentar\n"
+                    "[provider-auth]\nusername=trunk\npassword=trunk-secret\n")
+    monkeypatch.setenv("KFX_PHONE_COUNT", "2")
+    monkeypatch.setenv("KFX_PHONE_ENDPOINT_202_PASSWORD", "local-secret")
+    print_accounts(app_config.source, path)
+    output = capsys.readouterr().out
+    assert all(value in output for value in ("201", "alpha;beta", "202", "local-secret", "test-red-secret"))
+    assert "trunk-secret" not in output and "Kommentar" not in output
+
+
+def test_number_dialog_reprompts_when_basis_number_uses_another_format(app_config, tmp_path):
+    script = r'''
+source "$1"
+VENV="$2"
+CONFIG_FILE="$3"
+KZF_AREA_CODE=02331
+KFX_PHONE_IN_SIP_NUMBER=49233190008
+KFX_FAX_DID=49233190000
+collect_direct_numbers
+update_existing_direct_numbers
+'''
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    answers = ["j", "0233190008", "90000", "49233190009", "", "queue-secret", "sip.1und1.de", "", "", "",
+               "j", "0049233190009", "49233190010", "", "red-secret", "sip.1und1.de", "", "", ""]
+    result = subprocess.run(["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(),
+                             tmp_path, app_config.source], input="\n".join(answers) + "\n",
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.count("bereits belegt") == 3
+    data = tomllib.loads(app_config.source.read_text())
+    assert data["sip_direkte_queue"]["rufnummer"] == "49233190009"
+    assert data["sip_rotes_telefon"]["rufnummer"] == "49233190010"
+
+
+def test_installer_activates_local_routing_and_reuses_an_existing_setup(app_config, tmp_path):
+    from kienzlefon.config import load_config
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "python").symlink_to(os.sys.executable)
+    setup = binary / "kienzlefon-control-setup"
+    setup.write_text('#!/bin/sh\nexec "$(dirname "$0")/python" -m kienzlefon.control_setup "$@"\n')
+    setup.chmod(0o755)
+    script = r'''
+source "$1"
+VENV="$2"
+CONFIG_FILE="$3"
+collect_statistics_configuration
+configure_local_routing
+'''
+    command = ["bash", "-c", script, "test", Path("kienzlefon-installer.sh").resolve(), tmp_path, app_config.source]
+    for answers, enabled in (("praxis.test\nn\n", False), ("praxis.test\nj\npraxis-test\n", True), ("", True)):
+        result = subprocess.run(command, input=answers, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        loaded = load_config(app_config.source)
+        assert loaded.control_api.enabled is enabled
+        if enabled:
+            assert loaded.control_api.pbx_id == "praxis-test"
+            assert loaded.control_api.bind == "127.0.0.1"

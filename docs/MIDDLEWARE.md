@@ -28,6 +28,10 @@ UserEvents `KienzlefonCallEntered` und `KienzlefonCallRoute`. Tageszählung
 und dauerhafte Speicherung gehören zur T2med-Middleware. Die Anlagenseite ist
 im [Prüfbericht](TESTS-2.6.0.md) beschrieben.
 
+## Lokale Vollinstallation und Reparatur
+
+Ab Fon 2.6.10 und T2med 1.5.5 aktiviert die Auswahl „Vollständige T2med-Middleware hier installieren und mit der App verbinden“ die Statistik mit einer gemeinsamen Anlagenkennung. `--kombi --mit-t2med` übernimmt eine vorhandene Kennung oder erzeugt sie bei der Ersteinrichtung. Fon richtet seinen lokalen Control-Dienst und den Dialplan ein. Der anschließende Middleware-Schritt `--with-app-telephony` registriert bei Bedarf eine Identität mit Leserecht und prüft die Eingangs- und Wegeereignisse im geladenen Dialplan. Er verwendet den lokal installierten Fon-Helfer. Eine bestehende Installation der Version 2.6.9 zuerst mit dem Fon-Schritt des Universalinstallers aktualisieren.
+
 ## Installation und Update
 
 Im Hauptinstaller die Middleware einschalten und die beiden Funktionen

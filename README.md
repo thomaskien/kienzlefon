@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.6.1
+Version: 2.7
 
 - 2.4.4: G.722-Fix fuer KI-Endpunkte in Installation und Updates dauerhaft uebernommen.
 - 2.4.3: Separate Kokoro-Python-Laufzeit fuer Systeme mit Python 3.13 ergaenzt.
@@ -49,7 +49,16 @@ direkt in der Praxis abgelegt oder verschlüsselt zur Abholung bereitgestellt.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.6.1**
+Version: **2.7**
+
+Bei Installation und Update bietet der Installer die lokale Verwaltung der Rufgruppen Normal und ROT an. Im Admin-Menü stehen danach die aktuelle Teilnahme, die Standardbesetzung und die Freigaben für App und Middleware zur Verfügung. Der lokale Steuerungsdienst bindet sich bei der Ersteinrichtung an Loopback.
+
+Unter **Rufgruppen** lassen sich Geräte umbenennen und externe Änderungen für alle authentifizierten Praxisarbeitsplätze oder nur für ausgewählte Plätze freigeben. Die Einrichtung des Schaltzugangs ist unter [Anlagensteuerung](docs/ANLAGENSTEUERUNG.md) beschrieben.
+
+Die Hauptnummer für Begrüßung und IVR stammt aus der eingehenden Telefonieleitung der Kienzlefax-Basis. Im Kienzlefon-Menü werden davon getrennte Direktnummern für Praxisqueue und ROT vergeben. Bei 1&1 kann der Registrar frühere Kontakte bis zum Ablauf ihrer Registrierung führen. Der Installer meldet andere Geräte nicht ab.
+
+Am Installationsende erscheint die SIP-Einrichtungsliste für die lokalen Endgeräte. Im Webinterface lassen sich Praxisname und Ansagenreihenfolge anpassen und das Google-Sprechtempo mit einer einzelnen Hörprobe testen. [Bedienung des Webinterfaces](webinterface/README.md#bedienung)
+
 
 ## Eigenschaften
 
@@ -100,6 +109,22 @@ Version: **2.6.1**
   Fachstellenzeiten blockiert
 - integriertes Administrations-Webinterface mit vier Zeitbloecken, einem
   alternativen Anrufsbaum und expliziten Ansagenmodi
+
+## Neu in 2.6.6
+
+Zeitfenster brauchen eine Anfangs- und eine Endzeit, etwa `08:00-12:00`.
+Mehrere Fenster am selben Tag werden in zeitlicher Reihenfolge durch Kommas
+getrennt. Ein leerer Tag bedeutet „geschlossen“. Der Installer fragt bei einer
+ungültigen Eingabe erneut nach. Um beim Update nur fehlerhafte gespeicherte
+Tage zu korrigieren, die bestehende Konfiguration übernehmen und **Zeitprofile
+jetzt neu konfigurieren?** mit **Nein** beantworten.
+
+## Neu in 2.6.3
+
+Beim Update lassen sich die vier Zeitprofile einer bestehenden Anlage erneut
+erfassen. Einzeln eingegebene Tageszeiten werden gespeichert. Ein leerer Tag
+bedeutet „geschlossen“. Nach einem Abbruch mit `KeyError: 'CONFIG_FILE'` den
+Installer mit dem korrigierten Paket erneut starten und die Zeiten erneut eingeben.
 
 ## Neu in 2.6.1
 
@@ -289,6 +314,17 @@ Details, Exportformat und Testfaelle: [Middleware-Anbindung](docs/MIDDLEWARE.md)
 
 ## Installation
 
+### Universalinstaller
+
+Auf dem Linux-Server in einem eigenen Installationsverzeichnis den Universalinstaller herunterladen und im Terminal starten. Im Menü die gewünschten Rollen für Fax, Fon, Praxis-App oder T2med wählen.
+
+```bash
+wget -O kienzle-installieren.sh https://kienzlefon.de/kienzle-installieren.sh &&
+sudo bash ./kienzle-installieren.sh
+```
+
+Für die aktuellen Testversionen die Modularchive (`.tar.gz`) vor dem Start in `pakete/` neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Modularchiven auf GitHub.
+
 ### Als zweite Komponente nach Kienzlefax
 
 Das Fon-Paket auf macOS oder Linux im gewuenschten Arbeitsbaum mit Bash und
@@ -411,8 +447,12 @@ gleichzeitig klingeln sollen.
 Die Installation laedt jedes konfigurierte Whisper-Modell genau einmal, die
 Piper-Stimme als weiter waehlbare Alternative und bei Kokoro-Auswahl das
 pruefsummengesicherte Thorsten-Modell in einer separaten CPU-Umgebung.
-Qwen3-TTS wird nur nach ausdruecklicher Auswahl
-mit dem geprueften Offline-Installer v1.5 eingerichtet. Bei weniger als 16 GB warnt der Installer vor der
+Für Qwen3-TTS verwendet der Hauptinstaller seit 2.6.2 auch beim normalen
+Start den mitgelieferten Installer v1.5. Fehlt die Datei, fragt das Menü,
+ob sie von GitHub geladen werden darf. Enter lehnt den Download ab und beendet
+die Installation. Vor der Ausführung prüft Kienzlefon die fest hinterlegte
+SHA-256-Summe. Bei einer Abweichung bricht die Installation ab.
+Bei weniger als 16 GB warnt der Installer vor der
 gleichzeitigen Verwendung beider Whisper-Modelle, erlaubt sie aber nach
 ausdruecklicher Bestaetigung.
 Je nach Server und Internetanbindung kann dieser Schritt laenger dauern.
@@ -623,6 +663,11 @@ Installationshelfer laesst sich auch direkt starten.
 sudo ./kienzlefon-webinterface-installer.sh
 ```
 
+Für ein internes Praxis-LAN kann **1 · Eigener schlanker PHP-Systemdienst**
+an die feste private IPv4-Adresse des Servers gebunden werden. Die Anmeldung
+erfolgt mit Kennwort über HTTP, standardmäßig auf Port 8088. In dieser
+Betriebsart darf der Dienst keinesfalls aus dem Internet erreichbar sein.
+
 Der Installationshelfer aktiviert den Export des fluechtigen
 Laufzeitstatus als Boot-Dienst. Dadurch werden nach dem Leeren von `/run` bei
 einem Systemneustart insbesondere der konfigurierte Passwortmodus und die
@@ -754,4 +799,9 @@ und systemd. Der vollstaendige Lauf mit `python -m pytest -q` bestand mit
 647 Tests und 34 Untertests, einschliesslich der lokalen Loopback-Testserver.
 
 Weitere Einzelheiten stehen in [Architektur](docs/ARCHITEKTUR.md),
-[IVR-Ablauf](docs/IVR.md) und [Telepraxis-Format](docs/TELEPRAXIS.md).
+[IVR-Ablauf](docs/IVR.md), [Telepraxis-Format](docs/TELEPRAXIS.md) und
+[SMS-Ausgangsqueue mit eigenständigem Worker](docs/SMS-QUEUE.md).
+
+Maßgeblich für SMS-Bibliotheken, Konfiguration und Worker ist künftig das
+separate IONOS-Repository (`ionos`). Die Demo wird nur gezielt abgeglichen;
+sie ersetzt die reguläre App nicht. Siehe [SMS-Repository-Zuordnung](docs/SMS-REPOSITORIES.md).

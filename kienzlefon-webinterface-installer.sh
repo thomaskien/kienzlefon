@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installationshelfer fuer das in Kienzlefon integrierte Webinterface.
-# Kienzlefon-Version: 2.6.1
+# Kienzlefon-Version: 2.7
 # Changelog:
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
@@ -32,7 +32,7 @@ installer_error() {
 }
 trap 'installer_error "$?" "$LINENO"' ERR
 
-VERSION="2.6.1"
+VERSION="2.7"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CONFIG_FILE="/etc/kienzlefon/kienzlefon.toml"
 WEB_CONFIG="/etc/kienzlefon/webinterface.json"
@@ -76,7 +76,7 @@ ask_yes_no() {
 choose_server() {
   local answer
   printf '\nBetriebsart:\n'
-  printf '  1) Eigener schlanker PHP-Systemdienst\n'
+  printf '  1) Eigener schlanker PHP-Systemdienst (Praxis-LAN, localhost oder WireGuard)\n'
   printf '  2) Apache-Konfiguration\n'
   printf '  3) Nginx-Konfiguration\n'
   while true; do
@@ -87,6 +87,49 @@ choose_server() {
       3) SERVER_MODE="nginx"; return ;;
     esac
   done
+}
+
+first_web_ipv4() {
+  "${VENV}/bin/python" - "$@" <<'PY'
+import ipaddress
+import sys
+
+lan = tuple(map(ipaddress.IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
+for candidate in sys.argv[2:]:
+    try:
+        address = ipaddress.IPv4Address(candidate)
+    except ValueError:
+        continue
+    if address.is_unspecified or address.is_multicast or address.is_reserved:
+        continue
+    if sys.argv[1] == "standalone" and not (address.is_loopback or any(address in net for net in lan)):
+        continue
+    print(address)
+    break
+PY
+}
+
+ask_passwordless() {
+  local prompt="$1" default=n
+  if [[ -f "$WEB_CONFIG" ]]; then
+    default="$("${VENV}/bin/python" - "$WEB_CONFIG" "$SERVER_MODE" "$LISTEN_IP" "$WG_INTERFACE" <<'PY'
+import json, sys
+from pathlib import Path
+
+try:
+    previous = json.loads(Path(sys.argv[1]).read_text())
+except (OSError, ValueError):
+    previous = {}
+same_binding = isinstance(previous, dict) and (
+    previous.get("server"), previous.get("listen"), previous.get("wireguard_interface", "")
+) == tuple(sys.argv[2:])
+print("y" if same_binding and previous.get("passwordless") is True else "n")
+PY
+)"
+  fi
+  local choice
+  ask_yes_no choice "$prompt" "$default"
+  if [[ "$choice" == y ]]; then PASSWORDLESS=true; fi
 }
 
 choose_wireguard() {
@@ -125,24 +168,42 @@ choose_wireguard() {
     WG_INTERFACE="$selected"
     LISTEN_IP="$address"
     TLS_ENABLED="false"
-    ask_yes_no use_passwordless "Auf diesem WireGuard-Interface passwortlosen Betrieb erlauben?" n
-    [[ "$use_passwordless" == "y" ]] && PASSWORDLESS="true"
+    ask_passwordless "Auf diesem WireGuard-Interface passwortlosen Betrieb erlauben?"
     return 0
   fi
 
   local suggested
-  suggested="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  suggested="${suggested:-127.0.0.1}"
-  read -r -p "Feste IPv4-Adresse fuer das Webinterface [${suggested}]: " LISTEN_IP
-  LISTEN_IP="${LISTEN_IP:-$suggested}"
-  [[ "$LISTEN_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "Nur eine feste IPv4-Adresse ist zulaessig."
-  [[ "$LISTEN_IP" != "0.0.0.0" ]] || die "Das Webinterface darf nicht auf allen Interfaces lauschen."
-  PASSWORDLESS="false"
-  if [[ "$LISTEN_IP" == "127.0.0.1" ]]; then
+  local -a addresses
+  read -r -a addresses <<<"$(hostname -I 2>/dev/null || true)"
+  suggested="$(first_web_ipv4 "$SERVER_MODE" "${addresses[@]}" 127.0.0.1)"
+  while true; do
+    read -r -p "Feste IPv4-Adresse fuer das Webinterface [${suggested}]: " answer
+    LISTEN_IP="$(first_web_ipv4 "$SERVER_MODE" "${answer:-$suggested}")"
+    [[ -z "$LISTEN_IP" ]] || break
+    if [[ "$SERVER_MODE" == "standalone" ]]; then
+      printf 'Bitte eine feste private IPv4-Adresse des Praxisservers oder 127.0.0.1 eingeben.\n'
+    else
+      printf 'Bitte eine gültige einzelne IPv4-Adresse des Servers eingeben.\n'
+    fi
+  done
+  if [[ "$SERVER_MODE" == "standalone" || "$LISTEN_IP" == 127.* ]]; then
     TLS_ENABLED="false"
+    if [[ "$SERVER_MODE" == "standalone" && "$LISTEN_IP" != 127.* ]]; then
+      printf '\nDer PHP-Systemdienst ohne WireGuard ist auf dieser LAN-Adresse nur für den Betrieb in der Praxis zulässig.\n'
+      printf 'Der Dienst darf keinesfalls aus dem Internet erreichbar sein. Keine Portfreigabe oder öffentliche Proxy-Weiterleitung einrichten.\n'
+      printf 'Die Verbindung im Praxisnetz verwendet unverschlüsseltes HTTP.\n'
+    fi
   else
-    [[ "$SERVER_MODE" != "standalone" ]] || die "Ohne WireGuard ist der PHP-Systemdienst nur auf 127.0.0.1 zulaessig. Bitte Apache oder Nginx fuer HTTPS waehlen."
     TLS_ENABLED="true"
+  fi
+  if [[ "$LISTEN_IP" == 127.* ]]; then
+    ask_passwordless "Webinterface auf diesem Rechner ohne Kennwort betreiben?"
+  elif [[ -n "$(first_web_ipv4 standalone "$LISTEN_IP")" ]]; then
+    if [[ "$SERVER_MODE" != standalone ]]; then
+      printf 'Der Betrieb ohne Kennwort ist nur in der Praxis zulässig. Der Dienst darf keinesfalls aus dem Internet erreichbar sein.\n'
+    fi
+    printf 'Ohne Kennwort kann jeder mit Zugriff aus dem Praxisnetz die Telefonanlage verwalten.\n'
+    ask_passwordless "Webinterface im Praxis-LAN ohne Kennwort betreiben?"
   fi
 }
 
@@ -173,6 +234,7 @@ PY
 
 configure_password() {
   local current password first second
+  [[ "$PASSWORDLESS" == "false" ]] || return 0
   current="$("${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:
@@ -214,7 +276,7 @@ else:
     next_section = re.search(r"^\[[^]]+\]\s*$", text[match.end():], re.M)
     end = match.end() + (next_section.start() if next_section else len(text) - match.end())
     body = text[match.end():end]
-    replaced, count = re.subn(r"^(passwort\s*=\s*).*$", rf"\g<1>{literal}", body, count=1, flags=re.M)
+    replaced, count = re.subn(r"^(passwort\s*=\s*).*$", lambda match: match[1] + literal, body, count=1, flags=re.M)
     if count == 0:
         replaced = body.rstrip() + f"\npasswort = {literal}\n"
     updated = text[:match.end()] + replaced + text[end:]
@@ -390,6 +452,7 @@ Description=Kienzlefon TOML-Aenderungen fuer das Webinterface beobachten
 
 [Path]
 PathChanged=${CONFIG_FILE}
+PathChanged=/var/lib/kienzlefon/control/members-confirmed.json
 Unit=kienzlefon-webinterface-refresh.service
 
 [Install]
@@ -457,7 +520,9 @@ ReadWritePaths=${RUNTIME_DIR}/inbox ${RUNTIME_DIR}/sessions
 WantedBy=multi-user.target
 EOF
   systemctl disable --now kienzlefon-webinterface-apache.service 2>/dev/null || true
-  systemctl enable --now kienzlefon-webinterface.service
+  systemctl daemon-reload
+  systemctl enable kienzlefon-webinterface.service
+  systemctl restart kienzlefon-webinterface.service
 }
 
 install_apache() {
@@ -617,7 +682,7 @@ main() {
   [[ "$TLS_ENABLED" == "true" ]] && scheme="https"
   printf '\nWebinterface installiert: %s://%s:%s/\n' "$scheme" "$LISTEN_IP" "$PORT"
   if [[ "$PASSWORDLESS" == "true" ]]; then
-    printf 'Zugriff: passwortlos, ausschliesslich ueber WireGuard %s\n' "$WG_INTERFACE"
+    printf 'Zugriff: ohne Kennwort auf %s%s\n' "$LISTEN_IP" "${WG_INTERFACE:+ (WireGuard $WG_INTERFACE)}"
   else
     printf 'Zugriff: Administratorkennwort aus [webinterface].passwort\n'
   fi

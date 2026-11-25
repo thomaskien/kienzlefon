@@ -34,6 +34,18 @@ GENERATED_PROMPTS = {
 }
 
 
+MENU_PROMPTS = ("menu_intro", "menu_open", "menu_closed", "opening_hours_choice",
+                "pharmacy_access", "specialist_access", "phone_hours")
+MENU_CHOICES = ("praxis", "rezept", "ueberweisung", "termin", "weitere")
+
+
+def validated_order(value: object, choices: tuple[str, ...]) -> tuple[str, ...]:
+    if (not isinstance(value, (tuple, list)) or len(value) != len(choices)
+            or any(not isinstance(item, str) for item in value) or set(value) != set(choices)):
+        raise ValueError("Die Reihenfolge muss jede Ansage genau einmal enthalten")
+    return tuple(value)
+
+
 def validate_keys(raw: object) -> dict[str, str]:
     if not isinstance(raw, Mapping) or raw.keys() - DEFAULTS.keys():
         raise ValueError("Unbekannte IVR-Funktion")
@@ -50,7 +62,7 @@ def validate_keys(raw: object) -> dict[str, str]:
     return result
 
 
-def generated_texts(keys: Mapping[str, str]) -> dict[str, str]:
+def generated_texts(keys: Mapping[str, str], order: tuple[str, ...] = MENU_CHOICES) -> dict[str, str]:
     def sentence(name: str, words: str) -> str:
         key = keys[name]
         spoken = {"*": "Stern", "#": "Raute"}.get(key, key)
@@ -65,13 +77,14 @@ def generated_texts(keys: Mapping[str, str]) -> dict[str, str]:
         "termin": "Für einen Termin",
         "weitere": "Für eine Rückrufbitte oder ein sonstiges Anliegen",
     }
-    closed = combined(concern_menu)
+    menu = {"praxis": "Um mit der Praxis zu sprechen", **concern_menu}
+    closed = combined({name: menu[name] for name in order if name != "praxis"})
     additional = dict(concern_menu)
     if not (keys["rueckruf"] or keys["sonstiges"]):
         additional.pop("weitere")
-    opened = combined({"praxis": "Um mit der Praxis zu sprechen"})
+    opened = combined({name: menu[name] for name in order})
     return {
-        "menu_open": " ".join(filter(None, (opened, closed))) or "Bitte bleiben Sie in der Leitung.",
+        "menu_open": opened or "Bitte bleiben Sie in der Leitung.",
         "menu_closed": closed or "Bitte bleiben Sie in der Leitung.",
         "opening_hours_choice": sentence("oeffnungszeiten", "Für unsere Öffnungszeiten") or "Bitte bleiben Sie in der Leitung.",
         "pharmacy_access": sentence("apotheke", "Apotheken") or "Bitte bleiben Sie in der Leitung.",

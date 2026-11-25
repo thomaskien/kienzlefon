@@ -2,8 +2,9 @@
 # ==============================================================================
 # kienzlefon-installer.sh
 #
-# Version: 2.6.1
+# Version: 2.7
 # Changelog:
+# - 2.6.12: Nebenstellennamen in Asterisk uebernehmen und nach dem PJSIP-Reload pruefen.
 # - 2.4.4: G.722 und lokale Codec-Praeferenz fuer KI-Endpunkte dauerhaft erzeugen.
 # - 2.4.3: Separate Kokoro-Python-Laufzeit bei fehlendem Python 3.11/3.12 installieren.
 # - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
@@ -41,7 +42,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.6.1"
+VERSION="2.7"
 PROJECT_URL="https://github.com/thomaskien/kienzlefon"
 ARCHIVE_URL="${PROJECT_URL}/archive/refs/heads/main.tar.gz"
 KFX_INSTALLER_URL="https://raw.githubusercontent.com/thomaskien/kienzlefax-fuer-linux/main/kienzlefax-installer.sh"
@@ -61,11 +62,13 @@ VENV="${INSTALL_ROOT}/venv"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 KOMBI="n"
 MIT_T2MED="n"
+FULL_PBX_ID=""
 REPORTING_ERROR="n"
 EXISTING_INSTALL="n"
 KZF_INSTALL_QWEN="n"
 KZF_GOOGLE_API_KEY=""
-KZF_GOOGLE_VOICE="de-DE-Chirp3-HD-Sulafat"
+GOOGLE_DEFAULT_VOICE="de-DE-Chirp3-HD-Enceladus"
+KZF_GOOGLE_VOICE="$GOOGLE_DEFAULT_VOICE"
 KZF_GOOGLE_LANG="de-DE"
 KZF_GOOGLE_RATE="0.93"
 KZF_FORCE_PROMPTS="n"
@@ -109,9 +112,9 @@ ask_yes_no(){
 }
 
 ask_value(){
-  local __var="$1" prompt="$2" default="${3-}" value=""
-  read -r -p "${prompt}${default:+ [${default}]}: " value
-  printf -v "$__var" '%s' "${value:-$default}"
+  local __var="$1" prompt="$2" default="${3-}" __answer=""
+  read -r -p "${prompt}${default:+ [${default}]}: " __answer
+  printf -v "$__var" '%s' "${__answer:-$default}"
 }
 
 qwen_voice_from_choice(){
@@ -152,21 +155,59 @@ qwen_generator_knows_worker(){
 google_conf_value(){
   # usage: google_conf_value KEY  (liest einen Wert aus der Google-TTS-Konfiguration)
   [[ -r "$GOOGLE_CONFIG" ]] || return 0
-  sed -n "s/^${1}=//p" "$GOOGLE_CONFIG" | head -n 1 | tr -d '"'"'"'\r'
+  sed -nE "s/^[[:space:]]*${1}[[:space:]]*=[[:space:]]*//p" "$GOOGLE_CONFIG" |
+    tail -n 1 | sed -E "s/[[:space:]]+$//; s/^[\"']//; s/[\"']$//"
+}
+
+choose_google_voice(){
+  local voices=(
+    Achernar Achird Algenib Algieba Alnilam Aoede Autonoe Callirrhoe Charon Despina
+    Enceladus Erinome Fenrir Gacrux Iapetus Kore Laomedeia Leda Orus Puck
+    Pulcherrima Rasalgethi Sadachbia Sadaltager Schedar Sulafat Umbriel Vindemiatrix Zephyr Zubenelgenubi
+  )
+  local i voice label choice default="$KZF_GOOGLE_VOICE"
+  printf '\nGoogle-Stimmen für Deutsch (Deutschland)\n'
+  for i in "${!voices[@]}"; do
+    voice="de-DE-Chirp3-HD-${voices[i]}"
+    label=""
+    [[ "$voice" != "$GOOGLE_DEFAULT_VOICE" ]] || label=" (Standard)"
+    [[ "$voice" != "$KZF_GOOGLE_VOICE" ]] || default="$((i + 1))"
+    printf '%2d  %s%s\n' "$((i + 1))" "$voice" "$label"
+  done
+  while true; do
+    ask_value choice "Google-Stimme (Nummer oder vollständige Bezeichnung)" "$default"
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+      if [[ "$choice" =~ ^[0-9]{1,2}$ ]] && (( 10#$choice >= 1 && 10#$choice <= ${#voices[@]} )); then
+        KZF_GOOGLE_VOICE="de-DE-Chirp3-HD-${voices[10#$choice - 1]}"
+        return
+      fi
+    elif [[ "$choice" =~ ^[A-Za-z0-9_-]+$ ]]; then
+      KZF_GOOGLE_VOICE="$choice"
+      return
+    fi
+    printf 'Bitte eine Nummer von 1 bis %d oder die vollständige Stimmbezeichnung eingeben.\n' "${#voices[@]}"
+  done
 }
 
 collect_google_tts_configuration(){
-  local keep="n" key=""
+  local keep="n" key="" admin_rate=""
+  if [[ -r "$CONFIG_FILE" ]]; then
+    GOOGLE_CONFIG="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("tts",{}).get("google_konfig",sys.argv[2]))' "$CONFIG_FILE" "$GOOGLE_CONFIG")"
+    admin_rate="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("tts",{}).get("google_sprechtempo",""))' "$CONFIG_FILE")"
+    [[ "$GOOGLE_CONFIG" == /* ]] || die "Der Pfad zur Google-TTS-Konfiguration muss absolut sein."
+  fi
   KZF_GOOGLE_API_KEY="$(google_conf_value API_KEY)"
-  KZF_GOOGLE_VOICE="$(google_conf_value VOICE)"; KZF_GOOGLE_VOICE="${KZF_GOOGLE_VOICE:-de-DE-Chirp3-HD-Sulafat}"
+  KZF_GOOGLE_VOICE="$(google_conf_value VOICE)"
+  KZF_GOOGLE_VOICE="${KZF_GOOGLE_VOICE:-$GOOGLE_DEFAULT_VOICE}"
   KZF_GOOGLE_LANG="$(google_conf_value LANG)"; KZF_GOOGLE_LANG="${KZF_GOOGLE_LANG:-de-DE}"
-  KZF_GOOGLE_RATE="$(google_conf_value RATE)"; KZF_GOOGLE_RATE="${KZF_GOOGLE_RATE:-0.93}"
+  KZF_GOOGLE_RATE="$(google_conf_value RATE)"; KZF_GOOGLE_RATE="${admin_rate:-${KZF_GOOGLE_RATE:-0.93}}"
   KZF_GOOGLE_ENDPOINT="$(google_conf_value ENDPOINT)"
   printf '\nGoogle Cloud Text-to-Speech (Chirp 3 HD):\n'
   printf '  Die Ansagetexte werden einmalig an Google uebertragen; es entstehen nur beim Erzeugen Kosten.\n'
   printf '  Benoetigt wird ein API-Schluessel mit Zugriff auf die Cloud Text-to-Speech API.\n'
   if [[ -n "$KZF_GOOGLE_API_KEY" ]]; then
-    ask_yes_no keep "Vorhandenen Google-API-Schluessel beibehalten?" "j"
+    printf '  Google-API-Schlüssel (schon gesetzt)\n'
+    ask_yes_no keep "Gespeicherten Schlüssel beibehalten?" "j"
   fi
   if [[ "$keep" != "y" ]]; then
     while true; do
@@ -176,12 +217,9 @@ collect_google_tts_configuration(){
       printf 'Der Schluessel darf nur Buchstaben, Ziffern, - und _ enthalten (mindestens 20 Zeichen).\n'
     done
     KZF_GOOGLE_API_KEY="$key"
+    write_google_tts_configuration
   fi
-  while true; do
-    ask_value KZF_GOOGLE_VOICE "Google-Stimme" "$KZF_GOOGLE_VOICE"
-    [[ "$KZF_GOOGLE_VOICE" =~ ^[A-Za-z0-9_-]+$ ]] && break
-    printf 'Ungueltiger Stimmenname.\n'
-  done
+  choose_google_voice
   while true; do
     ask_value KZF_GOOGLE_RATE "Sprechtempo (0.25 bis 2.0; kleiner = langsamer)" "$KZF_GOOGLE_RATE"
     "${VENV}/bin/python" -c 'import sys; v=float(sys.argv[1]); sys.exit(0 if 0.25 <= v <= 2.0 else 1)' \
@@ -417,17 +455,23 @@ update_existing_tts(){
 }
 
 install_qwen_tts(){
-  local installer checksum
+  local installer checksum online="n"
+  local packaged="${SOURCE_TARGET}/install-kienzlefon-qwen3-tts-v1.5.sh"
   [[ "$KZF_INSTALL_QWEN" == "y" ]] || return 0
+  if [[ ! -e "$packaged" && ! -L "$packaged" ]]; then
+    [[ "$KOMBI" != "y" ]] || die "Qwen3-TTS-Installer v1.5 fehlt im Fon-Paket."
+    ask_yes_no online "Der Qwen3-TTS-Installer v1.5 fehlt im Fon-Paket. Jetzt von GitHub herunterladen?" "n"
+    [[ "$online" == "y" ]] || die "Download abgelehnt. Bitte ein vollständiges Fon-Paket verwenden oder eine andere TTS-Engine wählen."
+  fi
   installer="$(mktemp /tmp/kienzlefon-qwen3-tts-v1.5.XXXXXX)"
-  if [[ "$KOMBI" == "y" ]]; then
-    if ! cp -- "${SOURCE_TARGET}/install-kienzlefon-qwen3-tts-v1.5.sh" "$installer"; then
+  if [[ "$online" == "y" ]]; then
+    if ! download "$QWEN_INSTALLER_URL" "$installer"; then
       rm -f -- "$installer"
-      die "Qwen3-TTS-Installer v1.5 fehlt im Fon-Paket."
+      die "Qwen3-TTS-Installer v1.5 konnte nicht geladen werden."
     fi
-  elif ! download "$QWEN_INSTALLER_URL" "$installer"; then
+  elif [[ ! -f "$packaged" ]] || ! cp -- "$packaged" "$installer"; then
     rm -f -- "$installer"
-    die "Qwen3-TTS-Installer v1.5 konnte nicht geladen werden."
+    die "Qwen3-TTS-Installer v1.5 im Fon-Paket konnte nicht gelesen werden."
   fi
   if ! bash -n "$installer"; then
     rm -f -- "$installer"
@@ -604,8 +648,18 @@ update_existing_delivery(){
 }
 
 collect_statistics_configuration(){
-  local current="" choice=""
+  local current="" choice="" control_id=""
+  if [[ "$MIT_T2MED" == y ]]; then
+    export KZF_STATISTICS_PBX_ID="$FULL_PBX_ID"
+    return
+  fi
   if [[ -r "$CONFIG_FILE" ]]; then
+    control_id="$("${VENV}/bin/python" -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],"rb")).get("control_api",{}); print(c.get("pbx_id","") if c.get("enabled") else "")' "$CONFIG_FILE")"
+    if [[ -n "$control_id" ]]; then
+      log "Anrufstatistik verwendet die vorhandene Anlagenkennung der Rufgruppensteuerung: $control_id"
+      export KZF_STATISTICS_PBX_ID="$control_id"
+      return
+    fi
     current="$("${VENV}/bin/python" -c \
       'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb")).get("anrufstatistik", {}).get("pbx_id", ""))' \
       "$CONFIG_FILE")"
@@ -844,16 +898,27 @@ copy_and_install_project(){
   done
 }
 
-#collect_schedule(){
-#  local prefix="$1" label="$2" day variable value
-#  for day in montag dienstag mittwoch donnerstag freitag samstag sonntag; do
-#    variable="${prefix}_${day^^}"
-#    ask_value value "${label} ${day} (z.B. 08:00-12:00,14:00-17:00; leer=geschlossen)" ""
-#    printf -v "$variable" '%s' "$value"
-#    export "$variable"
-#  done
-#}
-
+ask_schedule_value() {
+  local field="$1" prompt="$2" earlier="${3:-}" required="${4:-n}"
+  local candidate status
+  while true; do
+    ask_value "$field" "$prompt" ""
+    candidate="${!field}"
+    if [[ "$required" == "y" && -z "${candidate//[[:space:]]/}" ]]; then
+      printf 'Bitte die gemeinsame Vormittagsöffnungszeit eingeben.\n'
+      continue
+    fi
+    if [[ -n "$earlier" ]]; then
+      candidate="${earlier}${candidate:+,${candidate}}"
+    fi
+    if "${VENV}/bin/python" -m kienzlefon.installer_times validate "$candidate"; then
+      return 0
+    else
+      status=$?
+      [[ "$status" == 2 ]] || return "$status"
+    fi
+  done
+}
 
 collect_schedule() {
   local prefix="$1"
@@ -874,9 +939,8 @@ collect_schedule() {
     variable="${prefix}_${day_key}"
     value=""
 
-    ask_value value \
-      "${label} ${day} (ohne Klammern; z.B. 08:00-12:00,14:00-17:00; leer=geschlossen)" \
-      ""
+    ask_schedule_value value \
+      "${label} ${day} (ohne Klammern; z.B. 08:00-12:00,14:00-17:00; leer=geschlossen)"
 
     printf -v "$variable" '%s' "$value"
     export "$variable"
@@ -903,9 +967,8 @@ collect_opening_schedule() {
     return
   fi
 
-  ask_value morning \
-    "Gemeinsame Vormittagsoeffnungszeit Montag bis Freitag (z.B. 08:00-12:00)" ""
-  [[ -n "$morning" ]] || die "Die gemeinsame Vormittagsoeffnungszeit darf nicht leer sein."
+  ask_schedule_value morning \
+    "Gemeinsame Vormittagsoeffnungszeit Montag bis Freitag (z.B. 08:00-12:00)" "" y
 
   for day in montag dienstag mittwoch donnerstag freitag; do
     case "$day" in
@@ -915,8 +978,8 @@ collect_opening_schedule() {
       donnerstag) day_key="DONNERSTAG"; day_label="Donnerstag" ;;
       freitag) day_key="FREITAG"; day_label="Freitag" ;;
     esac
-    ask_value afternoon \
-      "Praxisoeffnungszeit ${day_label} nachmittags (leer=geschlossen)" ""
+    ask_schedule_value afternoon \
+      "Praxisoeffnungszeit ${day_label} nachmittags (leer=geschlossen)" "$morning"
     combined="$morning"
     if [[ -n "$afternoon" ]]; then
       combined="${combined},${afternoon}"
@@ -924,9 +987,9 @@ collect_opening_schedule() {
     set_schedule_value KZF_OPEN "$day_key" "$combined"
   done
 
-  ask_value weekend "Praxisoeffnungszeiten Samstag (leer=geschlossen)" ""
+  ask_schedule_value weekend "Praxisoeffnungszeiten Samstag (leer=geschlossen)" ""
   set_schedule_value KZF_OPEN "SAMSTAG" "$weekend"
-  ask_value weekend "Praxisoeffnungszeiten Sonntag (leer=geschlossen)" ""
+  ask_schedule_value weekend "Praxisoeffnungszeiten Sonntag (leer=geschlossen)" ""
   set_schedule_value KZF_OPEN "SONNTAG" "$weekend"
 }
 
@@ -939,14 +1002,14 @@ collect_phone_schedule() {
     return
   fi
 
-  ask_value weekdays \
+  ask_schedule_value weekdays \
     "Gemeinsame Telefonzeiten Montag bis Freitag (z.B. 08:00-12:00)" ""
   for day_key in MONTAG DIENSTAG MITTWOCH DONNERSTAG FREITAG; do
     set_schedule_value KZF_PHONE "$day_key" "$weekdays"
   done
-  ask_value weekend "Telefonzeiten Samstag (leer=geschlossen)" ""
+  ask_schedule_value weekend "Telefonzeiten Samstag (leer=geschlossen)" ""
   set_schedule_value KZF_PHONE "SAMSTAG" "$weekend"
-  ask_value weekend "Telefonzeiten Sonntag (leer=geschlossen)" ""
+  ask_schedule_value weekend "Telefonzeiten Sonntag (leer=geschlossen)" ""
   set_schedule_value KZF_PHONE "SONNTAG" "$weekend"
 }
 
@@ -982,81 +1045,29 @@ collect_time_configuration() {
 
 
 update_existing_times() {
-  "${VENV}/bin/python" - <<'PY'
-# kienzlefon installer time updater
-# Version: 1.8
-# Changelog:
-# - 1.8: Zeitaktualisierung unveraendert in den 1.8-Installer uebernommen.
-# - 1.7.1: Zeitaktualisierung unveraendert in den 1.7.1-Installer uebernommen.
-# - 1.7: Zeitaktualisierung unveraendert in den 1.7-Installer uebernommen.
-# - 1.6.2: Zeitaktualisierung unveraendert in den 1.6.2-Installer uebernommen.
-# - 1.6.1: Zeitaktualisierung unveraendert in den 1.6.1-Installer uebernommen.
-# - 1.6: Zeitaktualisierung unveraendert in den 1.6-Installer uebernommen.
-# - 1.5: Zeitaktualisierung unveraendert in den 1.5-Installer uebernommen.
-# - 1.4: Zeitaktualisierung unveraendert in den 1.4-Installer uebernommen.
-# - 1.3: Zeitaktualisierung unveraendert in den 1.3-Installer uebernommen.
-# - 1.2: Ausschliesslich vorhandene TOML-Zeitprofile atomar aktualisieren.
-import json
-import os
-import re
-import tomllib
+  "${VENV}/bin/python" -m kienzlefon.installer_times "${1:-update}" "$CONFIG_FILE"
+}
+
+direct_number_available(){
+  local other="" other_label=""
+  if [[ "$1" == KZF_RED_LINE && "${KZF_QUEUE_LINE_AKTIV:-n}" == y ]]; then
+    other="$KZF_QUEUE_LINE_DID"; other_label="direkte Praxisqueue"
+  fi
+  "${VENV}/bin/python" - "$2" "${KZF_AREA_CODE:-}" "$CONFIG_FILE" \
+    "${KFX_PHONE_IN_SIP_NUMBER:-}" "${KFX_FAX_DID:-}" "$other" "$other_label" <<'PY_DID'
+import sys, tomllib
 from pathlib import Path
-
-target = Path(os.environ["CONFIG_FILE"])
-text = target.read_text(encoding="utf-8")
-
-def toml(value):
-    return json.dumps(value, ensure_ascii=False)
-
-def set_value(section, key, value):
-    global text
-    lines = text.splitlines()
-    in_section = False
-    for index, line in enumerate(lines):
-        if line == f"[{section}]":
-            in_section = True
-            continue
-        if in_section and line.startswith("["):
-            break
-        if in_section and re.match(rf"^{re.escape(key)}\s*=", line):
-            lines[index] = f"{key} = {toml(value)}"
-            text = "\n".join(lines) + "\n"
-            return
-    raise SystemExit(f"ERROR: TOML-Feld nicht gefunden: [{section}].{key}")
-
-def schedule(prefix):
-    result = {}
-    for day in ("montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"):
-        raw = os.environ.get(f"{prefix}_{day.upper()}", "").replace(" ", "")
-        result[day] = [value for value in raw.split(",") if value]
-    return result
-
-expected_schedules = {
-    "oeffnungszeiten": schedule("KZF_OPEN"),
-    "telefonzeiten": schedule("KZF_PHONE"),
-    "apothekenzeiten": schedule("KZF_PHARMACY"),
-    "fachstellenzeiten": schedule("KZF_SPECIALIST"),
+from kienzlefon.config import did_variants
+did, area, config, main, fax, other, label = sys.argv[1:]
+if not area and Path(config).is_file():
+    with open(config, "rb") as handle:
+        area = tomllib.load(handle).get("wahlregeln", {}).get("ortsvorwahl", "")
+for used, role in ((main, "Hauptnummer mit Begrüßung und IVR"), (fax, "Fax"), (other, label)):
+    if did_variants(did, area) & did_variants(used, area):
+        print(f"Die Rufnummer {did} ist bereits belegt ({role}). Bitte eine eigene Direktnummer wählen.", file=sys.stderr)
+        sys.exit(1)
+PY_DID
 }
-for section, values in expected_schedules.items():
-    for key, value in values.items():
-        set_value(section, key, value)
-
-temporary = target.with_name(f".{target.name}.tmp.{os.getpid()}")
-temporary.write_text(text, encoding="utf-8")
-os.chmod(temporary, 0o640)
-os.replace(temporary, target)
-
-with target.open("rb") as handle:
-    stored = tomllib.load(handle)
-for section, expected in expected_schedules.items():
-    actual = {day: stored[section][day] for day in expected}
-    if actual != expected:
-        raise SystemExit(
-            f"ERROR: Zeitprofil [{section}] wurde nicht korrekt in {target} gespeichert"
-        )
-PY
-}
-
 
 collect_sip_line(){
   local prefix="$1" label="$2" section="$3"
@@ -1080,6 +1091,9 @@ PY
   domain="${current[4]:-}"; proxy="${current[5]:-}"
   expiration="${current[6]:-300}"; outbound="${current[7]:-n}"
   ask_yes_no change "Separate externe Rufnummer fuer ${label} einrichten oder aendern?" "n"
+  if [[ "$change" == n && "$enabled" == y ]] && ! direct_number_available "$prefix" "$did"; then
+    change=y
+  fi
   if [[ "$change" == "y" ]]; then
     if [[ "$enabled" == "y" ]]; then
       ask_yes_no enabled "Direktnummer fuer ${label} aktiv lassen?" "j"
@@ -1087,8 +1101,12 @@ PY
       enabled="y"
     fi
     if [[ "$enabled" == "y" ]]; then
-      ask_value did "Externe Rufnummer/DID fuer ${label}" "$did"
-      [[ "$did" =~ ^\+?[0-9]+$ ]] || die "DID fuer ${label} ist ungueltig."
+      while true; do
+        ask_value did "Externe Rufnummer/DID fuer ${label}" "$did"
+        if [[ "$did" =~ ^\+?[0-9]+$ ]] && direct_number_available "$prefix" "$did"; then break; fi
+        log "Bitte eine gültige, freie DID eingeben."
+        did=""
+      done
       did="${did#+}"
       ask_value user "SIP-Benutzer fuer ${label}" "${user:-$did}"
       keep="n"
@@ -1122,6 +1140,7 @@ PY
 }
 
 collect_direct_numbers(){
+  log "Hauptnummer mit Begrüßung und IVR (Telefoniebasis): ${KFX_PHONE_IN_SIP_NUMBER:-unbekannt}; Fax: ${KFX_FAX_DID:-nicht eingerichtet}."
   collect_sip_line KZF_QUEUE_LINE "die direkte Praxisqueue" sip_direkte_queue
   collect_sip_line KZF_RED_LINE "den Rufweg ROT" sip_rotes_telefon
 }
@@ -1135,6 +1154,10 @@ from kienzlefon.config import load_config
 
 target = Path(os.environ["CONFIG_FILE"])
 text = target.read_text(encoding="utf-8")
+if os.environ.get("KZF_MAIN_NUMBER"):
+    from kienzlefon.webadmin import _set_toml_value
+    text = _set_toml_value(text, "asterisk", "hauptausgang_nummer", os.environ["KZF_MAIN_NUMBER"])
+    text = _set_toml_value(text, "asterisk", "hauptausgang_endpoint", os.environ["KZF_MAIN_ENDPOINT"])
 for section, prefix in (("sip_direkte_queue", "KZF_QUEUE_LINE"), ("sip_rotes_telefon", "KZF_RED_LINE")):
     head = f"[{section}]\n"
     start = text.index(head) + len(head)
@@ -1522,6 +1545,18 @@ os.replace(temporary, target)
 PY
 }
 
+read_main_outbound(){
+  if [[ "${KFX_PHONE_SEPARATE_OUTBOUND:-n}" == "y" ]]; then
+    KZF_MAIN_ENDPOINT="kfx-phone-out-endpoint"
+    KZF_MAIN_NUMBER="${KFX_PHONE_OUT_SIP_NUMBER:-}"
+  else
+    KZF_MAIN_ENDPOINT="kfx-phone-in-endpoint"
+    KZF_MAIN_NUMBER="${KFX_PHONE_IN_SIP_NUMBER:-}"
+  fi
+  [[ -n "$KZF_MAIN_NUMBER" ]] || die "Kienzlefax-Hauptausgangsnummer fehlt."
+  export KZF_MAIN_ENDPOINT KZF_MAIN_NUMBER
+}
+
 collect_configuration(){
   local reuse="" reconfigure_times="" suggested_red
   if [[ -r "$CONFIG_FILE" ]]; then
@@ -1537,9 +1572,12 @@ collect_configuration(){
       if [[ "$reconfigure_times" == "y" ]]; then
         collect_time_configuration
         update_existing_times
+      else
+        update_existing_times repair
       fi
       configure_additional_extensions
       configure_special_queue
+      read_main_outbound
       collect_direct_numbers
       update_existing_direct_numbers
       configure_provider_target_formats
@@ -1555,7 +1593,11 @@ collect_configuration(){
     fi
   fi
 
-  ask_value KZF_PRACTICE_NAME "Praxisname fuer die Ansagen" "Praxisname"
+  local previous_name="Praxisname"
+  if [[ -r "$CONFIG_FILE" ]]; then
+    previous_name="$("${VENV}/bin/python" -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["praxis"]["name"])' "$CONFIG_FILE")"
+  fi
+  ask_value KZF_PRACTICE_NAME "Praxisname fuer die Ansagen" "$previous_name"
   ask_value KZF_CHANNEL "Telepraxis-Kanal/SSH-Benutzer" "dahl"
   ask_value KZF_OUTPUT_DIR "Telepraxis-Ausgabeverzeichnis" "/srv/telepraxis/${KZF_CHANNEL}/inbox"
   collect_delivery_configuration
@@ -1598,19 +1640,12 @@ collect_configuration(){
 
   collect_direct_numbers
 
-  if [[ "${KFX_PHONE_SEPARATE_OUTBOUND:-n}" == "y" ]]; then
-    KZF_MAIN_ENDPOINT="kfx-phone-out-endpoint"
-    KZF_MAIN_NUMBER="${KFX_PHONE_OUT_SIP_NUMBER:-}"
-  else
-    KZF_MAIN_ENDPOINT="kfx-phone-in-endpoint"
-    KZF_MAIN_NUMBER="${KFX_PHONE_IN_SIP_NUMBER:-}"
-  fi
-  [[ -n "$KZF_MAIN_NUMBER" ]] || die "Kienzlefax-Hauptausgangsnummer fehlt."
+  read_main_outbound
   KZF_OUT_COUNTS="${KFX_PHONE_OUT_COUNTS_PROVIDER_LIMIT:-y}"
   KZF_FIRST_EXTENSION="${KFX_PHONE_FIRST_EXTENSION:-201}"
   KZF_EXTENSION_COUNT="${KFX_PHONE_COUNT:-1}"
 
-  export KZF_PRACTICE_NAME KZF_CHANNEL KZF_OUTPUT_DIR KZF_TTS_ENGINE KZF_TTS_VOICE
+  export KZF_PRACTICE_NAME KZF_CHANNEL KZF_OUTPUT_DIR KZF_TTS_ENGINE KZF_TTS_VOICE GOOGLE_CONFIG
   export KZF_QWEN_VOICE KZF_TTS_LENGTH_SCALE KZF_TTS_SENTENCE_SILENCE
   export KZF_ANNOUNCEMENT_PAUSE_MS KZF_CPU_THREADS
   export KZF_MODEL_STANDARD KZF_MODEL_NAMES KZF_MODEL_MEDICATIONS
@@ -1648,6 +1683,8 @@ import tomllib
 from pathlib import Path
 
 template = Path(os.environ["SOURCE_TARGET"]) / "config/kienzlefon.toml.example"
+from kienzlefon.config import WEEKDAYS, parse_schedule_input
+
 target = Path(os.environ["CONFIG_FILE"])
 # Migration has filled missing fields before any reconfiguration. Preserve
 # settings owned by the admin UI and by the middleware and web installers.
@@ -1678,11 +1715,10 @@ def set_value(section, key, value):
     raise SystemExit(f"ERROR: TOML-Feld nicht gefunden: [{section}].{key}")
 
 def schedule(prefix):
-    result = {}
-    for day in ("montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag"):
-        raw = os.environ.get(f"{prefix}_{day.upper()}", "").replace(" ", "")
-        result[day] = [value for value in raw.split(",") if value]
-    return result
+    return {
+        day: parse_schedule_input(os.environ[f"{prefix}_{day.upper()}"], f"{prefix} {day}")
+        for day in WEEKDAYS
+    }
 
 set_value("praxis", "name", os.environ["KZF_PRACTICE_NAME"])
 set_value("ivr", "rotes_telefon_aktiv", os.environ["KZF_RED_ENABLED"] == "y")
@@ -1713,6 +1749,8 @@ set_value(
 )
 set_value("telepraxis", "public_key", "" if demo_mode else os.environ.get("KZF_DELIVERY_PUBLIC_KEY", os.environ["PUBLIC_KEY_FILE"]))
 set_value("tts", "engine", os.environ["KZF_TTS_ENGINE"])
+if os.environ["KZF_TTS_ENGINE"] == "google":
+    set_value("tts", "google_konfig", os.environ["GOOGLE_CONFIG"])
 set_value("tts", "stimme", os.environ["KZF_TTS_VOICE"])
 set_value("tts", "qwen_stimme", os.environ["KZF_QWEN_VOICE"])
 set_value("tts", "length_scale", float(os.environ["KZF_TTS_LENGTH_SCALE"]))
@@ -1809,6 +1847,33 @@ PY
 #}
 
 
+
+inbox_group() {
+  local output="$1" output_gid group_record
+  output_gid="$(stat -c '%g' -- "$output")" || die "Gruppe der Inbox $output konnte nicht ermittelt werden."
+  group_record="$(getent group "$output_gid")" \
+    || die "Gruppe ${output_gid} des Telepraxis-Ausgabeverzeichnisses ist nicht aufloesbar."
+  printf '%s\n' "${group_record%%:*}"
+}
+
+check_inbox_write() {
+  local output="$1" user="$2" group="${3-}"
+  local identity=(-u "$user")
+  [[ -z "$group" ]] || identity+=(-g "$group")
+  runuser "${identity[@]}" -- python3 -I - "$output" <<'PY' || die "Inbox-Schreibprobe für ${user}${group:+:${group}} in ${output} fehlgeschlagen."
+import os
+import sys
+import tempfile
+
+try:
+    with tempfile.NamedTemporaryFile(dir=sys.argv[1], prefix=".kienzlefon-schreibprobe-", suffix=".tmp") as probe:
+        probe.write(b"1")
+        probe.flush()
+        os.fsync(probe.fileno())
+except OSError as exc:
+    sys.exit(f"Dateisystemfehler bei der Inbox-Schreibprobe: {exc}")
+PY
+}
 
 prepare_directories() {
   local output channel spool models voices uploads masters prompts queue_digits
@@ -1946,21 +2011,22 @@ prepare_directories() {
       "$channel" >&2
   fi
 
-  runuser -u "$asterisk_user" -- test -w "$output" ||
-    die "Benutzer ${asterisk_user} kann nicht nach ${output} schreiben."
+  local worker_group
+  worker_group="$(inbox_group "$output")"
+  check_inbox_write "$output" root "$worker_group"
+  if [[ "$asterisk_user" != root ]]; then
+    check_inbox_write "$output" "$asterisk_user"
+  fi
 }
 
 
 
 
 install_systemd_unit(){
-  local output spool output_gid output_group group_record
+  local output spool output_group
   output="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["telepraxis"]["ausgabeverzeichnis"])' "$CONFIG_FILE")"
   spool="$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["pfade"]["spool"])' "$CONFIG_FILE")"
-  output_gid="$(stat -c '%g' -- "$output")"
-  group_record="$(getent group "$output_gid")" \
-    || die "Gruppe ${output_gid} des Telepraxis-Ausgabeverzeichnisses ist nicht aufloesbar."
-  output_group="${group_record%%:*}"
+  output_group="$(inbox_group "$output")"
   cat >/etc/systemd/system/kienzlefon-worker.service <<EOF
 # kienzlefon-worker.service
 # Version: 2.0
@@ -2067,26 +2133,47 @@ EOF
     || die "Admission-Listener konnte auf ${bind_ip}:${bind_port} nicht gestartet werden."
 }
 
+write_google_tts_configuration()(
+  umask 077
+  mkdir -p -- "$(dirname "$GOOGLE_CONFIG")"
+  local temporary
+  temporary="$(mktemp "${GOOGLE_CONFIG}.XXXXXX")"
+  trap 'rm -f -- "$temporary"' EXIT
+  {
+    printf 'API_KEY=%s\nVOICE=%s\nLANG=%s\nRATE=%s\n' \
+      "$KZF_GOOGLE_API_KEY" "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_LANG" "$KZF_GOOGLE_RATE"
+    if [[ -n "${KZF_GOOGLE_ENDPOINT:-}" ]]; then
+      printf 'ENDPOINT=%s\n' "$KZF_GOOGLE_ENDPOINT"
+    fi
+  } > "$temporary"
+  chown root:root "$temporary"
+  mv -f -- "$temporary" "$GOOGLE_CONFIG"
+)
+
 install_google_tts(){
-  [[ "${KZF_TTS_ENGINE:-}" == "google" ]] || return 0
+  if [[ "${KZF_TTS_ENGINE:-}" != google ]]; then
+    if [[ -x "$GOOGLE_GENERATOR" ]]; then
+      install -m 0755 "${SOURCE_TARGET}/scripts/google-tts/kienzlefon-google-tts-generate" "$GOOGLE_GENERATOR"
+    fi
+    return 0
+  fi
   [[ -n "$KZF_GOOGLE_API_KEY" ]] || die "Google-TTS ist gewaehlt, aber es liegt kein API-Schluessel vor."
-  install -d -m 0755 "$(dirname "$GOOGLE_GENERATOR")" "$(dirname "$GOOGLE_CONFIG")"
+  install -d -m 0755 "$(dirname "$GOOGLE_GENERATOR")"
   install -m 0755 "${SOURCE_TARGET}/scripts/google-tts/kienzlefon-google-tts-generate" "$GOOGLE_GENERATOR"
-  (
-    umask 077
-    {
-      printf 'API_KEY=%s\nVOICE=%s\nLANG=%s\nRATE=%s\n' \
-        "$KZF_GOOGLE_API_KEY" "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_LANG" "$KZF_GOOGLE_RATE"
-      if [[ -n "${KZF_GOOGLE_ENDPOINT:-}" ]]; then
-        printf 'ENDPOINT=%s\n' "$KZF_GOOGLE_ENDPOINT"
-      fi
-    } > "${GOOGLE_CONFIG}.new"
-  )
-  chown root:root "${GOOGLE_CONFIG}.new"
-  chmod 0600 "${GOOGLE_CONFIG}.new"
-  mv -f "${GOOGLE_CONFIG}.new" "$GOOGLE_CONFIG"
+  write_google_tts_configuration
   [[ -x "$GOOGLE_GENERATOR" && -r "$GOOGLE_CONFIG" ]] \
     || die "Google-TTS konnte nicht eingerichtet werden."
+  if [[ -r "$CONFIG_FILE" ]]; then
+    "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY_RATE'
+import sys, tomllib
+from pathlib import Path
+from kienzlefon.migration import set_string
+path = Path(sys.argv[1])
+with path.open("rb") as handle:
+    if tomllib.load(handle).get("tts", {}).get("google_sprechtempo", "") != "":
+        set_string(path, "tts", "google_sprechtempo", "")
+PY_RATE
+  fi
   printf 'Google-TTS eingerichtet: Stimme %s, Tempo %s.\n' "$KZF_GOOGLE_VOICE" "$KZF_GOOGLE_RATE"
 }
 
@@ -2163,6 +2250,32 @@ EOF
   systemctl enable --now kienzlefon-control.service
 }
 
+configure_local_routing(){
+  local enable identifier suggested
+  if "${VENV}/bin/python" -c 'import sys,tomllib; sys.exit(not tomllib.load(open(sys.argv[1],"rb")).get("control_api",{}).get("enabled",False))' "$CONFIG_FILE"; then
+    log "Vorhandene Rufgruppensteuerung wird weiterverwendet."
+    return
+  fi
+  if [[ "$MIT_T2MED" != y ]]; then
+    ask_yes_no enable "Lokale Verwaltung der Rufgruppen Normal und ROT im Admin-Menü einrichten?" "j"
+    [[ "$enable" == "y" ]] || return 0
+  fi
+  identifier="${KZF_STATISTICS_PBX_ID:-}"
+  if [[ ! "$identifier" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]; then
+    if [[ -n "$identifier" ]]; then
+      log "Die bisherige Statistikkennung ist für die Rufgruppensteuerung ungültig. Die neue Kennung gilt auch für die Anrufstatistik."
+    fi
+    suggested="$(hostname -s | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+    while true; do
+      ask_value identifier "Anlagenkennung für die lokale Rufgruppensteuerung" "${suggested:-praxis}"
+      [[ "$identifier" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]] && break
+      log "Bitte eine Anlagenkennung aus Buchstaben, Zahlen, Bindestrich und Unterstrich eingeben."
+    done
+  fi
+  "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" enable-local --pbx-id "$identifier"
+  KZF_CONTROL_FIRST_ACTIVATION=y
+}
+
 configure_asterisk(){
   local red_enabled red_extension special_queue ai_enabled ai_count hold_installed control_enabled
   control_enabled="$(${VENV}/bin/python -c 'import sys,tomllib; print("y" if tomllib.load(open(sys.argv[1],"rb")).get("control_api",{}).get("enabled",False) else "n")' "$CONFIG_FILE")"
@@ -2172,13 +2285,23 @@ configure_asterisk(){
     "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" preflight
   fi
   "${VENV}/bin/kienzlefon-asterisk" --config "$CONFIG_FILE"
-  asterisk -rx "pjsip reload"
+  "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" sync-names
   asterisk -rx "dialplan reload"
   asterisk -rx "features reload"
   asterisk -rx "moh reload"
   "${VENV}/bin/kienzlefon-queue-setup" reload --config "$CONFIG_FILE"
   if [[ "$control_enabled" == "y" ]]; then
-    "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" initialize
+    if ! "${VENV}/bin/kienzlefon-control-setup" --config "$CONFIG_FILE" initialize; then
+      if [[ "${KZF_CONTROL_FIRST_ACTIVATION:-n}" == y ]]; then
+        log "Erstabgleich fehlgeschlagen. Die statische Queue-Besetzung wird wieder eingerichtet."
+        "${VENV}/bin/python" -c 'import sys; from pathlib import Path; from kienzlefon.migration import set_boolean; set_boolean(Path(sys.argv[1]), "control_api", "enabled", False)' "$CONFIG_FILE"
+        "${VENV}/bin/kienzlefon-asterisk" --config "$CONFIG_FILE"
+        asterisk -rx "dialplan reload"
+        "${VENV}/bin/kienzlefon-queue-setup" reload --config "$CONFIG_FILE"
+        "${VENV}/bin/kienzlefon-queue-setup" verify --config "$CONFIG_FILE"
+      fi
+      die "Asterisk hat die Rufgruppen bei der Initialisierung nicht bestätigt."
+    fi
     install_control_unit
     systemctl restart kienzlefon-control.service
   fi
@@ -2254,6 +2377,24 @@ install_or_update_webinterface(){
   }
 }
 
+print_sip_accounts() (
+  if [[ ! -t 1 ]]; then
+    if { exec >/dev/tty; } 2>/dev/null; then :; else
+      log "SIP-Zugangsdaten werden nur an einem interaktiven Terminal ausgegeben."
+      return 0
+    fi
+  fi
+  local first="${KFX_PHONE_FIRST_EXTENSION:-201}" count="${KFX_PHONE_COUNT:-1}" number key
+  export KFX_PHONE_FIRST_EXTENSION KFX_PHONE_COUNT
+  for ((number=first; number<first+count; number++)); do
+    key="KFX_PHONE_ENDPOINT_${number}_PASSWORD"
+    export "$key"
+  done
+  sep "SIP-Zugangsdaten für die Einrichtung der Endgeräte"
+  printf 'Interner SIP-Registrar: %s:%s (UDP)\n' "${KFX_PHONE_BIND_IP:-IP des Telefonieservers}" "${KFX_PHONE_INTERNAL_PORT:-5060}"
+  "${VENV}/bin/python" -m kienzlefon.installer_sip "$CONFIG_FILE" "${ASTERISK_DIR}/pjsip-kfx-telefonie.conf"
+)
+
 main(){
   local install_now="" demo_mode="" option
   for option in "$@"; do
@@ -2291,7 +2432,11 @@ main(){
   fi
   copy_and_install_project
   sep "Konfiguration erfassen"
+  if [[ "$MIT_T2MED" == y ]]; then
+    FULL_PBX_ID="$("${VENV}/bin/python" -Im kienzlefon.t2med_counters pbx-id --config "$CONFIG_FILE")" || die "Gemeinsame Anlagenkennung konnte nicht ermittelt werden."
+  fi
   collect_configuration
+  configure_local_routing
   sep "Optionale Middleware-Anbindung"
   local middleware_args=(--config "$CONFIG_FILE")
   [[ "$KOMBI" == "n" ]] || middleware_args+=(--kombi)
@@ -2341,10 +2486,7 @@ main(){
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:
     values = tomllib.load(handle)
-if values["ivr"]["rotes_telefon_aktiv"]:
-    print(f'Rote Nebenstelle: {values["ivr"]["rote_nebenstelle"]}')
-    print(f'Passwort rote Nebenstelle: {values["asterisk"]["rotes_telefon_passwort"]}')
-else:
+if not values["ivr"]["rotes_telefon_aktiv"]:
     print("Rufweg ROT: Die Rufgruppe klingelt sofort.")
 print(f'Sonderqueue: {values["sonderqueue"]["name"]}')
 PY
@@ -2368,13 +2510,6 @@ PY
   "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
 import sys, tomllib
 with open(sys.argv[1], "rb") as handle:
-    values = tomllib.load(handle)["zusaetzliche_nebenstellen"]
-for extension, password in zip(values["nebenstellen"], values["passwoerter"], strict=True):
-    print(f"Zusaetzliche Nebenstelle {extension}: Passwort {password}")
-PY
-  "${VENV}/bin/python" - "$CONFIG_FILE" <<'PY'
-import sys, tomllib
-with open(sys.argv[1], "rb") as handle:
     values = tomllib.load(handle)["ki_integration"]
 if not values["aktiv"]:
     print("Kienzlefon AI: nicht angebunden")
@@ -2383,11 +2518,7 @@ else:
         f'AI Admission-Listener: {values["listener_ip"]}:{values["listener_port"]} '
         f'({values["listener_bindung"]}, ohne Anwendungsauthentifizierung)'
     )
-    for index, password in enumerate(values["sip_passwoerter"]):
-        extension = 8810 + index
-        print(f"KI-Nebenstelle {extension} / ai-slot-{index:02d}: Passwort {password}")
 PY
-  printf 'Interner SIP-Registrar: %s:%s\n' "${KFX_PHONE_BIND_IP:-unbekannt}" "${KFX_PHONE_INTERNAL_PORT:-5060}"
   printf 'Telepraxis-Ausgabe: %s\n' "$(${VENV}/bin/python -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["telepraxis"]["ausgabeverzeichnis"])' "$CONFIG_FILE")"
   if [[ "$demo_mode" == "y" ]]; then
     printf 'Telepraxis-Modus: Lokale Ablage in der Praxis (unverschlüsselt).\n'
@@ -2400,6 +2531,7 @@ PY
   else
     printf 'Telepraxis-Modus: Verschlüsselte Ablage zur Abholung in der Praxis.\n'
   fi
+  print_sip_accounts
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

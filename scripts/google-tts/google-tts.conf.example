@@ -1,6 +1,6 @@
 # /etc/kienzlefon/google-tts.conf  (Rechte 0600, Besitzer root)
 # Google-Cloud-API-Schluessel mit Zugriff auf die Cloud Text-to-Speech API.
 API_KEY=
-VOICE=de-DE-Chirp3-HD-Sulafat
+VOICE=de-DE-Chirp3-HD-Enceladus
 LANG=de-DE
 RATE=0.93

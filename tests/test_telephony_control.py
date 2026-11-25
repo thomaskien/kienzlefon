@@ -212,12 +212,101 @@ def test_policy_toml_round_trip_retains_existing_other_tables(enabled):
         write_policy(config, RoutingPolicy.parse(data), journal.directory)
 
 
+def test_scope_rotation_revocation_and_legacy_empty_list(enabled, tmp_path):
+    from kienzlefon.control_api import encode_credentials
+
+    config, journal, plant = enabled
+    token = tmp_path / "practice.token"
+    register(config, "middleware", None, token)
+    service = ControlService(config, journal, plant)
+    service.controller.refresh(config)
+    request = command(journal.load(), "201")
+    service.controller.submit("middleware", None, request)
+    register(config, "middleware", ["limited"], tmp_path / "replacement.token")
+    service.controller.refresh(config)
+    assert service.controller.result("middleware", None, request["request_id"])["error"]["code"] == "client_forbidden"
+    assert "201" in plant.members["normal"]
+    register(config, "middleware", None, tmp_path / "rotation.token")
+    path = config.control_api.credentials_file
+    assert credentials(path)["middleware"][1] == {"limited"}
+    path.write_text(encode_credentials({"reader": ("1" * 64, set())}))
+    register(config, "reader", None, tmp_path / "reader.token")
+    assert credentials(path)["reader"][1] == set()
+    with pytest.raises(ValueError):
+        register(config, "t2med-counters", None, tmp_path / "bad.token")
+    path.write_text(encode_credentials({"t2med-counters": ("1" * 64, {"old-place"})}))
+    register(config, "t2med-counters", None, tmp_path / "legacy-rotation.token")
+    assert credentials(path)["t2med-counters"][1] == {"old-place"}
+    with pytest.raises(ValueError):
+        register(config, "t2med-counters", ["another-place"], tmp_path / "denied.token")
+    invalid = {"id": "reader", "allowed_clients": None, "token_sha256": "1" * 64}
+    for version, identity in ((1, invalid), (2, {**invalid, "id": "t2med-counters"})):
+        path.write_text(json.dumps({"schema_version": version, "identities": [identity]}))
+        with pytest.raises(ValueError):
+            credentials(path)
+
+
+def test_pair_routing_without_promoting_counter_or_legacy_identity(app_config, tmp_path, monkeypatch):
+    from kienzlefon import t2med_counters as pairing
+    from kienzlefon.config import load_config
+    from kienzlefon.control_setup import enable_local, ensure_credentials
+    from kienzlefon.webadmin import _set_toml_value
+
+    source = app_config.source
+    path = tmp_path / "credentials.json"
+    source.write_text(_set_toml_value(source.read_text(), "control_api", "credentials_file", str(path)))
+    enable_local(load_config(source), "praxis-test")
+    config = load_config(source)
+    ensure_credentials(config)
+    monkeypatch.setattr(pairing, "verify_dialplan", lambda _: None)
+
+    def prepare(name, routing_digest=None):
+        work = tmp_path / name
+        work.mkdir(mode=0o700)
+        (work / "fon-info.json").write_text(json.dumps({"pbx_id": "praxis-test", "already_enabled": True}))
+        (work / "control.sha256").write_text("c" * 64)
+        if routing_digest:
+            (work / "routing.sha256").write_text(routing_digest)
+            (work / "routing.sha256").chmod(0o600)
+        pairing.plan(source, work)
+        return work
+
+    pairing.publish(prepare("old-installer"), False)
+    before = path.read_bytes()
+    assert credentials(path)["t2med-counters"] == ("c" * 64, set())
+    work = prepare("new-installer", "d" * 64)
+    pairing.publish(work, False)
+    assert credentials(path)["t2med-routing"] == ("d" * 64, None)
+    assert credentials(path)["t2med-counters"] == ("c" * 64, set())
+    assert not (prepare("repeat", "d" * 64) / "identities.new").exists()
+    pairing.publish(work, True)
+    assert path.read_bytes() == before
+    with pytest.raises(pairing.SetupError, match="eigener Praxiszugang"):
+        prepare("reader-collision", "c" * 64)
+    register(config, "external", ["platz-1"], tmp_path / "limited.token")
+    with pytest.raises(pairing.SetupError, match="weiterverwenden"):
+        prepare("preserve-restriction", "e" * 64)
+    digest, clients = credentials(path)["external"]
+    assert clients == {"platz-1"}
+    assert not (prepare("reuse-restriction", digest) / "identities.new").exists()
+
+
 def test_http_api_scopes_commands_and_known_replays(enabled, tmp_path):
     config, journal, plant = enabled
+    config.routing_policy.members["201"]["specialist"] = Membership(eligible=True)
     config = replace(config, control_api=replace(config.control_api, port=0))
     token, other = tmp_path / "first.token", tmp_path / "second.token"
     register(config, "first", ["empfang-1"], token)
     register(config, "other", ["empfang-2"], other)
+    reader = tmp_path / "reader.token"
+    reader.write_text("c" * 64)
+    reader.chmod(0o600)
+    path = config.control_api.credentials_file
+    identities = json.loads(path.read_text())
+    identities["identities"].append({"id": "t2med-counters", "token_sha256": hashlib.sha256(reader.read_bytes()).hexdigest(), "allowed_clients": []})
+    path.write_text(json.dumps(identities))
+    practice = tmp_path / "practice.token"
+    register(config, "t2med-routing", None, practice)
     service = ControlService(config, journal, plant)
     service.controller.refresh(config)
     service.epoch = journal.load()["epoch"]
@@ -226,11 +315,11 @@ def test_http_api_scopes_commands_and_known_replays(enabled, tmp_path):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
 
-        def exchange(method, path, secret, body=None):
+        def exchange(method, path, secret, body=None, headers=None):
             conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
             try:
                 conn.request(method, path, body=body, headers={"Content-Type": "application/json",
-                             "Authorization": "Bearer " + secret.read_text().strip()})
+                             "Authorization": "Bearer " + secret.read_text().strip(), **(headers or {})})
                 response = conn.getresponse()
                 assert response.getheader("Cache-Control") == "no-store"
                 return response.status, json.loads(response.read())
@@ -240,13 +329,58 @@ def test_http_api_scopes_commands_and_known_replays(enabled, tmp_path):
         try:
             assert exchange("GET", "/control/v1/capabilities", token)[1]["pbx_id"] == "synthetic-pbx"
             assert exchange("GET", "/control/v1/state", token)[1]["routing_control"]["available"]
+            assert "ai_enabled" not in exchange("GET", "/control/v1/state", reader)[1]
+            display = {"X-Kienzlefon-Display": "1"}
+            for enabled_flag in (True, False):
+                service.config = replace(config, ai_integration=replace(config.ai_integration, enabled=enabled_flag, assistant_enabled=True))
+                assert exchange("GET", "/control/v1/state", reader, headers=display)[1]["ai_enabled"] is enabled_flag
+            service.config = config
             assert exchange("GET", "/api/v1/telephony", token)[0] == 404
             path = "/control/v1/routing/requests"
+            assert exchange("GET", "/control/v1/state", reader)[0] == 200
+            assert exchange("GET", "/control/v1/capabilities", reader)[0] == 200
+            assert exchange("POST", path, reader, json.dumps(request))[0] == 403
             assert exchange("POST", path, other, json.dumps(request))[0] == 403
             assert exchange("POST", path, token, json.dumps(request))[0] == 202
             service.controller.refresh(config)
             assert exchange("POST", path, token, json.dumps(request))[1]["request"]["state"] == "applied"
             assert exchange("GET", f"{path}/{request['request_id']}", other)[0] == 404
+            scope = "/control/v1/routing/workplaces"
+            assert exchange("GET", scope, practice)[1] == {
+                "schema_version": 1, "pbx_id": "synthetic-pbx", "remote_enabled": True,
+                "mode": "all", "client_ids": []}
+            assert exchange("GET", scope, token)[1]["client_ids"] == ["empfang-1"]
+            assert exchange("GET", scope, reader)[1]["mode"] == "selected"
+            assert exchange("GET", scope, reader)[1]["client_ids"] == []
+            for workplace, member in (("platz-neu-1", True), ("platz-neu-2", False)):
+                cmd = {**command(journal.load(), "201", member=member), "client_id": workplace}
+                assert exchange("POST", path, practice, json.dumps(cmd))[0] == 202
+                service.controller.refresh(config)
+                assert exchange("GET", f"{path}/{cmd['request_id']}", practice)[1]["request"]["state"] == "applied"
+                assert ("201" in plant.members["normal"]) is member
+            for member in (True, False):
+                cmd = {**command(journal.load(), "201", "specialist", member=member), "client_id": "platz-neu-2"}
+                assert exchange("POST", path, practice, json.dumps(cmd))[1]["error"]["code"] == "admin_locked"
+            ext = next(ext for ext in exchange("GET", "/control/v1/state", practice)[1]["extensions"] if ext["id"] == "201")
+            rights = ext["routing"]["permissions"]
+            assert rights["normal"]["can_enable"] and rights["normal"]["can_disable"]
+            assert not rights["specialist"]["can_enable"] and not rights["specialist"]["can_disable"]
+            for selected in (("platz-neu-1",), ()):
+                limited = replace(config, routing_policy=replace(config.routing_policy,
+                                  workplace_mode="selected", workplace_ids=selected))
+                service.config = limited
+                service.controller.refresh(limited)
+                assert exchange("GET", scope, practice)[1]["client_ids"] == list(selected)
+                assert exchange("GET", scope, practice)[1]["mode"] == "selected"
+                assert exchange("GET", scope, token)[1]["client_ids"] == []
+                cmd = {**command(journal.load(), "201", member=True), "client_id": "platz-neu-2"}
+                assert exchange("POST", path, practice, json.dumps(cmd))[1]["error"]["code"] == "client_forbidden"
+                if selected:
+                    cmd["client_id"] = selected[0]
+                    assert exchange("POST", path, practice, json.dumps(cmd))[0] == 202
+                    service.controller.refresh(limited)
+                    assert exchange("GET", f"{path}/{cmd['request_id']}", practice)[1]["request"]["state"] == "applied"
+            assert exchange("GET", f"{path}/{request['request_id']}", token)[0] == 404
         finally:
             server.shutdown()
             thread.join(timeout=2)
@@ -306,3 +440,73 @@ def test_native_ami_inventory_and_confirmed_empty_live_snapshot(enabled, monkeyp
                 plant.connection.close()
             server.shutdown()
             thread.join(timeout=2)
+
+
+def test_local_setup_keeps_credentials_and_external_settings(app_config, tmp_path, monkeypatch):
+    from kienzlefon.config import load_config
+    from kienzlefon import control_setup as setup
+    from kienzlefon.webadmin import _set_toml_value
+
+    source = app_config.source
+    text = _set_toml_value(source.read_text(), "control_api", "credentials_file", str(tmp_path / "control.json"))
+    source.write_text(text)
+    setup.enable_local(load_config(source), "praxis-test")
+    config = load_config(source)
+    assert config.control_api.enabled and config.control_api.bind == "127.0.0.1"
+    assert not config.routing_policy.remote_enabled
+    assert config.control_api.allowed_networks == ("127.0.0.1/32",)
+    setup.ensure_credentials(config)
+    token = tmp_path / "control-admin-lokal.token"
+    initial = token.read_bytes(), config.control_api.credentials_file.read_bytes()
+    assert token.stat().st_mode & 0o777 == 0o600
+    assert principal(config.control_api.credentials_file, "Bearer " + token.read_text().strip())[0] == "admin-lokal"
+    setup.ensure_credentials(config)
+    assert initial == (token.read_bytes(), config.control_api.credentials_file.read_bytes())
+    etc = tmp_path / "asterisk"
+    etc.mkdir()
+    (etc / "manager.conf").write_text("[general]\nenabled=no\n")
+    recorded = []
+    with monkeypatch.context() as mock:
+        mock.setattr(setup, "write_policy", lambda *_: None)
+        mock.setattr(setup.os, "geteuid", lambda: 0)
+        mock.setattr(setup, "ensure_credentials", lambda _: None)
+        mock.setattr(setup.os, "fchown", lambda *_: None)
+        mock.setattr(setup.os, "chown", lambda p, uid, gid: recorded.append((p, gid)))
+        def missing_group(_):
+            raise KeyError("asterisk")
+        mock.setattr(setup.grp, "getgrnam", missing_group)
+        setup.provision(config, etc)
+    assert (etc / setup.MANAGED, (etc / "manager.conf").stat().st_gid) in recorded
+    external = _set_toml_value(source.read_text(), "control_api", "bind", "10.20.1.1")
+    source.write_text(external)
+    setup.enable_local(load_config(source), "other")
+    assert source.read_text() == external
+
+
+def test_current_local_participation_independent_of_remote_permissions(enabled):
+    from kienzlefon.telephony_control import InventoryChanged
+
+    config, journal, plant = enabled
+    config = replace(config, routing_policy=replace(config.routing_policy, remote_enabled=False))
+    controller = Controller(journal, plant)
+    controller.refresh(config)
+    confirmed = journal.directory / "members-confirmed.json"
+    first = json.loads(confirmed.read_text())
+    real_inventory = plant.inventory
+
+    def queued_event(config):
+        if "201" not in plant.members["normal"]:
+            plant.inventory = real_inventory
+            raise InventoryChanged("Queue-Ereignis")
+        return real_inventory(config)
+    plant.inventory = queued_event
+    controller.set_local_member(config, first["revision"], "normal", "201", False)
+    next_view = json.loads(confirmed.read_text())
+    assert next_view["members"] == {"normal": ["202"], "specialist": ["202"]}
+    assert config.routing_policy.members["201"]["normal"].default_member
+    with pytest.raises(SourceError, match="geändert"):
+        controller.set_local_member(config, first["revision"], "normal", "201", True)
+    with pytest.raises(ValueError, match="letzte"):
+        controller.set_local_member(config, next_view["revision"], "normal", "202", False)
+    with pytest.raises(ValueError, match="zugelassen"):
+        controller.set_local_member(config, next_view["revision"], "specialist", "201", True)

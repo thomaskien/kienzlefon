@@ -143,7 +143,7 @@ def phone_hours_text(schedule: WeeklySchedule, prefix: str, closed_template: str
 
 
 def rendered_prompts(config: AppConfig) -> dict[str, str]:
-    from .ivr_keys import DEFAULTS, generated_texts
+    from .ivr_keys import DEFAULTS, MENU_CHOICES, generated_texts
 
     values = {
         key: value.replace("{praxisname}", config.practice.name)
@@ -170,7 +170,10 @@ def rendered_prompts(config: AppConfig) -> dict[str, str]:
         rendered_phone_hours = f"{rendered_phone_hours} {additional_phone_hours}"
     values["phone_hours"] = rendered_phone_hours
     if config.ivr_keys != DEFAULTS:
-        values.update(generated_texts(config.ivr_keys))
+        values.update(generated_texts(config.ivr_keys, config.menu_choices))
+    elif config.menu_choices != MENU_CHOICES:
+        menu = generated_texts(config.ivr_keys, config.menu_choices)
+        values.update({key: menu[key] for key in ("menu_open", "menu_closed")})
     names = set(PROMPT_CATALOG) | {entry.prompt_name for entry in config.scheduled_overrides}
     return {key: value for key, value in values.items() if key in names}
 
@@ -997,6 +1000,8 @@ class PromptGenerator:
                     settings[key.strip()] = value.strip().strip("\"'")
         except OSError:
             pass
+        if self.config.tts.google_rate is not None:
+            settings["RATE"] = str(self.config.tts.google_rate)
         self._cached_google_identity = (
             "google", str(generator), digest,
             settings["VOICE"], settings["LANG"], settings["RATE"],
@@ -1140,7 +1145,7 @@ class PromptGenerator:
             "--model-dir", str(directory), "--speed", str(self.config.tts.kokoro_speed),
         ]
 
-    def _google_command(self, text: str, output: Path) -> list[str]:
+    def _google_command(self, text: str, output: Path, *, rate: float | None = None) -> list[str]:
         generator = self.config.tts.google_generator
         if not generator.is_file() or not os.access(generator, os.X_OK):
             raise RuntimeError(f"Google-TTS-Generator ist nicht installiert: {generator}")
@@ -1148,8 +1153,11 @@ class PromptGenerator:
             raise RuntimeError(
                 f"Google-TTS-Konfiguration fehlt: {self.config.tts.google_config}"
             )
+        if rate is None:
+            rate = self.config.tts.google_rate
         return [
             str(generator), "--config", str(self.config.tts.google_config),
+            *(["--speaking-rate", str(rate)] if rate is not None else []),
             "--text", text, "--output", str(output),
         ]
 

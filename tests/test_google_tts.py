@@ -104,7 +104,8 @@ def test_web_accepts_google_only_when_configured(installed_google):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg fehlt")
-def test_generator_script_calls_api_and_writes_wav(tmp_path):
+@pytest.mark.parametrize(("arguments", "rate"), [([], 0.93), (["--speaking-rate", "1.17"], 1.17)])
+def test_generator_script_calls_api_and_writes_wav(tmp_path, arguments, rate):
     source = tmp_path / "tone.wav"
     subprocess.run(
         ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2",
@@ -136,7 +137,7 @@ def test_generator_script_calls_api_and_writes_wav(tmp_path):
         output = tmp_path / "out.wav"
         result = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "--config", str(settings),
-             "--text", "Guten Tag", "--output", str(output), "--model-dir", "/x", "--speed", "1.0"],
+             "--text", "Guten Tag", "--output", str(output), "--model-dir", "/x", "--speed", "1.0", *arguments],
             capture_output=True, text=True,
         )
     finally:
@@ -145,8 +146,8 @@ def test_generator_script_calls_api_and_writes_wav(tmp_path):
     assert seen["path"] == "/v1/text:synthesize"
     assert seen["key"] == "test-key"
     assert seen["body"]["input"]["text"] == "Guten Tag"
-    assert seen["body"]["voice"]["name"] == "de-DE-Chirp3-HD-Sulafat"
-    assert seen["body"]["audioConfig"]["speakingRate"] == 0.93
+    assert seen["body"]["voice"]["name"] == "de-DE-Chirp3-HD-Enceladus"
+    assert seen["body"]["audioConfig"]["speakingRate"] == rate
     assert output.read_bytes()[:4] == b"RIFF"
 
 
@@ -169,7 +170,7 @@ def test_generator_script_refuses_missing_key_and_remote_http(tmp_path):
 INSTALLER = Path(__file__).resolve().parents[1] / "kienzlefon-installer.sh"
 
 
-def _installer_run(tmp_path, answers, *, existing_key=None, endpoint=None):
+def _installer_run(tmp_path, answers, *, existing_key=None, endpoint=None, custom_path=False):
     """Fuehrt die Google-Funktionen des Installers in einer Sandbox aus."""
     bin_dir = tmp_path / "venv" / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -178,27 +179,27 @@ def _installer_run(tmp_path, answers, *, existing_key=None, endpoint=None):
     source = tmp_path / "src" / "scripts" / "google-tts"
     source.mkdir(parents=True, exist_ok=True)
     shutil.copy(SCRIPT, source / SCRIPT.name)
-    config = tmp_path / "google-tts.conf"
+    default_config = tmp_path / "google-tts.conf"
+    config = default_config
+    if custom_path:
+        config = tmp_path / "Google Stimmen.conf"
+        (tmp_path / "kienzlefon.toml").write_text('[tts]\ngoogle_konfig = ' + json.dumps(str(config)))
     if existing_key:
-        config.write_text(f"API_KEY={existing_key}\nVOICE=old\nRATE=1.0\n")
+        config.write_text(f'API_KEY = "{existing_key}"\nVOICE=old\nRATE=1.0\n')
         if endpoint:
             with config.open("a") as handle:
                 handle.write(f"ENDPOINT={endpoint}\n")
     script = f"""
-set -euo pipefail
-die(){{ echo "DIE: $*" >&2; exit 1; }}
+source "$1"
 chown(){{ test "$1" = root:root && test -f "$2"; }}
-for f in ask_yes_no ask_value google_conf_value collect_google_tts_configuration install_google_tts; do
-  eval "$(sed -n "/^${{f}}(){{/,/^}}/p" '{INSTALLER}')"
-done
 VENV='{tmp_path}/venv'; SOURCE_TARGET='{tmp_path}/src'
-GOOGLE_GENERATOR='{tmp_path}/gen'; GOOGLE_CONFIG='{config}'
-KZF_GOOGLE_API_KEY=""; KZF_GOOGLE_VOICE=""; KZF_GOOGLE_LANG=""; KZF_GOOGLE_RATE=""
+GOOGLE_GENERATOR='{tmp_path}/gen'; GOOGLE_CONFIG='{default_config}'; CONFIG_FILE='{tmp_path}/kienzlefon.toml'
 KZF_TTS_ENGINE=google
 collect_google_tts_configuration
 install_google_tts
 """
-    result = subprocess.run(["bash", "-c", script], input=answers, capture_output=True, text=True)
+    result = subprocess.run(["bash", "-c", script, "test", INSTALLER], input=answers,
+                            capture_output=True, text=True, timeout=10)
     return result, config
 
 
@@ -207,19 +208,72 @@ def test_installer_writes_private_config_and_validates_input(tmp_path):
     result, config = _installer_run(tmp_path, f"kurz\n{key}\n\n5\n0.9\n")
     assert result.returncode == 0, result.stderr
     assert config.read_text() == (
-        f"API_KEY={key}\nVOICE=de-DE-Chirp3-HD-Sulafat\nLANG=de-DE\nRATE=0.9\n"
+        f"API_KEY={key}\nVOICE=de-DE-Chirp3-HD-Enceladus\nLANG=de-DE\nRATE=0.9\n"
     )
     assert oct(config.stat().st_mode & 0o777) == "0o600"
     assert (tmp_path / "gen").stat().st_mode & 0o111
-    assert key not in result.stdout
+    assert "(schon gesetzt)" not in result.stdout
+    assert key not in result.stdout + result.stderr
 
 
-def test_installer_keeps_existing_key(tmp_path):
+@pytest.mark.parametrize("custom_path", [False, True])
+def test_installer_keeps_existing_key(tmp_path, custom_path):
     key = "AIzaSyKEEPKEEPKEEPKEEPKEEP1234567"
     endpoint = "eu-texttospeech.googleapis.com"
     result, config = _installer_run(
-        tmp_path, "j\nneueStimme\n1.1\n", existing_key=key, endpoint=endpoint,
+        tmp_path, "\nneueStimme\n1.1\n", existing_key=key, endpoint=endpoint, custom_path=custom_path,
     )
     assert result.returncode == 0, result.stderr
     assert config.read_text().startswith(f"API_KEY={key}\nVOICE=neueStimme\n")
     assert f"ENDPOINT={endpoint}\n" in config.read_text()
+    assert "Google-API-Schlüssel (schon gesetzt)" in result.stdout
+    assert key not in result.stdout + result.stderr
+    if custom_path:
+        assert not (tmp_path / "google-tts.conf").exists()
+
+
+@pytest.mark.parametrize(("answers", "expected"), [
+    ("", "Sulafat"),
+    ("11", "Enceladus"),
+    ("31\n0\n01", "Achernar"),
+    ("30", "Zubenelgenubi"),
+])
+def test_numbered_voices_preserve_or_change_existing_selection(tmp_path, answers, expected):
+    config = tmp_path / "google-tts.conf"
+    config.write_text("API_KEY=test-key\nVOICE=de-DE-Chirp3-HD-Sulafat\n")
+    result, _ = _installer_run(tmp_path, f"\n{answers}\n\n")
+    assert result.returncode == 0, result.stderr
+    assert f"VOICE=de-DE-Chirp3-HD-{expected}" in config.read_text().splitlines()
+    entries = re.findall(r"^\s*(\d+)  (de-DE-Chirp3-HD-\w+)(.*)$", result.stdout, re.M)
+    assert [int(number) for number, _, _ in entries] == list(range(1, 31))
+    assert entries[10] == ("11", "de-DE-Chirp3-HD-Enceladus", " (Standard)")
+    assert entries[25] == ("26", "de-DE-Chirp3-HD-Sulafat", "")
+
+
+def test_saved_key_survives_interruption_and_can_be_replaced(tmp_path):
+    first = "test-first-google-key-123456"
+    second = "test-next-google-key-789012"
+    interrupted, config = _installer_run(tmp_path, first + "\n")
+    assert interrupted.returncode != 0
+    assert config.read_text().splitlines()[0] == "API_KEY=" + first
+    assert config.stat().st_mode & 0o777 == 0o600
+    assert not (tmp_path / "gen").exists()
+
+    invalid, _ = _installer_run(tmp_path, "n\nkurz\n")
+    assert invalid.returncode != 0
+    assert config.read_text().splitlines()[0] == "API_KEY=" + first
+    replaced, _ = _installer_run(tmp_path, f"n\n{second}\n\n\n")
+    assert replaced.returncode == 0, replaced.stderr
+    assert "(schon gesetzt)" in replaced.stdout
+    assert config.read_text().splitlines()[0] == "API_KEY=" + second
+    for run in (interrupted, invalid, replaced):
+        assert first not in run.stdout + run.stderr and second not in run.stdout + run.stderr
+
+
+def test_installer_adopts_saved_web_tempo(tmp_path):
+    source = tmp_path / "kienzlefon.toml"
+    source.write_text('[tts]\ngoogle_sprechtempo = "1.18"\n')
+    result, config = _installer_run(tmp_path, "\n\n\n", existing_key="synthetic-key-already-configured")
+    assert result.returncode == 0, result.stderr
+    assert "RATE=1.18\n" in config.read_text()
+    assert 'google_sprechtempo = ""' in source.read_text()

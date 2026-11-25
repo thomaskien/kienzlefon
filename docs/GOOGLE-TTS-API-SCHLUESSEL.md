@@ -14,8 +14,8 @@ Für die Stimme **Google Cloud TTS Chirp 3 HD** brauchst du einen API-Schlüssel
 ## Im Kienzlefon-Installer
 
 1. Wähle bei **Erzeugungsmodell für automatische Ansagen** den Punkt **4) Google Cloud TTS Chirp 3 HD**. Fehlt Punkt 4, brauchst du eine Installer-Fassung mit Google-Unterstützung.
-2. Füge bei **Google-API-Schluessel** nur den kopierten Schlüsselwert ein und drücke **Enter**. Das Terminal zeigt beim Einfügen weder Buchstaben noch Sternchen an.
-3. Bestätige **Google-Stimme** und **Sprechtempo** jeweils mit **Enter**, wenn du die Vorschläge übernehmen möchtest. Bei einer Ersteinrichtung sind das `de-DE-Chirp3-HD-Sulafat` und `0.93`. Der Installer speichert den Schlüssel in `/etc/kienzlefon/google-tts.conf`. Bei einem späteren Lauf kannst du den vorhandenen Schlüssel beibehalten.
+2. Bei **Google-API-Schlüssel (schon gesetzt)** übernimmt **Enter** den gespeicherten Schlüssel. Mit **n** kannst du ihn ersetzen. Bei der ersten Einrichtung oder beim Ersetzen fügst du den Schlüssel verdeckt ein und drückst **Enter**. Der Installer speichert ihn sofort, standardmäßig in `/etc/kienzlefon/google-tts.conf`. Auch nach einem späteren Abbruch bleibt er für den nächsten Lauf verfügbar.
+3. Wähle die **Google-Stimme** über die Nummer in der Liste oder gib die vollständige Stimmbezeichnung ein. Bei einer Ersteinrichtung übernimmt **Enter** die Nummer **11** (`de-DE-Chirp3-HD-Enceladus`), bei einem Update die gespeicherte Stimme. Bestätige anschließend das **Sprechtempo** mit **Enter**, wenn du den Vorschlag übernehmen möchtest. Die Voreinstellung ist `0.93`.
 
 ## Kosten für alle Ansagen
 

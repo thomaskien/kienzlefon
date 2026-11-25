@@ -308,3 +308,35 @@ exten => _X.,1,NoOp(KienzleFax Telefonie ausgehend)
     assert phone.count("Set(CHANNEL(language)=de_kienzlefon)") == 1
     assert "exten => 300,1,Dial(PJSIP/300,120)" in phone
     assert "exten => 777,1,Goto(kienzlefon-red-local,777,1)" in phone
+
+
+def test_stable_contact_requires_an_installed_matching_did_ingress(app_config, tmp_path):
+    from kienzlefon.asterisk import stable_registration_domains, _patch_direct_did_routes, AsteriskConfigError
+    import pytest
+    line = replace(app_config.asterisk.direct_queue, enabled=True, domain="sip.1und1.de",
+                   did="49233190009", user="49233190009", password="synthetic")
+    config = replace(app_config, asterisk=replace(app_config.asterisk, direct_queue=line))
+    plan = tmp_path / "extensions.conf"
+    plan.write_text("[kfx-provider-in]\nexten => 49233190008,1,Goto(kfx-phone-in,s,1)\n")
+    source = tmp_path / "pjsip-kfx-telefonie.conf"
+    endpoint = "[basis]\ntype=endpoint\ncontext=kfx-provider-in\ntransport=transport-udp\nfrom_domain=sip.1und1.de\n"
+    identify = "[basis-identify]\ntype=identify\nendpoint=basis\nmatch=212.227.0.0/16\n"
+    (tmp_path / "pjsip.conf").write_text('#tryinclude "/etc/asterisk/pjsip-kfx-telefonie.conf"\n')
+    source.write_text(endpoint)
+    assert not stable_registration_domains(tmp_path)
+    source.write_text(endpoint + identify)
+    domains = stable_registration_domains(tmp_path)
+    assert domains == {"sip.1und1.de"}
+    def registration(cfg):
+        return render_pjsip(cfg, domains).split("[kienzlefon-direct-queue-registration]")[1].split("[")[0]
+    assert "line=yes" not in registration(config) and "contact_user=49233190009" in registration(config)
+    other = replace(config, asterisk=replace(config.asterisk, direct_queue=replace(line, domain="sip.plusnet.de")))
+    assert "line=yes" in registration(other)
+    _patch_direct_did_routes(config, plan, "kfx-provider-in")
+    original = plan.read_bytes()
+    _patch_direct_did_routes(config, plan, "kfx-provider-in")
+    assert plan.read_bytes() == original
+    conflict = replace(config, asterisk=replace(config.asterisk, direct_queue=replace(line, did="0233190008")))
+    with pytest.raises(AsteriskConfigError, match="bereits belegt"):
+        _patch_direct_did_routes(conflict, plan, "kfx-provider-in")
+    assert plan.read_bytes() == original

@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from .config import AppConfig
 from .queue_dispatch import MEMBER_CONTEXT, member_interface
-from .telephony_control import UUID, QueueInventory, Rejected, SourceError
+from .telephony_control import UUID, InventoryChanged, QueueInventory, Rejected, SourceError
 from .telephony_policy import ROUTES
 
 ROUTING_EVENTS = {"queuememberadded", "queuememberremoved", "queuememberpaused", "queuememberpenalty"}
@@ -236,7 +236,7 @@ class AsteriskPlant:
                 else:
                     raise SourceError("Unbekannter Pause-Status")
         if generation != self.routing_generation:
-            raise SourceError("Queue-Mitgliedschaften haben sich während des Lesens geändert")
+            raise InventoryChanged("Queue-Mitgliedschaften haben sich während des Lesens geändert")
         return QueueInventory(inventories, generation)
 
     def ready(self, value: bool) -> None:

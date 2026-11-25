@@ -188,30 +188,19 @@ class IVR:
 
     def _main_menu(self) -> str | None:
         open_now = self.config.phone_is_open()
-        digit = self._stream("menu_intro", ALL_DIGITS)
-        if digit:
-            return digit
-        key = "menu_open" if open_now else "menu_closed"
-        digit = self._stream(key, ALL_DIGITS)
-        if digit:
-            return digit
-        if self.config.ivr_keys["oeffnungszeiten"]:
-            digit = self._stream("opening_hours_choice", ALL_DIGITS)
-            if digit:
-                return digit
-        if self.config.ivr_keys["apotheke"] and self.config.pharmacy_is_available():
-            digit = self._stream("pharmacy_access", ALL_DIGITS)
-            if digit:
-                return digit
-        if self.config.ivr_keys["rot"] and self.config.specialist_is_available():
-            digit = self._stream("specialist_access", ALL_DIGITS)
-            if digit:
-                return digit
-        current_override = self.config.current_override()
-        if not open_now and not (
-            current_override is not None and current_override.block_phone_hours
-        ):
-            digit = self._stream("phone_hours", ALL_DIGITS)
+        override = self.config.current_override()
+        for name in self.config.menu_order:
+            if name == ("menu_closed" if open_now else "menu_open"):
+                continue
+            if name == "opening_hours_choice" and not self.config.ivr_keys["oeffnungszeiten"]:
+                continue
+            if name == "pharmacy_access" and not (self.config.ivr_keys["apotheke"] and self.config.pharmacy_is_available()):
+                continue
+            if name == "specialist_access" and not (self.config.ivr_keys["rot"] and self.config.specialist_is_available()):
+                continue
+            if name == "phone_hours" and (open_now or (override and override.block_phone_hours)):
+                continue
+            digit = self._stream(name, ALL_DIGITS)
             if digit:
                 return digit
         return self._wait_for_digit()

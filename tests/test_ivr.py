@@ -552,3 +552,21 @@ def test_phone_display_is_normalized_without_changing_original_caller_id(app_con
     ivr.run()
     assert channel.values["CALLERID(num)"] == "02331123456"
     assert ivr.caller_id == "492331123456"
+
+
+def test_main_menu_uses_saved_order_and_preserves_time_gates_and_digits(app_config, monkeypatch):
+    from kienzlefon.ivr_keys import MENU_PROMPTS, MENU_CHOICES
+    from kienzlefon.prompts import rendered_prompts
+
+    config = replace(app_config, menu_order=tuple(reversed(MENU_PROMPTS)), menu_choices=tuple(reversed(MENU_CHOICES)))
+    text = rendered_prompts(config)["menu_open"]
+    assert text.index("Für ein Rezept drücken Sie 2.") < text.index("Um mit der Praxis zu sprechen drücken Sie 1.")
+    menu = IVR(config, DummyChannel())
+    heard = []
+    monkeypatch.setattr(menu, "_stream", lambda name, digits: heard.append(name))
+    monkeypatch.setattr(menu, "_wait_for_digit", lambda: "2")
+    assert menu._main_menu() == "2"
+    assert heard == ["phone_hours", "opening_hours_choice", "menu_closed", "menu_intro"]
+    monkeypatch.setattr(type(config), "phone_is_open", lambda self: True)
+    assert menu._main_menu() == "2"
+    assert heard[-3:] == ["opening_hours_choice", "menu_open", "menu_intro"]

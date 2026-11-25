@@ -137,7 +137,7 @@ def test_export_state_contains_only_sanitized_web_values(app_config, tmp_path: P
     }
     assert state["product"] == {
         "name": "kienzlefon.de",
-        "version": "2.6.1",
+        "version": "2.7",
         "author": "Dr. Thomas Kienzle",
         "url": "https://kienzlefon.de",
     }
@@ -822,7 +822,7 @@ def test_separate_installer_and_php_have_valid_syntax() -> None:
         )
         assert "No syntax errors" in result.stdout
     installer = Path("kienzlefon-webinterface-installer.sh").read_text(encoding="utf-8")
-    assert 'VERSION="2.6.1"' in installer
+    assert 'VERSION="2.7"' in installer
     assert '--from-main-installer) confirmed="y"' in installer
     assert "d ${RUNTIME_DIR}/audio 0750 root ${WEB_GROUP} -" in installer
     assert "DirectoryNotEmpty=${RUNTIME_DIR}/inbox" in installer
@@ -857,6 +857,92 @@ def test_web_installer_skips_certificate_successfully_without_tls() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(("server", "addresses", "answers", "listen", "tls", "lan_notice", "choice"), [
+    ("standalone", "10.0.83.85", "\n", "10.0.83.85", False, True, "\n"),
+    ("standalone", "10.0.83.85", "\n", "10.0.83.85", False, True, "j\n"),
+    ("standalone", "2001:db8::1 203.0.113.10 172.31.255.12", "\n", "172.31.255.12", False, True, "n\n"),
+    ("standalone", "203.0.113.10", "\n", "127.0.0.1", False, False, "j\n"),
+    ("standalone", "10.0.83.85", "0.0.0.0\n172.32.0.1\n192.168.1.999\n192.168.1.20\n",
+     "192.168.1.20", False, True, "\n"),
+    ("apache", "10.0.83.85", "\n", "10.0.83.85", True, True, "j\n"),
+    ("nginx", "203.0.113.10", "\n", "203.0.113.10", True, False, ""),
+])
+def test_web_bind_address_without_wireguard(tmp_path, server, addresses, answers, listen, tls, lan_notice, choice):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    script = r'''
+source "$1"
+VENV="$2"; WEB_CONFIG="$2/web.json"; SERVER_MODE="$3"; PORT=8088
+hostname(){ printf '%s\n' "$HOST_IPS"; }
+wg(){ return 0; }
+choose_wireguard
+write_web_config
+'''
+    result = subprocess.run(
+        ["bash", "-c", script, "test", Path("kienzlefon-webinterface-installer.sh").resolve(),
+         tmp_path, server],
+        env={**os.environ, "HOST_IPS": addresses}, input=answers + choice, text=True, capture_output=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    config = json.loads((tmp_path / "web.json").read_text())
+    assert config["listen"] == listen and config["tls"] is tls
+    assert config["passwordless"] is (choice == "j\n")
+    assert config["wireguard_interface"] == ""
+    assert ("keinesfalls aus dem Internet erreichbar" in result.stdout) == lan_notice
+    assert result.stdout.count("Bitte eine feste private IPv4-Adresse") == answers.count("\n") - 1
+
+
+def test_passwordless_practice_reconfiguration(tmp_path):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/python").symlink_to(os.sys.executable)
+    config = tmp_path / "kienzlefon.toml"
+    config.write_text('[webinterface]\npasswort = ""\n')
+    script = r'''
+source "$1"
+VENV="$2"; CONFIG_FILE="$2/kienzlefon.toml"; WEB_CONFIG="$2/web.json"; SERVER_MODE=standalone; PORT=8088
+hostname(){ echo "10.0.83.85"; }
+wg(){ return 0; }
+choose_wireguard
+configure_password
+write_web_config
+'''
+    for answers, expected in [("\nj\n", True), ("\n\n", True),
+                              ("10.0.83.86\n\nTestkennwort1\nTestkennwort1\n", False),
+                              ("\nj\n", True), ("\nn\n\n", False)]:
+        result = subprocess.run(["bash", "-c", script, "test", Path("kienzlefon-webinterface-installer.sh").resolve(), tmp_path],
+                                input=answers, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert json.loads((tmp_path / "web.json").read_text())["passwordless"] is expected
+    assert 'passwort = "Testkennwort1"' in config.read_text()
+
+
+@pytest.mark.parametrize(("listen", "local", "peer", "wg", "allowed"), [
+    ("10.0.83.85", "10.0.83.85", "192.168.5.1", "", True),
+    ("10.0.83.85", "10.0.83.84", "10.0.83.10", "", False),
+    ("10.0.83.85", "10.0.83.85", "203.0.113.10", "", False),
+    ("203.0.113.20", "203.0.113.20", "10.0.83.10", "", False),
+    ("127.0.0.1", "127.0.0.1", "127.0.0.1", "", True),
+    ("127.0.0.1", "127.0.0.1", "10.0.83.10", "", False),
+    ("10.9.0.1", "10.9.0.1", "100.64.8.2", "wg0", True),
+])
+def test_passwordless_php_access(tmp_path, listen, local, peer, wg, allowed):
+    php = shutil.which("php")
+    if not php:
+        pytest.skip("PHP fehlt")
+    (tmp_path / "sessions").mkdir()
+    state = {"auth_required": False, "network": {"server": "standalone", "listen": listen, "wireguard_interface": wg}}
+    (tmp_path / "state.json").write_text(json.dumps(state))
+    result = subprocess.run([php, "-r", '$_GET["api"]="state"; require "webinterface/admin.php";'],
+                            env={**os.environ, "KZF_WEB_RUNTIME": str(tmp_path), "REQUEST_METHOD": "GET",
+                                 "SERVER_NAME": local, "REMOTE_ADDR": peer, "HTTP_HOST": listen,
+                                 "HTTP_X_FORWARDED_FOR": "10.0.83.10"},
+                            text=True, capture_output=True, check=True)
+    if allowed:
+        assert listen in result.stdout
+    else:
+        assert "für diese Verbindung gesperrt" in result.stdout
 
 
 def test_web_installer_restores_volatile_state_on_every_boot() -> None:
@@ -910,7 +996,7 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
         }}},
         "product": {
             "name": "kienzlefon.de",
-            "version": "2.6.1",
+            "version": "2.7",
             "author": "Dr. Thomas Kienzle",
             "url": "https://kienzlefon.de",
         },
@@ -1059,8 +1145,11 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
     assert 'data-ivr-key="rot"' in result.stdout
     assert 'data-page="routing">Rufgruppen</button>' in result.stdout
     assert 'data-routing-extension="201" data-routing-route="specialist"' in result.stdout
+    assert 'value="all" checked' in result.stdout and 'Nur ausgewählte Arbeitsplätze' in result.stdout
+    assert 'data-phone-name="201" maxlength="128" required value="Empfang"' in result.stdout
+    assert 'kein nutzbarer Schaltzugang' in result.stdout
     assert "Keine Taste" in result.stdout
-    assert "Kienzlefon 2.6.1" in result.stdout
+    assert "Kienzlefon 2.7" in result.stdout
     assert "kienzlefon.de" in result.stdout
     assert "Dr. Thomas Kienzle" in result.stdout
     assert "Genau diese Ansage aufnehmen" in result.stdout
@@ -1113,3 +1202,143 @@ def test_php_renders_passwordless_dashboard_only_on_configured_address(
             capture_output=True,
             text=True,
         )
+
+
+def test_routing_admin_saves_shared_name_and_scope_without_changing_members(app_config, tmp_path, monkeypatch):
+    from kienzlefon import control_setup, phone_callerid
+    from kienzlefon.middleware import telephone_extensions
+    from kienzlefon.middleware_setup import raw_telephones
+    from kienzlefon.telephony_control import Controller, Journal
+    from kienzlefon.webadmin import _set_toml_value
+    from tests.test_telephony_control import Plant
+
+    source = app_config.source
+    local = _set_toml_value(source.read_text(), "control_api", "credentials_file", str(tmp_path / "credentials"))
+    source.write_text(local.replace("queue_nebenstellen_anzahl = 1", "queue_nebenstellen_anzahl = 2"))
+    control_setup.enable_local(load_config(source), "test-pbx")
+    config = load_config(source)
+    control_setup.ensure_credentials(config)
+    control_setup.register(config, "middleware", ["empfang-1"], tmp_path / "test.token")
+    worker = _worker(config, tmp_path)
+    journal = Journal(tmp_path / "control")
+    plant = Plant()
+    controller = Controller(journal, plant)
+    controller.refresh(config)
+    writer = control_setup.write_policy
+    pjsip = tmp_path / "pjsip.conf"
+    pjsip.write_text("; Asterisk\n")
+    active = {}
+
+    def cli(command):
+        if command == "pjsip reload":
+            active.update({ext: value for value, ext in re.findall(r'callerid=(".*?" <(\d+)>)', pjsip.read_text())})
+            return ""
+        return " callerid : " + active[command.split()[-1]]
+
+    monkeypatch.setattr(phone_callerid, "_cli", cli)
+    monkeypatch.setattr(control_setup, "write_policy", lambda cfg, p, **kw: writer(
+        cfg, p, journal.directory, asterisk_dir=tmp_path, **kw))
+    state = worker.export()
+    view = state["routing_policy"]
+    assert view["writing_access"] == {"middleware": ["empfang-1"]}
+    assert view["workplace_mode"] == "all"
+    members = view["members"]
+    members["201"]["normal"].update(can_enable=True, can_disable=True)
+    policy = {"remote_enabled": True, "members": members, "workplace_mode": "selected", "workplace_ids": ["platz-2"]}
+    action = {"action": "save_routing_policy", "policy": policy}
+    _queue(worker, "a" * 32, {**action, "config_hash": state["config_hash"]})
+    worker.run_once()
+    config = load_config(source)
+    assert config.routing_policy.workplace_ids == ("platz-2",)
+    controller.refresh(config)
+    controller.set_local_member(config, controller.view(config, journal.load()["epoch"])[0]["revision"], "normal", "201", False)
+    before = journal.load()
+    old_tab = {**action, "policy": {"members": members, "remote_enabled": True}}
+    _queue(worker, "b" * 32, {**old_tab, "config_hash": worker.export()["config_hash"],
+                              "names": {"201": "Empfang"}})
+    worker.run_once()
+    saved = load_config(source)
+    assert saved.phone_names == {"201": "Empfang"}
+    assert active["201"] == '"Empfang" <201>'
+    assert saved.routing_policy == config.routing_policy
+    assert telephone_extensions(saved)["201"] == raw_telephones(tomllib.loads(source.read_text()))["201"] == "Empfang"
+    controller = Controller(journal, plant)
+    controller.refresh(saved)
+    assert journal.load() == before
+    ext = next(item for item in controller.view(saved, before["epoch"])[1] if item["id"] == "201")
+    assert ext["label"] == worker.export()["routing_policy"]["labels"]["201"] == "Empfang"
+    assert ext["routing"]["normal"] is False and ext["routing"]["permissions"]["normal"]["can_enable"]
+    original = source.read_bytes()
+    for index, names in enumerate(({"201": " "}, {"201": "Empfang\nEG"}, {"11111111": "Fremd"}), start=1):
+        _queue(worker, str(index) * 32, {**action, "config_hash": worker.export()["config_hash"], "names": names})
+        worker.run_once()
+        assert source.read_bytes() == original
+
+
+def test_admin_saves_practice_and_both_menu_orders(app_config, tmp_path):
+    from kienzlefon.ivr_keys import MENU_PROMPTS, MENU_CHOICES
+    from kienzlefon.prompts import rendered_prompts
+
+    worker = _worker(app_config, tmp_path)
+    state = worker.export()
+    job = {"action": "save", "practice_name": 'Praxis "Test" am Ring',
+           "menu_order": list(reversed(MENU_PROMPTS)), "menu_choices": list(reversed(MENU_CHOICES)),
+           "config_hash": state["config_hash"]}
+    _queue(worker, "a" * 32, job)
+    worker.run_once()
+    saved = load_config(app_config.source)
+    assert saved.practice.name == job["practice_name"]
+    assert saved.menu_order == tuple(job["menu_order"]) and saved.menu_choices == tuple(job["menu_choices"])
+    assert saved.practice.name in rendered_prompts(saved)["greeting_open"]
+    for field, value in (("menu_order", ["menu_intro"] * len(MENU_PROMPTS)), ("practice_name", "Praxis\nTest")):
+        unchanged = app_config.source.read_bytes()
+        _queue(worker, "b" * 32, {**job, "config_hash": worker.export()["config_hash"], field: value})
+        worker.run_once()
+        assert json.loads((worker.status_directory / ("b"*32 + ".json")).read_text())["code"] == "auftrag_abgelehnt"
+        assert app_config.source.read_bytes() == unchanged
+
+
+def test_google_rate_preview_and_save_are_separate(app_config, tmp_path, monkeypatch):
+    import wave
+    from kienzlefon.webadmin import _set_toml_value
+
+    settings = tmp_path / "google.conf"
+    settings.write_text("API_KEY=synthetic-secret\nVOICE=de-DE-Chirp3-HD-Enceladus\nRATE=0.93\n")
+    settings.chmod(0o600)
+    generator = tmp_path / "generate"
+    generator.touch(mode=0o700)
+    text = _set_toml_value(app_config.source.read_text(), "tts", "google_generator", str(generator))
+    app_config.source.write_text(_set_toml_value(text, "tts", "google_konfig", str(settings)))
+    worker = _worker(app_config, tmp_path, prompts_command="/usr/bin/false")
+    state = worker.export()
+    seen = []
+    def run(command, *, timeout):
+        if "--output" not in command:
+            return subprocess.CompletedProcess(command, 0, b"", b"")
+        seen.append(command)
+        with wave.open(command[command.index("--output")+1], "wb") as stream:
+            stream.setparams((1, 2, 24000, 0, "NONE", ""))
+            stream.writeframes(bytes(480))
+        return subprocess.CompletedProcess(command, 0, b"", b"")
+    monkeypatch.setattr(webadmin_module, "_run_command", run)
+    base = {"config_hash": state["config_hash"], "rate": 1.2, "previous_rate": state["tts"]["google_rate"],
+            "voice": state["tts"]["google_voice"]}
+    before = settings.read_bytes()
+    for digit, action in (("a", "preview_google_rate"), ("b", "save_google_rate"), ("c", "save_google_rate")):
+        _queue(worker, digit * 32, {**base, "action": action})
+        worker.run_once()
+        status = json.loads((worker.status_directory / (digit * 32 + ".json")).read_text())
+        if digit == "a":
+            assert status["code"] == "hoerprobe_bereit"
+            assert (worker.runtime_path / "audio" / ("google-" + digit*32 + ".wav")).is_file()
+            assert settings.read_bytes() == before
+        else:
+            assert status["code"] == ("einstellungen_aktuell" if digit == "b" else "auftrag_abgelehnt")
+    assert settings.read_bytes() == before
+    saved = load_config(app_config.source)
+    assert saved.tts.google_rate == 1.2
+    speech = PromptGenerator(saved)._google_command("Praxis", tmp_path / "out.wav")
+    assert speech[speech.index("--speaking-rate") + 1] == "1.2"
+    assert settings.stat().st_mode & 0o777 == 0o600
+    assert len(seen) == 1 and seen[0][seen[0].index("--speaking-rate") + 1] == "1.2"
+    assert "synthetic-secret" not in worker.state_path.read_text()

@@ -49,9 +49,9 @@ def no_duplicates(pairs):
     return result
 
 
-def credentials(path: Path) -> dict[str, tuple[str, set[str]]]:
+def credentials(path: Path) -> dict[str, tuple[str, set[str] | None]]:
     data = json.loads(private_read(path, 65536), object_pairs_hook=no_duplicates)
-    if not isinstance(data, dict) or set(data) != {"schema_version", "identities"} or type(data["schema_version"]) is not int or data["schema_version"] != 1:
+    if not isinstance(data, dict) or set(data) != {"schema_version", "identities"} or type(data["schema_version"]) is not int or data["schema_version"] not in (1, 2):
         raise ValueError("Ungültiges Control-Credentials-Schema")
     if not isinstance(data["identities"], list) or not data["identities"]:
         raise ValueError("Control-Identitäten fehlen")
@@ -63,16 +63,25 @@ def credentials(path: Path) -> dict[str, tuple[str, set[str]]]:
         identifier, digest, clients = item["id"], item["token_sha256"], item["allowed_clients"]
         if (not isinstance(identifier, str) or not CLIENT.fullmatch(identifier) or identifier in identities
                 or not isinstance(digest, str) or not HEX_TOKEN.fullmatch(digest) or digest in hashes
-                or not isinstance(clients, list) or not clients
-                or any(not isinstance(client, str) or not CLIENT.fullmatch(client) for client in clients)
-                or len(set(clients)) != len(clients)):
+                or (clients is None and (data["schema_version"] != 2 or identifier == "t2med-counters"))
+                or (clients is not None and (not isinstance(clients, list)
+                    or any(not isinstance(client, str) or not CLIENT.fullmatch(client) for client in clients)
+                    or len(set(clients)) != len(clients)))):
             raise ValueError("Ungültige oder doppelte Control-Identität")
-        identities[identifier] = digest, set(clients)
+        identities[identifier] = digest, None if clients is None else set(clients)
         hashes.add(digest)
     return identities
 
 
-def principal(path: Path, header: str) -> tuple[str, set[str]]:
+def encode_credentials(identities: dict[str, tuple[str, set[str] | None]]) -> str:
+    version = 2 if any(clients is None for _, clients in identities.values()) else 1
+    return json.dumps({"schema_version": version, "identities": [
+        {"id": key, "token_sha256": digest, "allowed_clients": None if clients is None else sorted(clients)}
+        for key, (digest, clients) in identities.items()
+    ]}, indent=2) + "\n"
+
+
+def principal(path: Path, header: str) -> tuple[str, set[str] | None]:
     prefix = "Bearer "
     if not header.startswith(prefix) or not HEX_TOKEN.fullmatch(header[len(prefix):]):
         raise ControlError("unauthenticated")
@@ -86,6 +95,11 @@ def principal(path: Path, header: str) -> tuple[str, set[str]]:
     return matched
 
 
+def permits_queued_request(config: AppConfig, identity: str, client: str) -> bool:
+    entry = credentials(config.control_api.credentials_file).get(identity)
+    return entry is not None and (entry[1] is None or client in entry[1])
+
+
 class ControlService:
     def __init__(self, config: AppConfig, journal: Journal, plant: AsteriskPlant):
         self.config = config
@@ -93,7 +107,7 @@ class ControlService:
         self.control_settings = config.control_api
         self.journal = journal
         self.plant = plant
-        self.controller = Controller(journal, plant)
+        self.controller = Controller(journal, plant, permits_queued_request)
         self.live = LiveMonitor(plant)
         self.epoch: str | None = None
         self.last_prune = 0.0
@@ -219,7 +233,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, service.capabilities())
                 return
             if self.path == PREFIX + "state" and self.command == "GET":
-                self._json(200, service.state())
+                state = service.state()
+                if self.headers.get("X-Kienzlefon-Display") == "1":
+                    state["ai_enabled"] = service.config.ai_integration.admission_enabled
+                self._json(200, state)
+                return
+            policy = service.config.routing_policy
+            clients = policy.permitted_clients(clients)
+            if self.path == PREFIX + "routing/workplaces":
+                if self.command != "GET":
+                    raise ControlError("method_not_allowed")
+                self._json(200, {"schema_version": 1, "pbx_id": service.control_settings.pbx_id,
+                                 "remote_enabled": policy.remote_enabled,
+                                 "mode": "all" if clients is None else "selected",
+                                 "client_ids": [] if clients is None else sorted(clients)})
                 return
             path = PREFIX + "routing/requests"
             if self.path == path and self.command == "POST":

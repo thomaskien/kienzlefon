@@ -131,7 +131,7 @@ function queue_job(array $payload): string
     }
     $allowed = [
         'save',
-        'save_routing_policy',
+        'save_routing_policy', 'set_local_member', 'preview_google_rate', 'save_google_rate',
         'record',
         'activate_candidate',
         'regenerate_prompt',
@@ -171,6 +171,16 @@ function queue_job(array $payload): string
         throw new RuntimeException('Der Auftrag konnte nicht freigegeben werden.');
     }
     return $jobId;
+}
+
+function practice_or_loopback_ipv4(string $address): bool
+{
+    if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        return false;
+    }
+    [$first, $second] = array_map('intval', explode('.', $address));
+    return $first === 127 || $first === 10 || ($first === 192 && $second === 168)
+        || ($first === 172 && $second >= 16 && $second <= 31);
 }
 
 $secureCookie = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
@@ -217,9 +227,15 @@ if ($serverMode === 'standalone' && $localAddress === '') {
     // Listener-Adresse und nicht den vom Client gelieferten Host-Header.
     $localAddress = (string)($_SERVER['SERVER_NAME'] ?? '');
 }
-if (!$authRequired && ($expectedAddress === '' || !hash_equals($expectedAddress, $localAddress))) {
-    http_response_code(403);
-    exit('Passwortloser Zugriff ist ausschließlich über die konfigurierte WireGuard-Adresse erlaubt.');
+if (!$authRequired) {
+    $peer = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    $wireguard = ($state['network']['wireguard_interface'] ?? '') !== '';
+    $practiceAccess = practice_or_loopback_ipv4($localAddress) && practice_or_loopback_ipv4($peer)
+        && (!str_starts_with($localAddress, '127.') || str_starts_with($peer, '127.'));
+    if ($expectedAddress === '' || !hash_equals($expectedAddress, $localAddress) || (!$wireguard && !$practiceAccess)) {
+        http_response_code(403);
+        exit('Der Zugriff ohne Kennwort ist für diese Verbindung gesperrt.');
+    }
 }
 $authenticated = !$authRequired || (
     !empty($_SESSION['authenticated'])
@@ -300,6 +316,8 @@ if (isset($_GET['api'])) {
                 }
                 break;
             }
+        } elseif ($kind === 'google' && preg_match('/^[a-f0-9]{32}$/D', $name)) {
+            $filename = 'google-' . $name . '.wav';
         } elseif ($kind === 'hold_music' && !empty($state['hold_music']['preview'])) {
             $filename = 'hold-music.wav';
         }
@@ -457,7 +475,7 @@ foreach (($state['sources'] ?? []) as $source) {
 }
 $treeGroups = [
     'Eingang' => ['greeting_open', 'greeting_closed', 'emergency', 'urgent_help'],
-    'Klassisches Hauptmenü' => ['menu_intro', 'menu_open', 'menu_closed', 'opening_hours_choice', 'pharmacy_access', 'specialist_access', 'phone_hours'],
+    'Klassisches Hauptmenü' => $state['menu_order'] ?? ['menu_intro', 'menu_open', 'menu_closed', 'opening_hours_choice', 'pharmacy_access', 'specialist_access', 'phone_hours'],
     'Gemeinsame Datenerfassung' => ['recording_hint', 'first_name', 'last_name', 'birth_date', 'callback_number'],
     'Taste 2 · Rezept' => ['first_medication', 'next_medication', 'medication_choice', 'prescription_information'],
     'Taste 3 · Überweisung' => ['specialty', 'referral_reason'],
@@ -634,9 +652,13 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
 
         <section id="page-overview" class="page active" aria-labelledby="overview-title">
             <h2 id="overview-title">Übersicht</h2>
+            <div class="card mb18"><label for="practice-name">Praxisname für die Ansagen</label>
+                <input type="text" id="practice-name" maxlength="160" value="<?= h($state['practice'] ?? '') ?>">
+                <button type="button" class="button secondary" id="save-practice">Praxisname speichern</button>
+            </div>
             <div class="grid two">
                 <div class="card"><div class="status"><span class="status-dot"></span><div><strong>Ansagen bereit</strong><div class="muted">Automatische Erzeugung: <?= ($state['tts']['engine'] ?? 'kokoro') === 'qwen' ? 'Qwen3-TTS · ' . h($qwenVoiceLabels[$state['tts']['qwen_voice'] ?? ''] ?? ($state['tts']['qwen_voice'] ?? '')) : (($state['tts']['engine'] ?? 'kokoro') === 'kokoro' ? 'Kokoro · Thorsten' : (($state['tts']['engine'] ?? 'kokoro') === 'google' ? 'Google Cloud TTS · Chirp 3 HD' : 'Piper')) ?></div></div></div></div>
-                <div class="card"><div class="muted">Erreichbarkeit</div><div class="metric"><?= h(($state['network']['listen'] ?? '') . ':' . ($state['network']['port'] ?? '')) ?></div><span class="badge"><?= !empty($state['auth_required']) ? 'Kennwortschutz' : 'WireGuard, passwortlos' ?></span></div>
+                <div class="card"><div class="muted">Erreichbarkeit</div><div class="metric"><?= h(($state['network']['listen'] ?? '') . ':' . ($state['network']['port'] ?? '')) ?></div><span class="badge"><?= !empty($state['auth_required']) ? 'Kennwortschutz' : 'Ohne Kennwort' ?></span></div>
                 <div class="card"><div class="muted">Konfigurierbare Ansagetexte</div><div class="metric"><?= count($state['prompts'] ?? []) ?></div></div>
                 <div class="card"><div class="muted">Aufnahmefähige Nebenstellen</div><div class="metric"><?= count($state['extensions'] ?? []) ?></div></div>
             </div>
@@ -701,14 +723,27 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
             <?php $treeIndex = 3; foreach ($treeGroups as $groupLabel => $names): if ($groupLabel === 'Eingang') continue; ?>
             <div class="tree-stage">
                 <h3><?= h((string)$treeIndex) ?> · <?= h($groupLabel) ?></h3>
+                <?php $sortable = $groupLabel === 'Klassisches Hauptmenü'; ?>
+                <?php if ($sortable): ?><p>Ansagen mit der Maus ziehen oder mit den Pfeilen verschieben.</p><div data-sort-list="menu_order"><?php endif; ?>
                 <?php foreach ($names as $name): if (!isset($sourcesByName[$name])) continue; $source = $sourcesByName[$name]; $mode = (string)($source['mode'] ?? 'immer'); ?>
-                <article class="tree-node">
+                <article class="tree-node" <?= $sortable ? 'draggable="true" data-sort-item="' . h($name) . '"' : '' ?>>
+                    <?php if ($sortable): ?><div><button type="button" data-move="-1" aria-label="Ansage nach oben">↑</button> <button type="button" data-move="1" aria-label="Ansage nach unten">↓</button></div><?php endif; ?>
                     <div><button class="tree-node-title" type="button" <?= !empty($source['active_preview']) ? 'data-tree-play="tree-audio-' . h($name) . '"' : 'disabled' ?>><?= h($source['label'] ?? $name) ?></button><div class="hint"><?= h($name) ?> · <?= ($source['source'] ?? 'tts') === 'manuell' ? 'manuelle Aufnahme' : 'TTS' ?></div></div>
                     <div class="tree-node-controls"><label class="checkbox"><input type="checkbox" data-prompt-enabled="<?= h($name) ?>" data-default="<?= ($source['default_mode'] ?? 'immer') === 'deaktiviert' ? '0' : '1' ?>" <?= $mode !== 'deaktiviert' ? 'checked' : '' ?>>Ansage aktiv</label></div>
                     <?php if (!empty($source['active_preview'])): ?><audio id="tree-audio-<?= h($name) ?>" controls preload="none" src="?api=audio&amp;kind=active&amp;name=<?= h($name) ?>"></audio><?php endif; ?>
                 </article>
                 <?php endforeach; ?>
-                <?php if ($groupLabel === 'Klassisches Hauptmenü'): ?>
+                <?php if ($sortable): ?></div>
+                <details><summary>Reihenfolge der gesprochenen Tasten im Menütext</summary>
+                    <p>Eine Änderung erzeugt den offenen und geschlossenen Menütext aus den zugewiesenen Tasten. Jede Taste behält ihre Nummer.</p>
+                    <div data-sort-list="menu_choices">
+                    <?php $choiceLabels = ['praxis'=>'Praxiswarteschlange','rezept'=>'Rezept','ueberweisung'=>'Überweisung','termin'=>'Termin','weitere'=>'Rückruf oder sonstiges Anliegen'];
+                    foreach (($state['menu_choices'] ?? array_keys($choiceLabels)) as $choice): ?>
+                        <div draggable="true" data-sort-item="<?= h($choice) ?>" class="tree-route-row">
+                            <span><?= h($choiceLabels[$choice]) ?></span><span><button type="button" data-move="-1" aria-label="Nach oben">↑</button> <button type="button" data-move="1" aria-label="Nach unten">↓</button></span>
+                        </div>
+                    <?php endforeach; ?></div>
+                </details>
                 <details open><summary>Tasten und Ziele</summary><div class="details-body tree-route">
                     <?php $keySections = [
                         'Hauptmenü' => ['ki' => 'KI-Assistent', 'praxis' => 'Praxiswarteschlange',
@@ -737,14 +772,36 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
         <section id="page-routing" class="page" aria-labelledby="routing-title">
             <div class="toolbar"><div><h2 id="routing-title">Rufgruppen</h2><p class="muted">Grundeinstellungen und Rechte für Normal und ROT.</p></div><button class="button" type="button" id="save-routing-policy">Rufgruppen speichern</button></div>
             <label class="checkbox"><input type="checkbox" id="routing-remote" <?= !empty($policy['remote_enabled']) ? 'checked' : '' ?>> Änderungen aus App und Middleware erlauben</label>
+            <fieldset><legend>Arbeitsplätze der angebundenen Praxis</legend>
+                <label><input type="radio" name="routing-workplaces" value="all" <?= ($policy['workplace_mode'] ?? 'all') === 'all' ? 'checked' : '' ?>> Alle Arbeitsplätze (Standard)</label>
+                <label><input type="radio" name="routing-workplaces" value="selected" <?= ($policy['workplace_mode'] ?? 'all') === 'selected' ? 'checked' : '' ?>> Nur ausgewählte Arbeitsplätze</label>
+                <div id="routing-workplace-list" <?= ($policy['workplace_mode'] ?? 'all') === 'all' ? 'hidden' : '' ?>>
+                    <label for="routing-workplace-ids">Platz-IDs (mit Komma oder Zeilenumbruch trennen)</label>
+                    <textarea id="routing-workplace-ids" rows="2"><?= h(implode(", ", $policy['workplace_ids'] ?? [])) ?></textarea>
+                    <p class="hint">Eine leere Auswahl sperrt alle Arbeitsplätze.</p>
+                </div>
+                <?php if (empty($policy['writing_access'])): ?>
+                <p class="hint">Für die Praxis ist kein nutzbarer Schaltzugang eingerichtet. Die Kopplung mit der Middleware benötigt einen eigenen Rufgruppenschlüssel.</p>
+                <?php else: foreach ($policy['writing_access'] as $access => $places): ?>
+                <p class="hint">Dienstzugang <?= h((string)$access) ?>: <?= h($places === null ? 'alle authentifizierten Praxisarbeitsplätze' : implode(', ', $places)) ?></p>
+                <?php endforeach; endif; ?>
+            </fieldset>
             <?php foreach (($policy['members'] ?? []) as $extension => $routes): ?>
                 <details><summary><?= h($policy['labels'][$extension] ?? 'Telefon') ?> <?= h((string)$extension) ?></summary>
                     <div class="details-body planning-grid">
+                    <label>Gerätename <input type="text" data-phone-name="<?= h((string)$extension) ?>" maxlength="128" required value="<?= h($policy['labels'][$extension] ?? '') ?>"></label>
+
                     <?php foreach (['normal' => 'Normal', 'specialist' => 'ROT'] as $route => $label): $member = $routes[$route]; ?>
                         <fieldset data-routing-extension="<?= h((string)$extension) ?>" data-routing-route="<?= h($route) ?>"><legend><?= h($label) ?></legend>
                             <?php foreach (['eligible' => 'Für diese Rufgruppe zugelassen', 'default_member' => 'Teilnahme als Standard', 'can_enable' => 'Hinzufügen aus App oder Middleware erlauben', 'can_disable' => 'Entfernen aus App oder Middleware erlauben'] as $key => $description): ?>
                                 <label class="checkbox"><input type="checkbox" data-routing-key="<?= h($key) ?>" <?= !empty($member[$key]) ? 'checked' : '' ?>> <?= h($description) ?></label>
                             <?php endforeach; ?>
+                            <?php $live = $state['routing_participation'] ?? null;
+                            if ($live !== null): $present = in_array((string)$extension, $live['members'][$route] ?? [], true); ?>
+                                <p>Zuletzt bestätigte Teilnahme: <strong><?= $present ? 'aktiv' : 'inaktiv' ?></strong>
+                                <button type="button" class="button secondary small" data-local-member="<?= $present ? '0' : '1' ?>" data-revision="<?= h($live['revision']) ?>"
+                                    <?= empty($member['eligible']) || ($present && count($live['members'][$route]) === 1) ? 'disabled' : '' ?>><?= $present ? 'Jetzt abmelden' : 'Jetzt anmelden' ?></button></p>
+                            <?php endif; ?>
                             <?php if ($route === 'normal'): ?><label>Rufstufe <input type="number" min="0" max="1000" required data-routing-key="penalty" value="<?= h((string)$member['penalty']) ?>"></label><?php endif; ?>
                         </fieldset>
                     <?php endforeach; ?>
@@ -758,6 +815,17 @@ $productUrl = (string)($state['product']['url'] ?? 'https://kienzlefon.de');
             <div class="toolbar"><div><h2 id="prompts-title">Ansagen</h2><p class="muted">Texte und aktive Audioquelle werden gemeinsam gespeichert.</p></div><button class="button" type="button" id="save-prompts">Ansagen speichern</button></div>
             <div class="card mb18">
                 <h3>Automatische Spracherzeugung</h3>
+                <?php if (!empty($state['tts']['google_available'])): ?>
+                <fieldset><legend>Google-Stimme testen</legend>
+                    <label for="google-rate">Sprechtempo für <?= h($state['tts']['google_voice']) ?> (0,25 bis 2,0)</label>
+                    <input id="google-rate" type="number" min="0.25" max="2" step="0.01"
+                        value="<?= h($state['tts']['google_rate']) ?>" data-voice="<?= h($state['tts']['google_voice']) ?>">
+                    <button type="button" class="button secondary" data-rate-action="preview_google_rate">Beispielansage erzeugen</button>
+                    <button type="button" class="button secondary" data-rate-action="save_google_rate">Tempo speichern</button>
+                    <audio id="google-sample" controls hidden></audio>
+                    <p class="hint">Die Hörprobe verwendet einen festen Beispieltext. Mit „Ansagen speichern“ übernehmen Sie das gespeicherte Tempo in die Telefonansagen.</p>
+                </fieldset>
+                <?php endif; ?>
                 <p class="muted">Erzeugungsmodell und Sprecher gelten global für sämtliche automatisch erzeugten TTS-Ansagen.</p>
                 <div class="planning-grid">
                     <div class="field">
@@ -921,7 +989,13 @@ document.querySelectorAll('.reset-textarea').forEach(button => button.addEventLi
 document.querySelectorAll('.reset-select').forEach(button => button.addEventListener('click', () => { const input = button.parentElement.querySelector('select'); input.value = input.dataset.default || ''; }));
 function splitRanges(value) { return value.split(',').map(item => item.trim()).filter(Boolean); }
 async function queue(payload) { const response = await fetch('?api=job', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRF-Token':csrf}, body:JSON.stringify(payload)}); const value = await response.json(); if (!response.ok || !value.ok) throw new Error(value.error || 'Auftrag konnte nicht gestartet werden.'); showFlash('Auftrag angenommen', 'Der sichere Dienst verarbeitet die Änderung.'); await poll(value.job_id, payload.action); }
-async function poll(job, action) { for (;;) { await new Promise(resolve => setTimeout(resolve, 900)); const response = await fetch('?api=status&job=' + encodeURIComponent(job), {cache:'no-store'}); const value = await response.json(); if (!value.status) continue; const status = value.status; showFlash(status.label || status.code, status.detail || '', ['ansagenerzeugung_fehlgeschlagen','aufnahme_verworfen','nebenstelle_nicht_erreichbar','auftrag_abgelehnt'].includes(status.code)); if (action === 'record_override_preset' && ['ansagen_aktuell','aufnahme_gespeichert'].includes(status.code)) continue; if (terminalCodes.has(status.code)) { if (['einstellungen_aktuell','ansagen_aktuell','aufnahme_gespeichert','vorlage_gespeichert','vorlage_geloescht'].includes(status.code)) setTimeout(() => location.reload(), 700); return; } } }
+async function poll(job, action) { for (;;) { await new Promise(resolve => setTimeout(resolve, 900)); const response = await fetch('?api=status&job=' + encodeURIComponent(job), {cache:'no-store'}); const value = await response.json(); if (!value.status) continue; const status = value.status; showFlash(status.label || status.code, status.detail || '', ['ansagenerzeugung_fehlgeschlagen','aufnahme_verworfen','nebenstelle_nicht_erreichbar','auftrag_abgelehnt'].includes(status.code)); if (action === 'record_override_preset' && ['ansagen_aktuell','aufnahme_gespeichert'].includes(status.code)) continue; if (status.code === 'hoerprobe_bereit') {
+    const audio = document.getElementById('google-sample');
+    audio.src = '?api=audio&kind=google&name=' + encodeURIComponent(job);
+    audio.hidden = false;
+    audio.play().catch(() => {});
+    return;
+} if (terminalCodes.has(status.code)) { if (['einstellungen_aktuell','ansagen_aktuell','aufnahme_gespeichert','vorlage_gespeichert','vorlage_geloescht'].includes(status.code)) setTimeout(() => location.reload(), 700); return; } } }
 async function safely(task) { try { await task(); } catch (error) { showFlash('Vorgang nicht möglich', error instanceof Error ? error.message : String(error), true); } }
 function promptValues() { const prompts = {}; document.querySelectorAll('textarea[data-prompt]').forEach(input => prompts[input.dataset.prompt] = input.value); return prompts; }
 function promptModeValues() { const modes = {}; document.querySelectorAll('[data-prompt-mode]').forEach(input => modes[input.dataset.promptMode] = input.value); document.querySelectorAll('[data-prompt-enabled]').forEach(input => modes[input.dataset.promptEnabled] = input.checked ? 'immer' : 'deaktiviert'); return modes; }
@@ -931,7 +1005,9 @@ function validatePromptTexts(prompts) { for (const [name, value] of Object.entri
 async function savePrompts() { const prompts = promptValues(); validatePromptTexts(prompts); const tts = ttsValues(); const activeTtsChanged = tts.engine !== initialTtsEngine || (tts.engine === 'qwen' && tts.qwen_voice !== initialQwenVoice); if (activeTtsChanged && !confirm('Modell oder Sprecher wurden geändert. Alle automatischen TTS-Ansagen werden neu erzeugt; manuelle Aufnahmen bleiben erhalten. Fortfahren?')) return; await queue({action:'save', config_hash:configHash, prompts, sources:sourceValues(), tts}); }
 async function saveCalltree() {
     const ivr_keys = Object.fromEntries([...document.querySelectorAll('[data-ivr-key]')].map(input => [input.dataset.ivrKey, input.value.trim()]));
-    await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues(), ivr_keys});
+    const orders = Object.fromEntries([...document.querySelectorAll('[data-sort-list]')].map(list =>
+        [list.dataset.sortList, [...list.children].map(row => row.dataset.sortItem)]));
+    await queue({action:'save', config_hash:configHash, prompt_modes:promptModeValues(), ivr_keys, ...orders});
 }
 async function saveRoutingPolicy() {
     const members = {};
@@ -945,8 +1021,21 @@ async function saveRoutingPolicy() {
         members[routingExtension] ??= {};
         members[routingExtension][routingRoute] = member;
     }
-    await queue({action:'save_routing_policy', config_hash:configHash,
-        policy:{remote_enabled:document.getElementById('routing-remote').checked, members}});
+    const names = {};
+    for (const input of document.querySelectorAll('[data-phone-name]')) {
+        if (!input.value.trim()) throw new Error('Bitte einen Gerätenamen eingeben.');
+        if (input.value !== input.defaultValue) {
+            const name = input.value.trim();
+            if (new TextEncoder().encode(name).length > 79) {
+                throw new Error('Gerätename für ' + input.dataset.phoneName + ' überschreitet die Asterisk-Grenze von 79 UTF-8-Bytes.');
+            }
+            names[input.dataset.phoneName] = name;
+        }
+    }
+    const mode = document.querySelector('input[name="routing-workplaces"]:checked').value;
+    const ids = document.getElementById('routing-workplace-ids').value.split(/[\s,]+/).filter(Boolean);
+    await queue({action:'save_routing_policy', config_hash:configHash, ...(Object.keys(names).length ? {names} : {}),
+        policy:{remote_enabled:document.getElementById('routing-remote').checked, workplace_mode:mode, workplace_ids:ids, members}});
 }
 async function saveAssistant() { await queue({action:'save', config_hash:configHash, assistant:{enabled:document.getElementById('assistant-enabled').checked}}); }
 async function saveHoldMusic() { await queue({action:'save', config_hash:configHash, hold_music:{mode:document.getElementById('hold-music-mode').value}}); }
@@ -956,8 +1045,51 @@ function findPreset(id) { return overridePresets.find(item => item.id === id); }
 function loadPreset(id, source) { const preset = findPreset(id); if (!preset) throw new Error('Die gespeicherte Sonderansage wurde nicht gefunden.'); document.getElementById('override-preset-name').value = preset.name; document.getElementById('override-text').value = preset.announcement; document.getElementById('override-preset-block').checked = Boolean(preset.block_phone_hours); document.getElementById('override-preset-position').value = preset.position || 'statt_begruessung'; document.getElementById('override-preset-active').checked = Boolean(preset.active); document.getElementById('override-preset-priority').value = String(preset.priority ?? 100); document.getElementById('override-preset-valid-from').value = preset.valid_from || ''; document.getElementById('override-preset-expiry').value = preset.expires_at || ''; const presetSource = document.getElementById('override-preset-source'); if (source === 'manuell') presetSource.querySelector('option[value="manuell"]').disabled = false; presetSource.value = source; const sourceSelect = document.getElementById('override-source'); if (source === 'manuell') { const manualOption = sourceSelect.querySelector('option[value="manuell"]'); manualOption.disabled = false; sourceSelect.value = 'manuell'; selectedManualPreset = id; } else { sourceSelect.value = 'tts'; selectedManualPreset = ''; } editingPresetId = id; window.scrollTo({top:document.getElementById('page-override').offsetTop, behavior:'smooth'}); showFlash('Planung geladen', source === 'manuell' ? 'Die WAV-Fassung ist für diesen Eintrag ausgewählt.' : 'Die TTS-Fassung ist für diesen Eintrag ausgewählt.'); }
 async function saveOverridePreset() { await queue({action:'save_override_preset', ...overridePresetValues()}); }
 async function recordOverridePreset(values = overridePresetValues()) { const extension = document.getElementById('override-record-extension').value; await queue({action:'record_override_preset', ...values, extension}); }
+for (const list of document.querySelectorAll('[data-sort-list]')) {
+    let moving = null;
+    list.addEventListener('dragstart', event => {
+        moving = event.target.closest('[data-sort-item]');
+        if (moving) event.dataTransfer.setData('text/plain', moving.dataset.sortItem);
+    });
+    list.addEventListener('dragover', event => { if (moving) event.preventDefault(); });
+    list.addEventListener('drop', event => {
+        if (!moving) return;
+        event.preventDefault();
+        const target = event.target.closest('[data-sort-item]');
+        if (target && target !== moving) {
+            const bounds = target.getBoundingClientRect();
+            list.insertBefore(moving, event.clientY < bounds.top + bounds.height / 2 ? target : target.nextElementSibling);
+        }
+    });
+    list.addEventListener('dragend', () => { moving = null; });
+    list.addEventListener('click', event => {
+        const button = event.target.closest('[data-move]');
+        if (!button) return;
+        const row = button.closest('[data-sort-item]');
+        if (button.dataset.move === '-1' && row.previousElementSibling) list.insertBefore(row, row.previousElementSibling);
+        if (button.dataset.move === '1' && row.nextElementSibling) list.insertBefore(row.nextElementSibling, row);
+        button.focus();
+    });
+}
+document.getElementById('save-practice').addEventListener('click', () => safely(() => queue({
+    action:'save', config_hash:configHash, practice_name:document.getElementById('practice-name').value
+})));
+document.querySelectorAll('[data-rate-action]').forEach(button => button.addEventListener('click', () => safely(() => {
+    const input = document.getElementById('google-rate');
+    if (!input.reportValidity() || !input.value) throw new Error('Bitte ein gültiges Sprechtempo eingeben.');
+    return queue({action:button.dataset.rateAction, config_hash:configHash, rate:input.valueAsNumber,
+                  previous_rate:input.defaultValue, voice:input.dataset.voice});
+})));
+document.querySelectorAll('[data-local-member]').forEach(button => button.addEventListener('click', () => safely(() => {
+    const group = button.closest('[data-routing-extension]');
+    return queue({action:'set_local_member', config_hash:configHash, revision:button.dataset.revision,
+        extension:group.dataset.routingExtension, route:group.dataset.routingRoute, member:button.dataset.localMember === '1'});
+})));
 document.getElementById('save-times').addEventListener('click', () => safely(async () => { const schedules = {}; document.querySelectorAll('[data-schedule]').forEach(input => { schedules[input.dataset.schedule] ??= {}; schedules[input.dataset.schedule][input.dataset.day] = splitRanges(input.value); }); await queue({action:'save', config_hash:configHash, schedules}); }));
 document.getElementById('save-calltree').addEventListener('click', () => safely(saveCalltree));
+document.querySelectorAll('input[name="routing-workplaces"]').forEach(input => input.addEventListener('change', () => {
+    document.getElementById('routing-workplace-list').hidden = input.value === 'all';
+}));
 document.getElementById('save-routing-policy')?.addEventListener('click', () => safely(saveRoutingPolicy));
 document.getElementById('save-prompts').addEventListener('click', () => safely(savePrompts));
 const saveAssistantButton = document.getElementById('save-assistant'); if (saveAssistantButton) saveAssistantButton.addEventListener('click', () => safely(saveAssistant));

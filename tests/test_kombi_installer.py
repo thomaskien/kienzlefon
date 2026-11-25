@@ -1,4 +1,4 @@
-"""Exercise the combined installer with local packages and isolated system boundaries."""
+"""Exercise the installer with local packages and isolated system boundaries."""
 from __future__ import annotations
 
 import hashlib
@@ -83,7 +83,7 @@ def fax_base(tmp_path):
         (etc / name).touch()
 
 
-def run_main(source, tmp_path, overrides="", args=("--kombi",)):
+def run_main(source, tmp_path, overrides="", args=("--kombi",), answers=""):
     # A command reaching the network, APT, or a question during preflight fails the test.
     script = r"""
 source "$1"
@@ -99,12 +99,14 @@ require_root(){ :; }
 unexpected(){ echo "UNERWARTET: $*" >&2; exit 99; }
 download(){ unexpected download "$@"; }
 curl(){ unexpected curl "$@"; }
-ask_yes_no(){ unexpected Frage "$@"; }
 install_packages(){ unexpected APT; }
-""" + overrides + '\nmain "$@"\n'
+"""
+    if "--kombi" in args:
+        script += 'ask_yes_no(){ unexpected Frage "$@"; }\n'
+    script += overrides + '\nmain "$@"\n'
     return subprocess.run(["bash", "-c", script, "test", source / INSTALLER, *args],
                           env={**os.environ, "TEST_ROOT": str(tmp_path)},
-                          cwd=tmp_path, capture_output=True, input="", text=True)
+                          cwd=tmp_path, capture_output=True, input=answers, text=True)
 
 
 @pytest.mark.parametrize(("file", "contents", "message"), [
@@ -270,3 +272,72 @@ install_qwen_tts
         assert result.returncode == 0 and "verifiziert" in result.stdout
     assert (tmp_path / "generator").exists() is (not modified)
     assert helper.exists()
+
+
+@pytest.mark.parametrize(("package_file", "consent", "downloaded", "expected"), [
+    ("original", "", False, "verifiziert"),
+    ("changed", "", False, "SHA-256-Pruefsumme"),
+    ("missing", "\n", False, "Download abgelehnt"),
+    ("missing", "n\n", False, "Download abgelehnt"),
+    ("missing", "j\n", True, "verifiziert"),
+    ("missing", "j\n", True, "SHA-256-Pruefsumme"),
+])
+def test_normal_menu_qwen_from_archive(tmp_path, unpacked, package_file, consent, downloaded, expected):
+    fax_base(tmp_path)
+    helper = unpacked / QWEN
+    remote = tmp_path / "online-installer.sh"
+    shutil.copyfile(helper, remote)
+    if package_file == "missing":
+        helper.unlink()
+    if package_file == "changed" or (downloaded and expected != "verifiziert"):
+        with (remote if downloaded else helper).open("a") as handle:
+            handle.write("\n# abweichender Inhalt\n")
+
+    commands = tmp_path / "opt/venv/bin"
+    commands.mkdir(parents=True)
+    for name in ["python", "kienzlefon-config", "kienzlefon-middleware",
+                 "kienzlefon-transfer-setup", "kienzlefon-queue-setup"]:
+        binary = commands / name
+        binary.write_text('#!/bin/sh\n[ "$1" != -c ] || echo y\n')
+        binary.chmod(0o755)
+    # Use the real start dialog, package selection/copy, TTS menu and pinned hash.
+    # Replace host changes and stop after the verified handoff to the Qwen installer.
+    overrides = r'''
+QWEN_GENERATOR="$TEST_ROOT/generator"
+install_packages(){ :; }
+ln(){ :; }
+collect_configuration(){ collect_tts_configuration; }
+configure_hold_music(){ :; }
+collect_regeneration_choice(){ :; }
+prepare_directories(){ :; }
+install_systemd_unit(){ :; }
+install_admission_listener_unit(){ :; }
+install_google_tts(){ exit 0; }
+download(){
+  [[ "$1" == "$QWEN_INSTALLER_URL" ]] || unexpected download "$1"
+  echo "$1" >> "$TEST_ROOT/downloads"
+  cp "$TEST_ROOT/online-installer.sh" "$2"
+}
+bash(){
+  if [[ "${2:-}" == --offline-only ]]; then
+    [[ $# == 2 && "$KZF_TTS_ENGINE" == qwen ]] || unexpected bash "$@"
+    cp "$1" "$TEST_ROOT/executed.sh"
+    command bash "$1" --help >/dev/null
+    printf '#!/bin/sh\n# kienzlefon-worker.service\nexit 0\n' > "$QWEN_GENERATOR"
+    chmod +x "$QWEN_GENERATOR"
+  else
+    command bash "$@"
+  fi
+}
+'''
+    result = run_main(unpacked, tmp_path, overrides, args=(), answers="j\nj\n3\n1\n" + consent)
+    assert expected in result.stdout + result.stderr, result.stderr
+    assert "UNERWARTET" not in result.stderr
+    assert (tmp_path / "downloads").exists() == downloaded
+    executed = tmp_path / "executed.sh"
+    if expected == "verifiziert":
+        assert result.returncode == 0, result.stderr
+        assert executed.read_bytes() == (ROOT / QWEN).read_bytes()
+    else:
+        assert result.returncode != 0
+        assert not executed.exists()

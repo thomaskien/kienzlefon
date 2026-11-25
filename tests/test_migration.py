@@ -33,6 +33,28 @@ def test_migration_preserves_explicit_sip_target_subtable(tmp_path: Path) -> Non
     }
 
 
+def test_migration_preserves_routing_choices_and_device_names(tmp_path):
+    template = Path("config/kienzlefon.toml.example")
+    current = template.read_text()
+    target = tmp_path / "old.toml"
+    previous = current.replace('workplace_mode = "all"\nworkplace_ids = []\n', "")
+    previous = re.sub(r"\[nebenstellennamen\]\n[^\[]*", "", previous)
+    previous = previous.replace("remote_enabled = false", "remote_enabled = true")
+    target.write_text(previous)
+    assert migrate_config(target, template)
+    data = tomllib.loads(target.read_text())
+    assert data["routing_policy"] == {"remote_enabled": True, "workplace_mode": "all", "workplace_ids": []}
+    assert data["nebenstellennamen"] == {}
+    configured = target.read_text().replace('workplace_mode = "all"', 'workplace_mode = "selected"')
+    configured = configured.replace("workplace_ids = []", 'workplace_ids = ["platz-1"]')
+    target.write_text(configured.replace("[nebenstellennamen]", '[nebenstellennamen]\n201 = "Empfang"'))
+    assert not migrate_config(target, template)
+    data = tomllib.loads(target.read_text())
+    assert data["nebenstellennamen"] == {"201": "Empfang"}
+    assert data["routing_policy"]["workplace_mode"] == "selected"
+    assert data["routing_policy"]["workplace_ids"] == ["platz-1"]
+
+
 def test_migration_adds_missing_values_without_overwriting(tmp_path: Path) -> None:
     template = Path("config/kienzlefon.toml.example")
     source = template.read_text(encoding="utf-8")

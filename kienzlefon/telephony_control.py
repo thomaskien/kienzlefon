@@ -17,13 +17,12 @@ from typing import Protocol
 from uuid import uuid4
 
 from .config import AppConfig
-from .telephony_policy import ROUTES, RoutingPolicy, managed_phones, policy_for
+from .telephony_policy import CLIENT, ROUTES, RoutingPolicy, managed_phones, policy_for
 
 MAX_AGE_MS = 10000
 RETENTION = 604800
 ACTIVE = {"accepted", "applying", "unknown"}
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
-CLIENT = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 EXTENSION = re.compile(r"[0-9]{1,12}")
 TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)")
 COMMAND_KEYS = {"request_id", "client_id", "extension", "route", "member", "expected_revision", "pbx_epoch", "expires_at"}
@@ -88,6 +87,10 @@ class SourceError(RuntimeError):
     """AMI disconnected or a native operation had an uncertain outcome."""
 
 
+class InventoryChanged(SourceError):
+    """Queue events overlapped a read of the Asterisk inventory."""
+
+
 class Rejected(SourceError):
     """Asterisk explicitly rejected a synchronous action."""
 
@@ -146,6 +149,14 @@ class Journal:
             db.execute("INSERT OR REPLACE INTO plant VALUES (1, ?)", (json.dumps(state),))
             if request is not None:
                 self._update(db, *request)
+
+    def publish_members(self, state: dict) -> None:
+        from .middleware import private_write
+
+        path = self.directory / "members-confirmed.json"
+        content = json.dumps({"revision": _revision(state), "members": state["members"]}) + "\n"
+        if not path.exists() or path.read_text(encoding="utf-8") != content:
+            private_write(path, content)
 
     def request(self, principal: str, identifier: str) -> tuple[dict, dict] | None:
         with self.connect() as db:
@@ -246,9 +257,11 @@ class Confirmed:
 
 
 class Controller:
-    def __init__(self, journal: Journal, plant: Plant):
+    def __init__(self, journal: Journal, plant: Plant,
+                 permits_request: Callable[[AppConfig, str, str], bool] | None = None):
         self.journal = journal
         self.plant = plant
+        self.permits_request = permits_request
         self.snapshot: Confirmed | None = None
         self.processing = threading.Lock()
         self.submission = threading.Lock()
@@ -276,15 +289,17 @@ class Controller:
             raise fail("invalid_request")
         if _revision(state) != command["expected_revision"]:
             raise fail("revision_conflict")
+        if policy.workplace_mode == "selected" and command["client_id"] not in policy.workplace_ids:
+            raise fail("client_forbidden")
         if command["extension"] not in policy.members:
             raise fail("unknown_extension")
         reason = permission(policy, state, command["route"], command["extension"], command["member"])
         if reason:
             raise fail(reason)
 
-    def submit(self, principal: str, clients: set[str], command: dict) -> dict:
+    def submit(self, principal: str, clients: set[str] | None, command: dict) -> dict:
         identifier = command["request_id"]
-        if command["client_id"] not in clients:
+        if clients is not None and command["client_id"] not in clients:
             raise ControlError("client_forbidden")
         with self.submission:
             previous = self.journal.request(principal, identifier)
@@ -303,9 +318,9 @@ class Controller:
             self.journal.append(principal, command, accepted)
             return accepted
 
-    def result(self, principal: str, clients: set[str], identifier: str) -> dict:
+    def result(self, principal: str, clients: set[str] | None, identifier: str) -> dict:
         previous = self.journal.request(principal, identifier)
-        if previous is None or previous[0]["client_id"] not in clients:
+        if previous is None or (clients is not None and previous[0]["client_id"] not in clients):
             raise ControlError("request_not_found")
         return previous[1]
 
@@ -322,10 +337,41 @@ class Controller:
                     if self.plant.process_key() != state["process"]:
                         raise SourceError("Asterisk wurde neu gestartet")
                     self.plant.change(config, route, extension, None)
-            current = self.plant.inventory(config)
+            for attempt in range(5):
+                try:
+                    current = self.plant.inventory(config)
+                    break
+                except InventoryChanged:
+                    if attempt == 4:
+                        raise
+                    time.sleep(0.2)
         if current.members != desired or self.plant.process_key() != state["process"]:
             raise SourceError("Rufgruppen konnten nicht bestätigt werden")
         return current
+
+    def set_local_member(self, config: AppConfig, revision: str, route: str, extension: str, member: bool) -> None:
+        """Set participation from the privileged local admin, keeping the restart defaults."""
+        with self.journal.locked():
+            state = self.journal.load()
+            policy = policy_for(config)
+            if (state is None or state["process"] != self.plant.process_key() or _revision(state) != revision
+                    or state["policy"] != policy.export() or self.journal.pending()):
+                raise SourceError("Rufgruppenstand geändert oder noch nicht bestätigt. Bitte neu laden.")
+            if route not in ROUTES or extension not in policy.members or type(member) is not bool:
+                raise ValueError("Unbekannte Rufgruppe oder Nebenstelle")
+            if not policy.members[extension][route].eligible:
+                raise ValueError("Nebenstelle ist für diese Rufgruppe nicht zugelassen")
+            target = _target(state, {"route": route, "extension": extension, "member": member})
+            if not target[route]:
+                raise ValueError("Das letzte Mitglied muss in der Rufgruppe bleiben")
+            actual = self.plant.inventory(config)
+            if actual.members != _members(policy, state["members"]):
+                raise SourceError("Asterisk meldet abweichende Mitgliedschaften. Bitte erneut laden.")
+            if target != state["members"]:
+                self._confirm(config, state, _members(policy, target), actual)
+                changed = {**state, "members": target, "revision": state["revision"] + 1}
+                self.journal.store(changed)
+                self.journal.publish_members(changed)
 
     def refresh(self, config: AppConfig, *, current_config: Callable[[], AppConfig] | None = None) -> None:
         with self.processing, self.journal.locked():
@@ -360,6 +406,8 @@ class Controller:
             self.plant.ready(True)
             self.snapshot = Confirmed(state, time.time(), time.monotonic(), inventory.generation)
             self._execute_next(config, policy, state)
+            if self.snapshot is not None:
+                self.journal.publish_members(self.snapshot.state)
 
     def _resolve_pending(self, state: dict, inventory: QueueInventory) -> tuple[dict, bool]:
         uncertain = False
@@ -389,6 +437,8 @@ class Controller:
             self.journal.update(principal, request)
 
         try:
+            if self.permits_request and not self.permits_request(config, principal, pending["client_id"]):
+                raise ControlError("client_forbidden", state["epoch"], _revision(state))
             self._decision(state, policy, pending)
         except ControlError as error:
             update(_record(pending, "expired" if error.code == "request_expired" else "rejected", error=error.payload))

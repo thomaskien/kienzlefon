@@ -544,6 +544,14 @@ header('Content-Type: text/html; charset=utf-8');
       .button { width: 100%; }
       .telepraxis-frame { height: 1100px; }
     }
+    .installer-section {
+      margin: 0 auto;
+      width: min(1280px, calc(100% - 48px));
+      padding: clamp(32px, 5vw, 64px) 0;
+      scroll-margin-top: 24px;
+    }
+    .installer-section h2 { margin: 0; }
+    .installer-section pre { max-width: 100%; overflow-x: auto; padding: 1em; background: #f3f5f7; }
   </style>
 </head>
 <body>
@@ -557,6 +565,7 @@ header('Content-Type: text/html; charset=utf-8');
       </div>
 
       <nav class="top-nav" aria-label="Demo-Links">
+        <a href="#installation">Installation</a>
         <a href="./inbox/">Gespeicherte JSON-Dateien</a>
         <a href="https://github.com/thomaskien/kienzlefon" target="_blank" rel="noopener noreferrer">GitHub</a>
         <a href="https://www.kienzlefax.de/impressum/" target="_blank" rel="noopener noreferrer">Impressum</a>
@@ -814,6 +823,14 @@ setInterval(updateCpuWidget, 5000);
         title="Telepraxis-App"
         loading="eager"
       ></iframe>
+    </section>
+    <section id="installation" class="installer-section" aria-labelledby="installation-title">
+      <h2 id="installation-title">Installation auf dem eigenen Server</h2>
+      <p>Im Terminal des Linux-Servers den Universalinstaller laden und starten. Im Menü die gewünschten Rollen auswählen.</p>
+      <pre><code>wget -O kienzle-installieren.sh https://kienzlefon.de/kienzle-installieren.sh &amp;&amp;
+sudo bash ./kienzle-installieren.sh</code></pre>
+      <p>Für die aktuellen Testversionen die Modularchive vor dem Start in <code>pakete/</code> neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Paketen.</p>
+      <a href="https://kienzlefon.de/kienzle-installieren.sh" download>Universalinstaller herunterladen (.sh)</a>
     </section>
   </main>
 

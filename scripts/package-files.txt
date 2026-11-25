@@ -54,12 +54,16 @@ kienzlefon/cli.py
 kienzlefon/config.py
 kienzlefon/control_api.py
 kienzlefon/control_setup.py
+kienzlefon/phone_callerid.py
+kienzlefon/t2med_counters.py
 kienzlefon/crypto.py
 kienzlefon/delivery.py
 kienzlefon/dialing.py
 kienzlefon/errors.py
 kienzlefon/health.py
 kienzlefon/hold_music.py
+kienzlefon/installer_sip.py
+kienzlefon/installer_times.py
 kienzlefon/ivr.py
 kienzlefon/ivr_keys.py
 kienzlefon/kokoro.py

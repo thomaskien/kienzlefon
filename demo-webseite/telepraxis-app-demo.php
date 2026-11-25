@@ -1,9 +1,11 @@
 <?php
 /*
  * telepraxis-app.php
- * Version: 3.4.3
+ * Version: 3.5.0
  *
  * Fortgeführter Changelog (niemals entfernen, nur ergänzen):
+ * - v3.5.0 (2026-09-29)
+ *   - SMS-Queue als konfigurierbaren Versandweg angebunden; Aufträge und Versandstatus werden ohne Routerzugriff im Webrequest angezeigt.
  * - v3.4.3 (2026-07-13)
  *   - Löschaktionen entfernen JSON-Dateien nun unmittelbar und endgültig, ohne sie zuvor in den Papierkorb zu verschieben.
  *   - Rückfragen für Einzel- und Sammellöschungen wurden auf die endgültige Löschung angepasst.
@@ -100,7 +102,7 @@ define('TELEPRAXIS_APP', true);
 require_once __DIR__ . '/telepraxis-sms.php';
 
 const TELEPRAXIS_APP_NAME = 'telepraxis-app';
-const TELEPRAXIS_APP_VERSION = '3.4.3';
+const TELEPRAXIS_APP_VERSION = '3.5.0';
 const TELEPRAXIS_INBOX_DIR = './inbox';
 const TELEPRAXIS_POLL_INTERVAL_MS = 5000;
 const TELEPRAXIS_DEFAULT_TIMEZONE = 'Europe/Berlin';
@@ -498,6 +500,52 @@ function tp_build_main_text(array $entry): string
     return $summary !== '' ? $summary : ($grund !== '' ? $grund : ($anliegen !== '' ? $anliegen : '—'));
 }
 
+function tp_sms_queue_comments(string $fileName): array
+{
+    static $settings = null;
+    static $unavailable = false;
+    try {
+        if ($unavailable) {
+            throw new RuntimeException('Queue nicht erreichbar.');
+        }
+        if ($settings === null) {
+            $settings = tp_sms_load_settings();
+        }
+        if (trim((string)($settings['queue']['database_path'] ?? '')) === '') {
+            return [];
+        }
+        require_once __DIR__ . '/telepraxis-sms-queue.php';
+        $jobs = tp_sms_queue_for_source($settings, $fileName);
+        $comments = [];
+        foreach ($jobs as $job) {
+            $labels = [
+                'pending' => 'zum Versand vorgemerkt',
+                'sending' => 'wird gesendet',
+                'accepted' => ($job['delivery_provider'] ?? 'fritz') === 'seven'
+                    ? 'an seven.io übergeben' : 'an FRITZ!Box übergeben',
+                'failed' => 'fehlgeschlagen – bitte prüfen',
+                'uncertain' => 'Versand unklar – vor erneutem Versand prüfen',
+            ];
+            $label = $labels[$job['status']] ?? 'Status unbekannt – bitte prüfen';
+            $comments[] = [
+                'text' => 'SMS an ' . (string)$job['recipient'] . ' · ' . $label . ":\n" . (string)$job['message'],
+                'created_at' => (string)$job['created_at'],
+                'created_at_display' => tp_format_datetime((string)$job['created_at']),
+                'workplace' => (string)$job['workplace'],
+                'sms_job_id' => (string)$job['id'],
+                'sms_status' => (string)$job['status'],
+            ];
+        }
+        return $comments;
+    } catch (Throwable $error) {
+        $unavailable = true;
+        return [[
+            'text' => 'SMS-Queue-Status derzeit nicht verfügbar. Bereits vorgemerkte SMS nicht erneut absenden.',
+            'created_at' => '', 'created_at_display' => '', 'workplace' => '',
+        ]];
+    }
+}
+
 function tp_build_entry_view(array $entry, string $fileName): array
 {
     $entry = tp_ensure_entry_app($entry);
@@ -526,6 +574,11 @@ function tp_build_entry_view(array $entry, string $fileName): array
             'workplace' => tp_sanitize_workplace((string)($comment['workplace'] ?? '')),
         ];
     }
+
+    $comments = array_merge($comments, tp_sms_queue_comments($fileName));
+    usort($comments, static function (array $left, array $right): int {
+        return (strtotime($left['created_at']) ?: 0) <=> (strtotime($right['created_at']) ?: 0);
+    });
 
     return [
         'id' => (string)($entry['id'] ?? pathinfo($fileName, PATHINFO_FILENAME)),
@@ -826,9 +879,36 @@ function tp_handle_api(): void
                 tp_json_response(['ok' => false, 'error' => 'Keine gültige Rückrufnummer für SMS vorhanden.'], 400);
             }
 
-            $smsResult = tp_sms_send_default($recipient, $smsText);
+            $requestId = (string)($_POST['sms_request_id'] ?? '');
+            if ($requestId !== '' && !preg_match('/^[a-f0-9]{32,64}$/D', $requestId)) {
+                tp_json_response(['ok' => false, 'error' => 'Ungültige SMS-Auftragskennung.'], 400);
+            }
+            $context = ['source_file' => $safeFile, 'workplace' => $workplace];
+            if ($requestId !== '') {
+                $context['request_id'] = $requestId;
+            }
+            // Nach CSRF-Prüfung Sitzungsdaten sichern und die Sitzung freigeben.
+            // Auch direkte Provider dürfen andere Anfragen dieses Browsers nicht blockieren.
+            $csrfToken = tp_get_csrf_token();
+            session_write_close();
+            $smsResult = tp_sms_send_default($recipient, $smsText, $context);
             if (($smsResult['provider'] ?? '') === 'none') {
                 tp_json_response(['ok' => false, 'error' => 'SMS-Versand ist deaktiviert.'], 400);
+            }
+
+            if (!empty($smsResult['queued'])) {
+                // Der Queue-Auftrag ist zugleich der dauerhafte SMS-Verlauf.
+                // Keine zweite Schreiboperation in der Vorgangsdatei nach erfolgreichem Enqueue.
+                tp_json_response([
+                    'ok' => true,
+                    'message' => !empty($smsResult['duplicate'])
+                        ? 'SMS-Auftrag bereits vorhanden. Der aktuelle Status steht bei der Karte.'
+                        : 'SMS zum Versand vorgemerkt.',
+                    'provider' => 'queue',
+                    'queued' => true,
+                    'job_id' => (string)$smsResult['job_id'],
+                    'csrf' => $csrfToken,
+                ], 202);
             }
 
             $commentText = 'SMS an Rückrufnummer ' . (tp_normalize_phone($callbackRaw) ?: $recipient) . ":\n" . $smsText;
@@ -840,7 +920,7 @@ function tp_handle_api(): void
                 'message' => 'SMS gesendet und als Kommentar gespeichert.',
                 'entry' => tp_build_entry_view($updated, $safeFile),
                 'provider' => (string)($smsResult['provider'] ?? ''),
-                'csrf' => tp_get_csrf_token(),
+                'csrf' => $csrfToken,
             ]);
         }
 
@@ -1759,6 +1839,7 @@ $isAdmin = tp_is_admin();
     const commentDrafts = new Map();
     const smsDrafts = new Map();
     const smsSendingFiles = new Set();
+    const smsRequestIds = new Map();
     const selected = {
         middle: new Set(),
         right: new Set(),
@@ -2579,6 +2660,7 @@ $isAdmin = tp_is_admin();
     }
 
     async function sendSms(file) {
+        if (smsSendingFiles.has(file)) return;
         const draft = String(smsDrafts.get(file) || '').trim();
         if (!draft) {
             showMessage('SMS-Text fehlt.', true);
@@ -2596,22 +2678,35 @@ $isAdmin = tp_is_admin();
             return;
         }
 
+        let request = smsRequestIds.get(file);
+        if (!request || request.text !== draft || request.recipient !== entry.sms_phone_href || request.workplace !== workplace) {
+            const bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            request = {
+                id: Array.from(bytes, value => value.toString(16).padStart(2, '0')).join(''),
+                text: draft, recipient: entry.sms_phone_href, workplace,
+            };
+            smsRequestIds.set(file, request);
+        }
+
         const formData = new FormData();
         formData.set('csrf', currentCsrf);
         formData.set('action', 'send_sms');
         formData.set('file', file);
         formData.set('workplace', workplace);
         formData.set('sms_text', draft);
+        formData.set('sms_request_id', request.id);
 
         smsSendingFiles.add(file);
         render(lastEntries);
-        showMessage('SMS wird gesendet...');
+        showMessage('SMS-Auftrag wird übermittelt...');
         try {
-            await apiRequest(formData);
+            const result = await apiRequest(formData);
             smsDrafts.delete(file);
+            smsRequestIds.delete(file);
             openSmsFiles.delete(file);
             await refresh();
-            showMessage('SMS gesendet und als Kommentar gespeichert.');
+            showMessage(result.message || 'SMS-Auftrag angenommen.');
         } catch (error) {
             showMessage(error.message || 'SMS konnte nicht gesendet werden.', true);
             render(lastEntries);

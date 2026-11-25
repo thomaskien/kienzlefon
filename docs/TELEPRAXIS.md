@@ -121,3 +121,9 @@ Fertige Produktiv- und Demodateien werden atomar mit Modus `0660` aktiviert.
 Laeuft der Worker als Root, setzt er Eigentumer `root` und uebernimmt die
 Gruppe des Ausgabeverzeichnisses. Dadurch bleibt eine geerbte ACL-Maske fuer
 die Gruppe schreibbar. Interne Spooldateien sind davon nicht betroffen.
+
+Bei „Verzeichnisse und Rechte“ schreibt der Installer eine private temporäre
+Datei in die konfigurierte Inbox, synchronisiert und entfernt sie. Die Prüfung
+läuft als `root` mit der Gruppe der Inbox, wie der Kienzlefon-Worker. Läuft
+Asterisk unter einem anderen Benutzer, wird auch dessen Schreibzugriff geprüft.
+Bei einem Fehler nennt der Installer den Pfad und die Ursache des Dateisystems.

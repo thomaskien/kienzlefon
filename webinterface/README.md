@@ -1,4 +1,4 @@
-# Kienzlefon-Webinterface in Kienzlefon 2.5.4
+# Kienzlefon-Webinterface in Kienzlefon 2.7
 
 Das Webinterface gehoert zur Kienzlefon-Hauptversion und besitzt keine eigene
 Produktversion mehr. Der Hauptinstaller aktualisiert eine vorhandene
@@ -21,10 +21,16 @@ Der Installer bietet drei Betriebsarten an:
 - Apache mit eigener Site-Konfiguration,
 - Nginx mit eigener Site-Konfiguration.
 
-Ist ein aktives WireGuard-Interface vorhanden, kann ausschließlich dessen feste IPv4-Adresse
-verwendet und optional der passwortlose Betrieb gewählt werden. Ohne WireGuard ist ein Kennwort
-zwingend; ein Zugriff außerhalb von `127.0.0.1` wird nur über Apache oder Nginx mit HTTPS
-eingerichtet.
+Im Praxis-LAN kann der PHP-Systemdienst direkt an die feste private IPv4-Adresse
+des Servers gebunden werden, beispielsweise `10.0.83.85`. Der vorgeschlagene
+Port ist `8088`. Der Dienst verwendet unverschlüsseltes HTTP. Vorgabe ist ein Administratorkennwort. Auf Wunsch kann der Installer den Zugriff im privaten Praxisnetz ohne Kennwort einrichten. Dieser Betrieb ist nur innerhalb der Praxis zulässig.
+Der Dienst darf keinesfalls aus dem Internet erreichbar sein. Keine Portfreigabe
+oder öffentliche Proxy-Weiterleitung für das Webinterface einrichten.
+
+Auf dem Server selbst ist der Zugriff über die Loopback-Adresse möglich. Bei
+Apache und Nginx richtet der Installer für den Netzwerkzugriff ohne WireGuard
+HTTPS ein. Auf einem aktiven WireGuard-Interface lässt sich der Dienst auf dessen
+feste IPv4-Adresse beschränken und optional passwortlos betreiben.
 
 Das Klartextkennwort steht wie vereinbart in der geschützten Datei
 `/etc/kienzlefon/kienzlefon.toml`:
@@ -116,3 +122,17 @@ einen Hinweis auf die Einrichtung im Hauptinstaller.
 
 Wartemusik ist bei neuer Einrichtung als Melodie vorausgewaehlt; eine bereits
 gespeicherte Auswahl wird durch ein Update nicht ueberschrieben.
+
+## Bedienung
+
+In **Übersicht** ändert „Praxisname speichern“ den Namen für Texte mit dem Platzhalter `{praxisname}`. Eigene Aufnahmen behalten ihren gesprochenen Inhalt.
+
+In **Anrufsbaum → Klassisches Hauptmenü** lassen sich die Ansagen ziehen oder mit den Pfeilen verschieben. Öffnungs-, Telefon- und Zugangszeiten bestimmen weiterhin, welche Ansagen ein Anrufer hört. Die zweite Sortierliste bestimmt die Reihenfolge der gesprochenen Tasten innerhalb der beiden Menütexte. Dafür wird TTS benötigt. Mit „Anrufsbaum speichern“ wird die Reihenfolge übernommen.
+
+Unter **Ansagen → Google-Stimme testen** erzeugt „Beispielansage erzeugen“ eine einzelne Hörprobe mit dem eingetragenen Tempo. „Tempo speichern“ übernimmt den Wert für die künftige Erzeugung. „Ansagen speichern“ aktualisiert anschließend die Telefonansagen mit dem ausgewählten Erzeugungsmodell.
+
+Unter **Rufgruppen** zeigt jede Nebenstelle die zuletzt bestätigte Teilnahme für Normal und ROT. „Jetzt anmelden“ und „Jetzt abmelden“ wirken bis zur nächsten Änderung oder zum Asterisk-Neustart. „Teilnahme als Standard“ legt den Startzustand fest. Zulassung, Rufstufe und externe Freigaben werden über „Rufgruppen speichern“ übernommen. Bei einem eigenen roten Telefon gilt die Teilnahme an ROT für das gemeinsame Klingeln nach dem ersten Rufversuch.
+
+Zum Umbenennen die Nebenstelle aufklappen, den **Gerätenamen** ändern und **Rufgruppen speichern** wählen. Speichern übernimmt den Namen auch in die Asterisk-Anruferkennung. Der Name erscheint im Anlagenstatus, aus dem die Praxis-App ihre Rufgruppenanzeige bezieht.
+
+Unter **Änderungen aus App und Middleware erlauben** gilt **Alle Arbeitsplätze (Standard)** für den authentifizierten Praxiszugang. **Nur ausgewählte Arbeitsplätze** akzeptiert die angegebenen Platz-IDs. Eine leere Auswahl sperrt alle. Der Dialog zeigt zusätzlich an, ob ein Schaltzugang eingerichtet ist und welche Beschränkungen er hat.

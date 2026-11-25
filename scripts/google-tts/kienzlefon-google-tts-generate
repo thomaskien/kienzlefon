@@ -5,7 +5,7 @@ Aufruf: kienzlefon-google-tts-generate --text TEXT --output AUSGABE.wav
 
 Konfiguration: /etc/kienzlefon/google-tts.conf (KEY=VALUE, Rechte 0600/0640)
   API_KEY    Google-Cloud-API-Schluessel (Text-to-Speech API)
-  VOICE      Stimme, Standard de-DE-Chirp3-HD-Sulafat
+  VOICE      Stimme, Standard de-DE-Chirp3-HD-Enceladus
   LANG       Sprachcode, Standard de-DE
   RATE       Sprechtempo 0.25-2.0, Standard 0.93
   ENDPOINT   API-Host, Standard texttospeech.googleapis.com
@@ -25,7 +25,7 @@ import urllib.request
 
 CONFIG = "/etc/kienzlefon/google-tts.conf"
 DEFAULTS = {
-    "VOICE": "de-DE-Chirp3-HD-Sulafat",
+    "VOICE": "de-DE-Chirp3-HD-Enceladus",
     "LANG": "de-DE",
     "RATE": "0.93",
     "ENDPOINT": "texttospeech.googleapis.com",
@@ -41,6 +41,8 @@ def read_config(path: str) -> dict[str, str]:
                 continue
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
+    if not values["VOICE"]:
+        values["VOICE"] = DEFAULTS["VOICE"]
     return values
 
 
@@ -79,6 +81,7 @@ def main() -> int:
     parser.add_argument("--config", default=CONFIG)
     parser.add_argument("--model-dir")
     parser.add_argument("--speed")
+    parser.add_argument("--speaking-rate", type=float, help="Sprechtempo für diese Erzeugung")
     arguments = parser.parse_args()
 
     try:
@@ -96,6 +99,10 @@ def main() -> int:
         print("RATE ist keine Zahl", file=sys.stderr)
         return 2
     rate = min(2.0, max(0.25, rate))
+    if arguments.speaking_rate is not None:
+        if not 0.25 <= arguments.speaking_rate <= 2.0:
+            parser.error("Sprechtempo muss zwischen 0.25 und 2.0 liegen")
+        rate = arguments.speaking_rate
 
     body = {
         "input": {"text": arguments.text},

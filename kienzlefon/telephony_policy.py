@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .config import AppConfig
 
 PBX_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+CLIENT = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 EXTENSION = re.compile(r"[0-9]{2,8}")
 ROUTES = {"normal": "Normal", "specialist": "ROT"}
 
@@ -85,10 +86,18 @@ class Membership:
 class RoutingPolicy:
     remote_enabled: bool = False
     members: Mapping[str, Mapping[str, Membership]] = field(default_factory=dict)
+    workplace_mode: str = "all"
+    workplace_ids: tuple[str, ...] = ()
+
+    def permitted_clients(self, identity_clients: set[str] | None) -> set[str] | None:
+        if self.workplace_mode == "all":
+            return identity_clients
+        selected = set(self.workplace_ids)
+        return selected if identity_clients is None else selected.intersection(identity_clients)
 
     @classmethod
     def parse(cls, value: object) -> RoutingPolicy:
-        if not isinstance(value, Mapping) or value.keys() - {"remote_enabled", "members"}:
+        if not isinstance(value, Mapping) or value.keys() - {"remote_enabled", "members", "workplace_mode", "workplace_ids"}:
             raise ValueError("Unbekannte Routing-Einstellung")
         members = value.get("members", {})
         if not isinstance(members, Mapping):
@@ -100,10 +109,17 @@ class RoutingPolicy:
             if not isinstance(routes, Mapping) or set(routes) != ROUTES.keys():
                 raise ValueError("Normal und ROT müssen je Nebenstelle angegeben werden")
             parsed[extension] = {route: Membership.parse(data, route) for route, data in routes.items()}
-        return cls(boolean(value.get("remote_enabled", False)), parsed)
+        mode = value.get("workplace_mode", "all")
+        ids = value.get("workplace_ids", [])
+        if (mode not in ("all", "selected") or not isinstance(ids, list) or len(ids) > 1024
+                or any(not isinstance(client, str) or not CLIENT.fullmatch(client) for client in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError("Ungültige Arbeitsplatz-Auswahl oder doppelte Platz-ID")
+        return cls(boolean(value.get("remote_enabled", False)), parsed, mode, tuple(sorted(ids)))
 
     def export(self) -> dict:
-        return {"remote_enabled": self.remote_enabled, "members": {
+        return {"remote_enabled": self.remote_enabled, "workplace_mode": self.workplace_mode,
+                "workplace_ids": list(self.workplace_ids), "members": {
             extension: {route: asdict(member) for route, member in routes.items()}
             for extension, routes in self.members.items()
         }}
@@ -142,7 +158,7 @@ def policy_for(config: AppConfig) -> RoutingPolicy:
                                  penalty=int(extension) - first if is_normal else 0),
             "specialist": Membership(eligible=is_specialist, default_member=is_specialist),
         })
-    result = RoutingPolicy(policy.remote_enabled, members)
+    result = RoutingPolicy(policy.remote_enabled, members, policy.workplace_mode, policy.workplace_ids)
     if config.control_api.enabled and any(not members for members in result.defaults().values()):
         raise ValueError("Normal und ROT brauchen jeweils mindestens ein Standardmitglied")
     return result

@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.6.1
+Version: 2.7
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Webinterface integriert, Anrufsbaum und Super-Priority-Notfallweg freigegeben.
@@ -34,6 +34,84 @@ Changelog:
 -->
 
 # Changelog
+
+## 2.7
+
+- Rufgruppen lassen sich im Webadmin verwalten. Freigegebene Praxis-Arbeitsplätze können die Teilnahme einzelner Nebenstellen ändern. Gespeicherte Gerätenamen erscheinen in der Asterisk-Anruferkennung.
+- Der Installer prüft Zeitprofile und Direktnummern und übernimmt bestehende Einstellungen für die Middleware und Google-TTS. Im Webadmin lassen sich die Reihenfolge der Hauptmenüansagen und das Google-Sprechtempo anpassen.
+- Das Installationspaket enthält den Fon-Installer, das Webinterface und die Konfigurationsvorlagen. Die Änderungen der einzelnen Zwischenversionen sind unten aufgeführt.
+
+## 2.6.12
+
+- Webadmin und Fon-Installer übernehmen die Gerätenamen in die Asterisk-Anruferkennung und prüfen den aktiven Namen jeder verwalteten Nebenstelle.
+
+## 2.6.11
+
+- Das Admin-Menü „Rufgruppen“ erlaubt externe Änderungen wahlweise von allen authentifizierten Arbeitsplätzen der angebundenen Praxis oder von ausgewählten Platz-IDs. Bestehende Beschränkungen eines Dienstzugangs gelten zusätzlich. Hinzufügen und Entfernen sind weiterhin je Nebenstelle für Normal und ROT getrennt einstellbar.
+- Der Gerätename ist unter „Rufgruppen“ editierbar. Webadmin, Anlagenstatus und Telefoninventar verwenden den gespeicherten Namen. Eine Umbenennung erhält auch die laufende Gruppenteilnahme.
+- Die lokale Installer-Kopplung unterstützt einen eigenen Rufgruppenschlüssel zusätzlich zum Statistik-Leseschlüssel. Die Control-API liefert der Middleware den wirksamen Arbeitsplatzumfang. Die nötigen Anpassungen an App und Middleware beschreibt die [Anlagensteuerung](docs/ANLAGENSTEUERUNG.md#anbindung-von-middleware-und-praxis-app).
+
+## 2.6.10
+
+Die lokale T2med-Vollinstallation übernimmt eine gemeinsame Anlagenkennung für Control und Tagesstatistik. Eine neue Middleware-Identität darf den Anlagenzustand lesen. Ihre Liste schaltberechtigter Arbeitsplätze ist leer. Vorhandene Identitäten, Rechte und Dienstschlüssel bleiben beim erneuten Einrichten erhalten.
+
+## 2.6.9
+
+- Der Installer bietet die lokale Rufgruppenverwaltung bei Installation, Update und Neukonfiguration an. Er richtet den Steuerungsdienst auf Loopback ein und übernimmt bestehende Freigaben bereits eingerichteter Anlagen. Beim ersten Abgleich wiederholt er die Abfrage bei zeitgleichen AMI-Mitgliedschaftsereignissen.
+- Im Admin-Menü lassen sich die aktuelle Teilnahme und der Standard nach einem Asterisk-Neustart für Normal und ROT getrennt einstellen. Die letzte Mitgliedschaft ist geschützt.
+- Hauptnummer, Fax und Direktnummern werden auf Doppelbelegung geprüft. Direkte 1&1-UDP-Leitungen verwenden bei passender vorhandener DID-Zustellung einen stabilen SIP-Kontakt.
+- Der Webinstaller bietet kennwortlosen Zugang für den ausdrücklich bestätigten lokalen Praxisbetrieb an. Der Hauptinstaller zeigt am Ende die SIP-Zugangsdaten der eingerichteten Endgeräte.
+- Praxisname, Reihenfolge der Hauptmenüansagen und Reihenfolge der gesprochenen Tasten lassen sich im Webinterface ändern. Das Google-Sprechtempo lässt sich mit einer einzelnen Beispielansage testen und separat speichern.
+
+## 2.6.8
+
+Der PHP-Systemdienst kann das Administrations-Webinterface mit Kennwort über
+HTTP an einer festen privaten IPv4-Adresse im Praxis-LAN bereitstellen.
+Der Installer weist bei dieser Auswahl darauf hin, dass der Dienst keinesfalls
+aus dem Internet erreichbar sein darf.
+
+## 2.6.7
+
+Der Installer prüft den Schreibzugriff auf die Telepraxis-Inbox mit einer
+temporären Datei unter der Benutzer- und Gruppenkennung des Workers. Damit
+entfällt der auf Ubuntu 26.04 beobachtete Fehlalarm des externen `test -w`.
+Bei einem tatsächlichen Schreibfehler zeigt der Installer die Meldung des
+Dateisystems an.
+
+## 2.6.6
+
+Der Installer prüft die Zeitfenster für Öffnungszeiten, Telefon, Apotheken
+und Fachstellen direkt bei der Eingabe. Bei einem ungültigen Zeitfenster
+wiederholt er die betroffene Frage. Wer beim Update die Zeitprofile beibehält,
+kann einzelne bereits gespeicherte fehlerhafte Tage vor der Einrichtung der
+Direktnummern korrigieren.
+
+## 2.6.5
+
+Google-TTS verwendet standardmäßig `de-DE-Chirp3-HD-Enceladus`. Im Installer
+sind die 30 deutschen Chirp-3-HD-Stimmen mit vollständiger Bezeichnung und
+Nummer aufgeführt. Bei der Ersteinrichtung wählt Enter die Nummer 11, bei
+einem Update die bereits konfigurierte Stimme.
+
+## 2.6.4
+
+Der Installer kennzeichnet einen vorhandenen Google-API-Schlüssel mit
+„(schon gesetzt)“. Enter übernimmt ihn auch bei einem eigenen Pfad zur
+Google-TTS-Konfiguration. Neu eingegebene Schlüssel werden sofort gespeichert
+und stehen beim nächsten Installerlauf wieder zur Verfügung.
+
+## 2.6.3
+
+Der Installer speichert neu eingegebene Zeitprofile bei bestehenden Installationen
+auch dann, wenn der Konfigurationspfad nur in der Shell gesetzt ist. Bei der
+tageweisen Eingabe übernimmt er die angegebenen Zeitfenster. Leere Tage bleiben
+geschlossen.
+
+## 2.6.2
+
+Auch beim normalen Start verwendet Kienzlefon den Qwen3-TTS-Installer v1.5
+aus dem entpackten Fon-Paket. Fehlt die Datei, fragt der Installer vor dem
+Download von GitHub. Für beide Bezugswege gilt dieselbe SHA-256-Prüfsumme.
 
 ## 2.6.1
 

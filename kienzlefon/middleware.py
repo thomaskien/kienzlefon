@@ -96,6 +96,18 @@ class MiddlewareConfig:
         return result
 
 
+def phone_names(raw: object) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        raise ValueError("Gerätenamen müssen nach Nebenstelle angegeben werden")
+    names = {}
+    for extension, name in raw.items():
+        if (not isinstance(extension, str) or not re.fullmatch(r"[0-9]{2,8}", extension)
+                or not isinstance(name, str) or not name.strip() or len(name) > 128 or not name.isprintable()):
+            raise ValueError("Gerätename benötigt eine Nebenstelle und 1 bis 128 druckbare Zeichen")
+        names[extension] = name.strip()
+    return names
+
+
 def telephone_extensions(config: AppConfig) -> dict[str, str]:
     result = {
         str(n): "Telefon (Praxisqueue)"
@@ -106,7 +118,7 @@ def telephone_extensions(config: AppConfig) -> dict[str, str]:
         result[config.ivr.red_extension] = "Rotes Telefon"
     result.update({entry.extension: "Zusaetzliches Telefon" for entry in config.standalone_extensions})
     result.update({extension: "KI-Nebenstelle" for extension in config.ai_integration.extensions})
-    return result
+    return {extension: config.phone_names.get(extension, label) for extension, label in result.items()}
 
 
 def private_write(path: Path, content: str, mode: int = 0o600) -> None:
