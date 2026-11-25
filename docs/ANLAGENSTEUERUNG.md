@@ -7,12 +7,10 @@ Im Admin-Menü zeigt **Rufgruppen** die zuletzt durch Asterisk bestätigte Teiln
 
 ## Einstellungen auf der Anlage
 
-- `bind` und `port` legen die konkrete private VPN-Adresse und den Port fest.
-  `allowed_networks` enthält die erlaubten Quellnetze der Middleware. Der
-  Standardport ist 8767. Die Betriebsverbindung nutzt das Praxisnetz oder VPN.
+- In `[control_api]` bestimmen `bind` und `port` die Adresse des Dienstes. Die lokale Einrichtung verwendet `127.0.0.1:8767` und erlaubt mit `allowed_networks = ["127.0.0.1/32"]` Zugriffe vom selben Rechner. Für eine getrennte Middleware müssen die erreichbare private Bind-Adresse und ihr erlaubtes Quellnetz zur Installation passen.
 - Die stabile `pbx_id` muss der Middleware-Anbindung und, sofern separat
   konfiguriert, `[anrufstatistik].pbx_id` entsprechen.
-- `kienzlefon-control-setup register --id <installation> --token-file <privater-pfad>`
+- `sudo /opt/kienzlefon/venv/bin/kienzlefon-control-setup register --id <installation> --token-file <privater-pfad>`
   registriert einen neuen Zugang für die authentifizierten Arbeitsplätze einer Middleware-Installation.
   Eine oder mehrere Optionen `--client <platz>` beschränken den Zugang auf diese IDs.
   Bei der Schlüsselrotation einer vorhandenen Identität bleiben deren Arbeitsplatzrechte ohne `--client` erhalten.

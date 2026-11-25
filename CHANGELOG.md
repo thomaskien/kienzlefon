@@ -37,9 +37,14 @@ Changelog:
 
 ## 2.7
 
-- Rufgruppen lassen sich im Webadmin verwalten. Freigegebene Praxis-Arbeitsplätze können die Teilnahme einzelner Nebenstellen ändern. Gespeicherte Gerätenamen erscheinen in der Asterisk-Anruferkennung.
-- Der Installer prüft Zeitprofile und Direktnummern und übernimmt bestehende Einstellungen für die Middleware und Google-TTS. Im Webadmin lassen sich die Reihenfolge der Hauptmenüansagen und das Google-Sprechtempo anpassen.
-- Das Installationspaket enthält den Fon-Installer, das Webinterface und die Konfigurationsvorlagen. Die Änderungen der einzelnen Zwischenversionen sind unten aufgeführt.
+Veröffentlicht am 25. November 2026. Die folgenden Änderungen seit `v2.5.5` enthalten die unten einzeln beschriebenen 2.6-Zwischenstände. [Release und Installationspaket](https://github.com/thomaskien/kienzlefon/releases/tag/v2.7)
+
+- **Telefonie und Rufgruppen.** Zwei optionale Direktnummern führen zeitunabhängig zur Praxiswarteschlange oder zu ROT. Im Webadmin lassen sich die laufende Teilnahme, die Standardbesetzung nach einem Neustart und die Rechte zum An- und Abmelden je Nebenstelle einstellen. Freigegebene Praxis-Arbeitsplätze können über die Middleware schalten. Gespeicherte Gerätenamen erscheinen in Asterisk als Anruferkennung. [Anlagensteuerung](docs/ANLAGENSTEUERUNG.md)
+- **Sprachmenü und Vorgänge.** Menütasten lassen sich umbelegen oder deaktivieren. Die Reihenfolge der Hauptmenüansagen und der gesprochenen Auswahl ist einstellbar. Das IVR erfasst mehrere Anliegen in einem Anruf. Fertige KI-Fälle lassen sich importieren. Lokale Ablage und verschlüsselte Abholung unterstützen jeweils die optionale WAV-Beilage. Bei verschlüsselten Audiopaketen bestätigt der Praxis-Abholer die Ablage. [IVR-Ablauf](docs/IVR.md) · [Dateiformate](docs/TELEPRAXIS.md)
+- **Ansagen und Transkription.** Kokoro, Piper und Qwen3-TTS erzeugen Ansagen lokal. Optional steht Google Cloud TTS mit deutscher Stimme und einer Hörprobe für das Sprechtempo zur Verfügung. Ein eingerichteter Whisper-Commander übernimmt die Erkennung bevorzugt. Bei einem Ausfall verarbeitet der Worker dieselbe Aufnahme lokal auf der CPU.
+- **Installation und Statistik.** Der Installer prüft Zeitfenster und doppelt vergebene Rufnummern. Für die verschlüsselte Ablage übernimmt er den öffentlichen RSA-Schlüssel aus einem PEM-Block oder einer Datei. Der Steuerungsdienst liefert Live-Zähler für Warteschleife, IVR und KI. Für die Tagesstatistik erzeugt Kienzlefon Ereignisse, die die Middleware auswertet.
+
+Die Release-Prüfung umfasste 778 bestandene Tests und 34 bestandene Untertests. Der Universalinstaller erkennt das veröffentlichte Fon-Paket als Version 2.7. [Installationsanleitung](README.md#installation)
 
 ## 2.6.12
 

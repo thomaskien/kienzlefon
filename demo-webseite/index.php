@@ -829,7 +829,7 @@ setInterval(updateCpuWidget, 5000);
       <p>Im Terminal des Linux-Servers den Universalinstaller laden und starten. Im Menü die gewünschten Rollen auswählen.</p>
       <pre><code>wget -O kienzlefon-installieren.sh https://kienzlefon.de/kienzlefon-installieren.sh &amp;&amp;
 sudo bash ./kienzlefon-installieren.sh</code></pre>
-      <p>Für die aktuellen Testversionen die Modularchive vor dem Start in <code>pakete/</code> neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Paketen.</p>
+      <p>Für Kienzlefon 2.7 die Online-Suche nach veröffentlichten Modulversionen erlauben oder das <a href="https://github.com/thomaskien/kienzlefon/releases/download/v2.7/kienzlefon-2.7.tar.gz">Fon-Paket 2.7</a> vor dem Start in <code>pakete/</code> neben die Bash-Datei legen.</p>
       <a href="https://kienzlefon.de/kienzlefon-installieren.sh" download>Universalinstaller herunterladen (.sh)</a>
     </section>
   </main>

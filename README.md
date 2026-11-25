@@ -49,7 +49,7 @@ direkt in der Praxis abgelegt oder verschlüsselt zur Abholung bereitgestellt.
 
 Demo-Server: https://kienzlefon.de
 
-Version: **2.7**
+**Version 2.7** · [Installationspaket herunterladen](https://github.com/thomaskien/kienzlefon/releases/download/v2.7/kienzlefon-2.7.tar.gz) · [Änderungen seit 2.5.5](CHANGELOG.md#27) · [Installation](#installation)
 
 Bei Installation und Update bietet der Installer die lokale Verwaltung der Rufgruppen Normal und ROT an. Im Admin-Menü stehen danach die aktuelle Teilnahme, die Standardbesetzung und die Freigaben für App und Middleware zur Verfügung. Der lokale Steuerungsdienst bindet sich bei der Ersteinrichtung an Loopback.
 
@@ -78,13 +78,12 @@ Am Installationsende erscheint die SIP-Einrichtungsliste für die lokalen Endger
 - OpenSSL-kompatible `AES-256-CBC`/RSA-Ausgabe als `*.json.enc`
 - unverschlüsselte JSON-Ablage für den Betrieb direkt in der Praxis
 - optionale WAV-Beilage im Vorgangsverzeichnis der Inbox
-- lokale Kokoro-Thorsten-Ansagen (Standard), alternativ Piper oder Qwen3-TTS,
-  in WAV, SLN16, G.722, A-law und mu-law
+- Ansagen in WAV, SLN16, G.722, A-law und mu-law. Lokal stehen Kokoro-Thorsten (Standard), Piper und Qwen3-TTS zur Wahl, optional auch Google Cloud TTS.
 - gezielte neue Qwen-Variante fuer einzelne Ansagen bei unerwuenschten Sprach-Artefakten
 - telefonische Ansagenaufnahmen als normalisiertes 16-kHz-PCM
 - Meldung jedes technisch erkannten Fehlers im konfigurierten Ausgabemodus
 - gruppenschreibbare Telepraxis-Ausgabedateien mit Modus `0660`
-- keine TTS-HTTP-Schnittstelle und kein dauerhaft geladener TTS-Dienst
+- Asterisk spielt fertig erzeugte Audiodateien ab. Google Cloud TTS benötigt HTTPS nur zur Synthese.
 - optionaler AI-Admission-Listener auf dem Haupt-Kienzlefon
 - KI-Nebenstellen ab `8810`, die nur mit einer aktiven AI-Freimeldungs-Lease
   angerufen werden
@@ -93,8 +92,8 @@ Am Installationsende erscheint die SIP-Einrichtungsliste für die lokalen Endger
 - aktivierte Begruessungs-, Sonder-, Notfall- und Bereitschaftsansagen liegen
   vor einer moeglichen AI-Uebergabe; die Admission-Pruefung bleibt am
   bisherigen Einstieg ins Hauptmenue
-- Taste `0` waehrend dieser Eingangsansagen springt sofort zur AI-Zulassung
-- Taste `0` im klassischen Hauptmenue versucht dieselbe AI-Zulassung lautlos
+- Die KI-Taste (standardmäßig `0`) während dieser Eingangsansagen springt sofort zur AI-Zulassung
+- Die KI-Taste im klassischen Hauptmenü versucht dieselbe AI-Zulassung lautlos
   erneut, ohne nach einer AI-Rueckkehr einen Kreisverkehr zu erzeugen
 - sofortige Medienbridge nach Annahme der freigemeldeten AI-Nebenstelle, damit
   das vom KI-Backend erzeugte Greeting vollstaendig hoerbar ist
@@ -323,22 +322,21 @@ wget -O kienzlefon-installieren.sh https://kienzlefon.de/kienzlefon-installieren
 sudo bash ./kienzlefon-installieren.sh
 ```
 
-Für die aktuellen Testversionen die Modularchive (`.tar.gz`) vor dem Start in `pakete/` neben die Bash-Datei legen. Nach Rückfrage sucht der Installer auch nach veröffentlichten Modularchiven auf GitHub.
+Für Fon die Frage **Online nach veröffentlichten Modulversionen suchen?** mit **Ja** beantworten und Kienzlefon `v2.7` auswählen. Alternativ das [Fon-Paket 2.7](https://github.com/thomaskien/kienzlefon/releases/download/v2.7/kienzlefon-2.7.tar.gz) vor dem Start in `pakete/` neben die Bash-Datei legen. Weitere ausgewählte Module benötigen ihre eigenen Pakete. Mit `bash kienzlefon-installieren.sh --pakete-pruefen` lassen sich die lokalen Archive vor der Installation prüfen.
 
 ### Als zweite Komponente nach Kienzlefax
 
-Das Fon-Paket auf macOS oder Linux im gewuenschten Arbeitsbaum mit Bash und
-Python 3 erstellen. Das Zielverzeichnis muss existieren.
+Das fertige Fon-Paket steht im [GitHub-Release 2.7](https://github.com/thomaskien/kienzlefon/releases/tag/v2.7). Wer das Paket aus einem eigenen Quellstand bauen möchte, führt im Repository folgenden Befehl aus. Das Zielverzeichnis muss existieren.
 
 ```bash
-bash scripts/pack.sh --output /absoluter/pfad/kienzlefon.tar.gz
+bash scripts/pack.sh --output /absoluter/pfad/kienzlefon-2.7.tar.gz
 ```
 
 Auf dem Linux-Ziel das Paket in ein frisches Verzeichnis entpacken. Der
 Kombi-Installer ruft dort als root eine der beiden Varianten auf.
 
 ```bash
-tar -xzf /absoluter/pfad/kienzlefon.tar.gz
+tar -xzf /absoluter/pfad/kienzlefon-2.7.tar.gz
 cd kienzlefon
 bash kienzlefon-installer.sh --kombi
 ```
@@ -381,12 +379,13 @@ Telepraxis-Demowebseite bleiben ausserhalb des Pakets.
 
 ### Eigenständige Kienzlefon-Installation
 
-Auf einem unterstuetzten Kienzlefax-Linux-System oder einem frischen Server:
+Für Version 2.7 auf dem Linux-Server in einem frischen Verzeichnis das Release-Paket laden, seine SHA-256-Prüfsumme vergleichen und den beiliegenden Installer starten.
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/thomaskien/kienzlefon/main/kienzlefon-installer.sh
-chmod +x kienzlefon-installer.sh
-sudo ./kienzlefon-installer.sh
+curl -fL -o kienzlefon-2.7.tar.gz https://github.com/thomaskien/kienzlefon/releases/download/v2.7/kienzlefon-2.7.tar.gz &&
+echo 'c622f4678dcf62afbde752ad18dd7cba9eebd033acd06c54287093fad8c9cb09  kienzlefon-2.7.tar.gz' | sha256sum -c - &&
+tar -xzf kienzlefon-2.7.tar.gz &&
+sudo bash kienzlefon/kienzlefon-installer.sh
 ```
 
 Fehlt Kienzlefax, bietet der Installer zuerst dessen offizielle Installation
@@ -488,13 +487,7 @@ gewicht = 100
 zusaetzliche_nebenstellen = []
 ```
 
-Die bestehende Kienzlefax-Queue `praxis` wird dabei nicht veraendert. Die
-Sonderqueue enthaelt automatisch alle normalen Queue-Nebenstellen mit Penalty
-`0`; ausgewaehlte Zusatztelefone und ein aktiviertes rotes Telefon werden
-ebenfalls mit Penalty `0` aufgenommen. Ohne rotes Telefon fuehrt Taste 9 direkt
-dorthin. Mit rotem Telefon klingelt dieses zuerst exklusiv fuer die konfigurierte
-Dauer von standardmaessig 20 Sekunden. Danach folgt die Sonderqueue, in der das
-rote Telefon gemeinsam mit allen anderen Mitgliedern erneut beruecksichtigt wird.
+Die Anfangsbesetzung von ROT umfasst die normalen Queue-Nebenstellen, ausgewählte Zusatztelefone und ein aktiviertes rotes Telefon, jeweils mit Penalty `0`. Bei eingerichteter Rufgruppenverwaltung zählt anschließend die aktive Teilnahme in ROT. Ohne eigenes rotes Telefon führt der Fachstellenweg direkt in diese Gruppe. Mit rotem Telefon klingelt es zuerst allein, standardmäßig 20 Sekunden. Bei Nichtannahme klingeln die aktiven ROT-Mitglieder. [Rufgruppen verwalten](docs/ANLAGENSTEUERUNG.md#rufgruppen)
 
 Extern eingehende deutsche Caller-IDs erscheinen an allen Telefonen als
 `02331...`, auslaendische als `0048...`. Die urspruenglich uebertragene
@@ -512,8 +505,7 @@ initial_prompt_nachname = "Es folgt ausschließlich der Familienname einer Perso
 initial_prompt_medikamente = "Es folgt eine Medikamentenangabe mit Medikamentenname oder Wirkstoff, Wirkstärke und Packungsgröße."
 ```
 
-Sind alle drei Modellwerte gleich, hält der Worker nur eine Modellinstanz. Bei
-unterschiedlichen Werten bleiben beide benötigten Modelle dauerhaft geladen.
+Sind alle drei Modellwerte gleich, hält der Worker nur eine Modellinstanz. Bei unterschiedlichen Werten hält der Worker jede konfigurierte Modellvariante einmal im Speicher.
 
 Nach einer Text-, Zeit- oder Stimmenaenderung werden die Ansagen aktualisiert:
 
@@ -569,8 +561,7 @@ kokoro_speed = 1.0
 `kokoro_speed` muss endlich und groesser als 0 sein; groessere Werte sprechen
 schneller. Text, Engine, Geschwindigkeit und Generatorstand fliessen in die
 Aenderungserkennung ein. Unveraenderte Ansagen werden nicht erneut synthetisiert.
-Piper bleibt mit `engine = "piper"` waehlbar. Das Webinterface bietet alle drei
-Engines an und prueft vor dem Wechsel, ob Kokoro bzw. Qwen eingerichtet ist.
+Piper bleibt mit `engine = "piper"` wählbar. Im Webinterface stehen auch Qwen, Kokoro und Google zur Wahl, sobald die jeweilige Engine eingerichtet ist. [Google Cloud TTS einrichten](docs/GOOGLE_TTS.md)
 Wenn Kokoro bei einer Installation nicht gewaehlt wurde, den Hauptinstaller
 mit Auswahl 1 erneut ausfuehren, bevor im Webinterface darauf gewechselt wird.
 
@@ -665,7 +656,7 @@ sudo ./kienzlefon-webinterface-installer.sh
 
 Für ein internes Praxis-LAN kann **1 · Eigener schlanker PHP-Systemdienst**
 an die feste private IPv4-Adresse des Servers gebunden werden. Die Anmeldung
-erfolgt mit Kennwort über HTTP, standardmäßig auf Port 8088. In dieser
+erfolgt standardmäßig mit Kennwort über HTTP auf Port 8088. Der Installer bietet nach ausdrücklicher Bestätigung auch kennwortlosen Zugriff im privaten Praxisnetz an. In dieser
 Betriebsart darf der Dienst keinesfalls aus dem Internet erreichbar sein.
 
 Der Installationshelfer aktiviert den Export des fluechtigen
@@ -679,8 +670,7 @@ Telefonzeiten, `care_service` fuer Apotheke, Pflegeheim oder Pflegedienst sowie
 weiterhin untereinander. Die vorhandenen technischen TOML-Felder
 `apothekenzeiten` und `fachstellenzeiten` bleiben unveraendert.
 
-Der zusaetzliche Navigationspunkt „Anrufsbaum“ zeigt den festen Ablauf als
-alternativen Zugang zu den vorhandenen Ansagen. Ansagen koennen dort
+Der Navigationspunkt „Anrufsbaum“ zeigt den konfigurierten Ablauf. Dort lassen sich Tasten belegen, Funktionen deaktivieren und die Reihenfolge im Hauptmenü ändern. Ansagen können dort
 ausdruecklich aktiviert oder deaktiviert und weiterhin abgespielt werden.
 Begruessungen und Notfallhinweis unterstuetzen `immer`, `offen`, `zu` und
 `deaktiviert`. Das Abschalten zeigt keine Warnabfrage und aendert nur die
@@ -749,7 +739,7 @@ Ergebnisverzeichnis übernehmen. `ergebnisverzeichnis` unter `[ki_integration]`
 ist der absolute Pfad zu den UUID-Fallordnern des KI-Postprozessors. Bei
 getrennten Rechnern benötigt der Kienzlefon-Worker geschützten Lesezugriff auf
 die bereitgestellten Fallordner mit `call.json`, `result.json` und optional
-`caller.wav`. Einzelne Fälle lassen sich mit `kienzlefon-ki-import` und dem
+`caller.wav`. Einzelne Fälle lassen sich mit `/opt/kienzlefon/venv/bin/kienzlefon-ki-import` und dem
 Pfad zum Fallordner übernehmen.
 
 Der Import verwendet die eingestellte Praxisablage oder verschlüsselte
@@ -803,5 +793,5 @@ Weitere Einzelheiten stehen in [Architektur](docs/ARCHITEKTUR.md),
 [SMS-Ausgangsqueue mit eigenständigem Worker](docs/SMS-QUEUE.md).
 
 Maßgeblich für SMS-Bibliotheken, Konfiguration und Worker ist künftig das
-separate IONOS-Repository (`ionos`). Die Demo wird nur gezielt abgeglichen;
+[Repository der Praxis-App](https://github.com/thomaskien/kienzlefon-app) (lokal `ionos`). Die Demo wird nur gezielt abgeglichen;
 sie ersetzt die reguläre App nicht. Siehe [SMS-Repository-Zuordnung](docs/SMS-REPOSITORIES.md).

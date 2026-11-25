@@ -6,7 +6,7 @@ Stand 18.11.2026. Diese Spezifikation übergibt die vereinbarten Änderungen aus
 
 Grundlage ist `ionos/telepraxis-app.php` in Commit `2f11f0d6c99abeea6403936f76bba8d0c6d60801`. Darin bleiben Bearbeiten in der Neu-Tabelle, der optionale WAV-Abspieler und das automatische Schließen des Patiententabs nach erfolgreicher Aktenübergabe erhalten. Der bisherige App-Release `v3.6` bleibt auf `e1f6a51` vor den drei Pull Requests. Die nächste App-Versionsnummer und Veröffentlichung sind offen.
 
-Die Oberfläche übernimmt die besprochenen Ergänzungen im vorhandenen Design. Farben, Typografie, Karten, Tabellen, Spalten und die bestehende Kopfzeile bleiben erhalten. [App-Versionsplanung](../../ionos/docs/PLANUNG-NAECHSTE-APP-VERSION-2026-11-17.md)
+Die Oberfläche übernimmt die besprochenen Ergänzungen im vorhandenen Design. Farben, Typografie, Karten, Tabellen, Spalten und die bestehende Kopfzeile bleiben erhalten. [App-Versionsplanung](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/PLANUNG-NAECHSTE-APP-VERSION-2026-11-17.md)
 
 ## Mehrere Anliegen und ein Bearbeiter je Vorgang
 
@@ -55,7 +55,7 @@ Für reine JSON-Lieferungen gilt das bestehende Format `*.json.enc` v1. PHP-Empf
 
 Der Klartext enthält `received_at`, `remote_ip`, `user_agent`, `typ` und `payload`. Kienzlefon erzeugt dieses Objekt beim direkten Export. Beim POST an das Empfangsmodul wird nur der Nutzinhalt gesendet. Das Empfangsmodul legt ihn unter `payload` ab. Teilanliegen und neue Audio-Metadaten gehören in `payload`. `anliegen_schema_version` und `v` sind getrennte Versionsangaben.
 
-Der private RSA-Schlüssel bleibt am Ziel. Der separate SSH-Schlüssel dient dem Abruf. Der Abholer entschlüsselt am Ziel, prüft SHA-256 und JSON, legt die Datei atomar in der Inbox ab und bereinigt erst nach erfolgreicher Ablage gemäß Konfiguration. Referenz für das Format und die Abholerlogik ist die [Übergabe des Empfangsmoduls](../../ionos/docs/uebergabe-empfangsmodul.md).
+Der private RSA-Schlüssel bleibt am Ziel. Der separate SSH-Schlüssel dient dem Abruf. Der Abholer entschlüsselt am Ziel, prüft SHA-256 und JSON, legt die Datei atomar in der Inbox ab und bereinigt erst nach erfolgreicher Ablage gemäß Konfiguration. Referenz für das Format und die Abholerlogik ist die [Übergabe des Empfangsmoduls](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/uebergabe-empfangsmodul.md).
 
 ## Audio-Beilagen und Löschung
 
@@ -94,7 +94,7 @@ bleiben gelöscht.
 Die App löst WAV-Pfade anhand der geprüften Vorgangszuordnung auf und
 liefert die Segmente im bestehenden Zugriffsschutz aus. Die
 Abspielposition bleibt beim Polling erhalten.
-[Originalaufnahmen in der App](../../ionos/docs/RECORDINGS.md)
+[Originalaufnahmen in der App](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/RECORDINGS.md)
 
 ## Gemeinsame Telefonie nach Vertrag 1.0.2
 
@@ -116,7 +116,7 @@ Endpunkte, Zustände, Fehlerantworten und Prüfdaten stehen im [Telefonievertrag
 
 Der gemeinsame Test verwendet die Kienzlefon-Beispiele, den vorhandenen Kienzlefon-Encoder, die bestehende Bash-Entschlüsselung und die PHP-Liste der App. Ein unabhängiger Leser hat das verschlüsselte JWE/ZIP mit drei Teilanliegen entschlüsselt und die WAV bytegleich dem Teilanliegen `a-002` zugeordnet. Alt- und Ersatz-JSON wurden bytegleich gelesen. Fehler in GCM-Tag, WAV-Bestand und IDs wurden erkannt. Die Beispielquittung ist an Dateiname und SHA-256 der verschlüsselten Lieferung gebunden.
 
-[Gemeinsames synthetisches Testpaket und Prüfanleitung](../../ionos/docs/vorgang-paket-v1-test/README.md) · [Technische Freigabe im Empfangsmodul](../../ionos/docs/uebergabe-empfangsmodul.md#technische-freigabe-des-testpakets)
+[Gemeinsames synthetisches Testpaket und Prüfanleitung](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/vorgang-paket-v1-test/README.md) · [Technische Freigabe im Empfangsmodul](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/uebergabe-empfangsmodul.md#technische-freigabe-des-testpakets)
 
 Die Freigabe gilt für die Schnittstelle als Grundlage der Implementierung. Nach der Umsetzung folgt die Laufzeitabnahme von Erzeuger, SSH-Abholer und App einschließlich Quittung, Wiederanlauf und Spool-Bereinigung.
 

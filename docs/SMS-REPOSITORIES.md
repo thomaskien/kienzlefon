@@ -1,7 +1,6 @@
 # Maßgeblicher SMS-Stand und gezielte Übernahme
 
-Stand: 29.09.2026. **Das Repository `thomaskien/IONOS_AI_Receptionist_Interface_Arztpraxis`
-(lokales Projekt `ionos`) ist künftig maßgeblich für die SMS-Funktionen.**
+Die SMS-Funktionen werden im Repository der Praxis-App gepflegt (lokales Projekt `ionos`). Die unten dokumentierte Übernahme stammt vom 29.09.2026. [Kienzlefon-App auf GitHub](https://github.com/thomaskien/kienzlefon-app)
 
 Die reguläre `telepraxis-app.php`, ihre SMS-Konfiguration, Bibliotheken,
 Worker und SMS-Tests werden dort weiterentwickelt. `kienzlefon` enthält eine

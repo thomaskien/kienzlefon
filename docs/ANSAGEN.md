@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.4.2
+Version: 2.7
 Changelog:
 - 2.4.2: Zahlen und Uhrzeiten vor der Spracherzeugung deutsch ausschreiben.
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
@@ -22,7 +22,7 @@ Für Installer mit der Auswahl **Google Cloud TTS Chirp 3 HD** gibt es eine
 [Anleitung zum API-Schlüssel und zu den Kosten der Ansagenerzeugung](GOOGLE-TTS-API-SCHLUESSEL.md).
 
 Seit 2.4.2 schreibt der gemeinsame Generator Zahlen und Uhrzeiten vor der
-Spracherzeugung deutsch aus. Dies gilt fuer Kokoro, Piper und Qwen, auch fuer
+Spracherzeugung deutsch aus. Dies gilt für Kokoro, Piper, Qwen und Google, auch für
 Vorschauen und Sonderansagen. Beispiele:
 
 - `Für unsere Öffnungszeiten drücken Sie 6.` → `Für unsere Öffnungszeiten drücken Sie sechs.`
@@ -143,6 +143,8 @@ Deaktivierungsweg und wird abgelehnt; nur der zusaetzliche Textbaustein
 105. `queue_digit_millions`: Millionen
 106. `queue_digit_milliard`: Milliarde
 107. `queue_digit_milliards`: Milliarden
+108. `more_concern`: weiteres Anliegen aufnehmen oder Vorgang abschließen
+109. `concern_types`: aktivierte Anliegenarten für die Folgeauswahl
 
 Die vier Queue-Bausteine ersetzen gezielt die von der vorhandenen
 Kienzlefax-Praxisqueue wirklich verwendeten schmalbandigen Standarddateien.

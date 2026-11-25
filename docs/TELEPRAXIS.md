@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 1.9.3
+Version: 2.7
 Changelog:
 - 1.9.3: Keine Telepraxis-Datei fuer vollstaendig inhaltslose fehlerfreie Anrufe dokumentiert.
 - 1.9.2: Fehlerfreies Ueberspringen der Demo-Anonymisierung bei Produktivupdates dokumentiert.
@@ -25,21 +25,28 @@ Changelog:
 
 # Telepraxis-Dateiformat
 
-Version 1.9.3 verwendet keinen HTTP-POST. Im Produktivmodus erzeugt der Worker
-direkt eine verschluesselte Datei im konfigurierten Kanalverzeichnis:
+Kienzlefon 2.7 schreibt in die konfigurierte Inbox, zum Beispiel `/srv/telepraxis/dahl/inbox`. Der Installer fragt die Ablageart und die Audio-Beilage getrennt ab.
+
+| Ablageart | Nur JSON | Mit verwertbaren WAV-Aufnahmen |
+| --- | --- | --- |
+| Lokal in der Praxis | `<vorgang_id>.json` | JSON sowie WAVs unter `<vorgang_id>/audio/` |
+| Verschlüsselt zur Abholung | `<vorgang_id>.json.enc` | `<vorgang_id>.kienzlepaket` mit JSON und WAVs |
+
+Für die verschlüsselte Ablage braucht der Fon-Server den öffentlichen RSA-Schlüssel der Praxis. Bei einem Audiopaket wartet er mit der Quellbereinigung auf die passende Ablagequittung des Abholers. Die Verträge beschreiben auch fehlende Aufnahmen, die Ersatz-JSON und die Zuordnung mehrerer Anliegen. [Audioübergabe](vorgang-v1/AUDIO.md) · [Mehrere Anliegen](vorgang-v1/ANLIEGEN.md)
+
+Beispiel einer verschlüsselten Ausgabe ohne Audio
 
 ```text
 /srv/telepraxis/dahl/inbox/20260711_114658_676879.json.enc
 ```
 
-Der Klartext vor der Verschluesselung entspricht dem gespeicherten
-Telepraxis-Transportdatensatz:
+Auszug aus dem Transportdatensatz eines einzelnen Terminanliegens vor der Verschlüsselung
 
 ```json
 {
   "received_at": "2026-07-11T11:46:58+02:00",
   "remote_ip": "",
-  "user_agent": "kienzlefon/1.9.3",
+  "user_agent": "kienzlefon/2.7",
   "typ": "termin",
   "payload": {
     "typ": "termin",
@@ -71,7 +78,7 @@ Der Vorgang wird intern als verarbeitet abgeschlossen. Sobald mindestens ein
 Transkript vorhanden ist, wird das normale JSON mit den uebrigen leeren Feldern
 ausgegeben. Technische Fehler werden weiterhin immer gemeldet.
 
-Die aeussere Datei ist kompatibel zur Referenzfunktion `openssl_seal()`:
+Die äußere Datei einer `.json.enc`-Ausgabe ist kompatibel zur Referenzfunktion `openssl_seal()`. Sie hat folgende Felder
 
 ```json
 {
@@ -89,21 +96,9 @@ Die aeussere Datei ist kompatibel zur Referenzfunktion `openssl_seal()`:
 verschluesselte AES-256-Schluessel. `sha256` prueft nach dem Entschluesseln den
 exakten Klartext.
 
-Bei einer ausdruecklich bestaetigten Demo-Installation steht in der TOML
-`demo = true`. Dann wird kein Public Key benoetigt und exakt der oben gezeigte
-Transportdatensatz atomar als `<vorgang_id>.json` abgelegt. Auch technische
-Fehlerdatensaetze sind in diesem Modus unverschluesselt. Der Demo-Modus darf
-auf keinen Fall fuer echte Patientendaten verwendet werden.
+Für die lokale Praxisablage verwendet der Installer aus Kompatibilitätsgründen den TOML-Schalter `[telepraxis].demo = true`. In dieser Betriebsart schreibt der Worker auch Fehlerdatensätze unverschlüsselt. Sie ist für eine geschützte lokale Inbox vorgesehen. Auf dem öffentlich zugänglichen Demoserver ausschließlich Beispieldaten verwenden.
 
-Optional kann zusaetzlich `anrufernummern_anonymisieren = true` gesetzt werden.
-Dann ersetzt die Demoausgabe in regulaeren und Fehlerdatensaetzen ausschliesslich
-die Payload-Felder `id` und `telefon` durch `#anonymisiert demo#`. Interne Spooldaten,
-Audiodateien und Rufnummern innerhalb frei gesprochener Texte bleiben
-unveraendert. Im Produktivmodus ist diese Option unzulaessig. Nach einer
-Installer-Aenderung dieser Option startet Version 1.9.1 den Worker im
-erfolgreichen Installationslauf neu; erst der neu gestartete Prozess verwendet
-die geaenderte TOML-Einstellung. Version 1.9.2 ueberspringt diese Abfrage bei
-`demo = false` fehlerfrei und veraendert den Produktivmodus nicht.
+Bei lokaler Ablage ersetzt `anrufernummern_anonymisieren = true` bekannte Nummern in den Payload-Feldern `id` und `telefon` durch `#anonymisiert demo#`. Interne Spooldaten, Aufnahmen und frei gesprochene Texte können weiterhin Rufnummern und andere personenbezogene Angaben enthalten. Der neu gestartete Worker übernimmt die Einstellung.
 
 Jeder erkannte technische Fehler wird zusaetzlich als eigener Datensatz mit
 `typ = kienzlefon_error` im konfigurierten Ausgabemodus ausgegeben. Ist das Zielverzeichnis

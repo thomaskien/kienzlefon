@@ -6,7 +6,7 @@ Der [gemeinsame Vertrag für Mehrfach-Anliegen v1](vorgang-v1/ANLIEGEN.md)
 ist seit 18.11.2026 für Kienzlefon und App verbindlich. Die Übergabe
 ergänzt ihn um Projektkontext und Einbaupunkte.
 
-**Ziel:** Mehrere Anliegen desselben Patienten werden in einem Vorgang übertragen und in einem gemeinsamen Patientenkasten bearbeitet. Das gewünschte Verhalten ist vom Benutzer bestätigt. Das Format v1 ist seit dem 18.11.2026 anhand des [gemeinsamen synthetischen Testpakets](../../ionos/docs/vorgang-paket-v1-test/README.md) technisch für die Implementierung freigegeben.
+**Ziel:** Mehrere Anliegen desselben Patienten werden in einem Vorgang übertragen und in einem gemeinsamen Patientenkasten bearbeitet. Das gewünschte Verhalten ist vom Benutzer bestätigt. Das Format v1 ist seit dem 18.11.2026 anhand des [gemeinsamen synthetischen Testpakets](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/vorgang-paket-v1-test/README.md) technisch für die Implementierung freigegeben.
 
 ## Bestätigtes Verhalten in der App
 
@@ -17,7 +17,7 @@ ergänzt ihn um Projektkontext und Einbaupunkte.
 - Nach dem letzten Häkchen bleibt der Kasten sichtbar in Bearbeitung. Erst ein zusätzlicher Klick auf **Fertig** schließt den gesamten Vorgang ab.
 - Bestehende JSON-Dateien mit nur einem Anliegen funktionieren weiterhin. Das übrige App-Design bleibt unverändert.
 
-Die bestätigte App-Basis ist `2f11f0d` mit den drei übernommenen Erweiterungen. Der alte App-Release `v3.6` bleibt auf `e1f6a51` erhalten. Details stehen in der [App-Versionsplanung](../../ionos/docs/PLANUNG-NAECHSTE-APP-VERSION-2026-11-17.md).
+Die bestätigte App-Basis ist `2f11f0d` mit den drei übernommenen Erweiterungen. Der alte App-Release `v3.6` bleibt auf `e1f6a51` erhalten. Details stehen in der [App-Versionsplanung](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/PLANUNG-NAECHSTE-APP-VERSION-2026-11-17.md).
 
 ## Zuständigkeiten und bestehender Transport
 
@@ -113,7 +113,7 @@ Für bisherige Vorgangstypen ohne die neuen Felder gilt der Ein-Anliegen-Ablauf.
 
 Ein alter App-Stand versteht die Liste noch nicht. Eine vollständige Gesamtzusammenfassung hilft bei der Textanzeige, ersetzt aber weder mehrere Typmarker noch die einzelnen Häkchen. Deshalb die neue Ausgabe erst mit einer kompatiblen App aktivieren. Die Unterstützung alter Ein-Anliegen-Dateien durch die neue App ist verbindlich; vollständige Unterstützung neuer Listen durch alte Apps wird nicht vorausgesetzt.
 
-Eine Wiederholung derselben Vorgangs-ID erzeugt keinen weiteren Patientenkasten. Für v1 bleibt der zuerst importierte fachliche Inhalt maßgeblich. Spätere automatische Inhaltskorrekturen benötigen eine eigene Vereinbarung. Eine Fehler-JSON kann dem bestehenden Vorgang gemäß der [Abholerspezifikation](../../ionos/docs/uebergabe-empfangsmodul.md#fehler-und-spool-bereinigung) einen Audiohinweis hinzufügen.
+Eine Wiederholung derselben Vorgangs-ID erzeugt keinen weiteren Patientenkasten. Für v1 bleibt der zuerst importierte fachliche Inhalt maßgeblich. Spätere automatische Inhaltskorrekturen benötigen eine eigene Vereinbarung. Eine Fehler-JSON kann dem bestehenden Vorgang gemäß der [Abholerspezifikation](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/uebergabe-empfangsmodul.md#fehler-und-spool-bereinigung) einen Audiohinweis hinzufügen.
 
 Das Format ist für jeden kompatiblen Erzeuger nutzbar. Welche Erfassungswege tatsächlich mehrere Anliegen aufnehmen, wird bei deren Anbindung festgelegt.
 

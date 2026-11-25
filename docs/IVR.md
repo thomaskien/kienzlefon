@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.4.0
+Version: 2.7
 Changelog:
 - 2.4.0: Ansagenmodi, AI-Shortcut im Hauptmenue und zeitabhaengigen Abschluss dokumentiert.
 - 1.8.3: Fortsetzung aller Feldaufnahmen trotz schweigend uebersprungener Felder dokumentiert.
@@ -19,6 +19,8 @@ Changelog:
 # IVR-Ablauf
 
 ## Hauptmenue
+
+Die Liste zeigt die Standardbelegung. Im Webadmin unter **Anrufsbaum** lassen sich die Tasten für Hauptmenü, Untermenüs und Folgeanliegen ändern. Eine leere Belegung deaktiviert die Funktion. Jede Taste darf innerhalb desselben Menüs nur einmal vorkommen. Die folgenden Tastenbeispiele setzen die Standardbelegung voraus.
 
 - Taste 0: Kienzlefon AI lautlos versuchen, sofern aktuell moeglich
 - Taste 1: bestehende Praxisqueue, nur waehrend der Telefonzeiten
@@ -44,8 +46,7 @@ Millisekunden. Auch waehrend dieser Pause werden Tastendruecke angenommen.
 
 Ohne Auswahl wird waehrend der Telefonzeiten zur Queue verbunden. Ausserhalb
 der Telefonzeiten folgt eine einzige zusammenhaengende Rueckrufaufnahme. Dabei
-bleiben die strukturierten Personenfelder leer und das vollstaendige
-Transkript wird in `grund` geschrieben.
+bleiben die strukturierten Personenfelder zunächst leer und das vollständige Transkript wird in `grund` geschrieben. Wählt der Anrufer danach ein weiteres Anliegen, fragt das IVR die Personenfelder einmal ab.
 Die Ansagen `no_selection_open` und `no_selection_closed` koennen deaktiviert
 werden; Durchstellung beziehungsweise Aufnahme finden dann lautlos statt.
 
@@ -81,30 +82,20 @@ Wird aufgelegt, bevor eine verwertbare Aufnahme entstanden ist, wird kein
 leerer Vorgang ausgegeben. Bereits vorhandene Aufnahmen bleiben erhalten.
 Technische Fehler werden auch ohne Aufnahme weiterhin gemeldet.
 
-Nach einer vollstaendigen Aufnahme wird „Vielen Dank und bis bald!“ abgespielt.
-Anschliessend endet das Gespraech; es erfolgt keine Weiterleitung in die Queue.
-Bei Rezepten wird vorher die konfigurierte Rezeptinformation gesprochen.
+Nach einem Rezept folgt die konfigurierte Rezeptinformation. Wenn die Folgeauswahl aktiviert ist, bietet das IVR bei Standardbelegung mit Taste 1 ein weiteres Anliegen und mit Taste 2 den Abschluss an. Für weitere Anliegen derselben Person gelten die bereits aufgenommenen Personendaten. Nach Abschluss folgt die Abschiedsansage.
 
-Ist das rote Telefon aktiviert, klingelt es standardmaessig 20 Sekunden. Wird
-der Anruf nicht angenommen, ist besetzt oder das Endgeraet nicht erreichbar,
-faellt der Anruf mit `QUEUE_PRIO=100` in die priorisierte Sonderqueue. Ist das
-rote Telefon zu diesem Zeitpunkt verfuegbar, klingelt es dort gemeinsam mit allen
-normalen Queue-Telefonen und den im Installer ausgewaehlten Zusatznebenstellen
-erneut. Ist kein rotes Telefon aktiviert, beginnt diese Sonderqueue unmittelbar
-und enthaelt kein Rottelefon-Mitglied. Die normale Queue `praxis` bleibt
-unveraendert.
+Ist ein eigenes rotes Telefon aktiviert, klingelt es zuerst allein, standardmäßig 20 Sekunden. Bei Nichtannahme, Besetzt oder Nichterreichbarkeit gelangt der Anruf standardmäßig mit `QUEUE_PRIO=100` in die Sonderqueue. Dort klingeln die aktuell in ROT angemeldeten und erreichbaren Nebenstellen. Das rote Telefon kann erneut mitklingeln, wenn es der Gruppe angehört. Ohne eigenes rotes Telefon beginnt der Gruppenruf sofort. [Rufgruppen verwalten](ANLAGENSTEUERUNG.md#rufgruppen)
 
 ## Zeitlogik
 
 Praxisoeffnungszeiten steuern die Begruessung mit `geoeffnet` oder
-`geschlossen`. Telefonzeiten steuern ausschliesslich Taste 1. Vor der ersten
+`geschlossen`. Telefonzeiten steuern den regulären Zugang zur Praxisqueue sowie den Abschluss ohne Tasteneingabe. Vor der ersten
 und nach der letzten Praxisoeffnungszeit des Tages sowie an vollstaendig
 geschlossenen Tagen wird auf 116117 hingewiesen. Zwischen zwei Oeffnungsbloecken
 bleibt der Hinweis aus. Die Nummern werden als `eins eins zwei` beziehungsweise
 `eins eins sechs, eins eins sieben` gesprochen.
 
-Ein aktiver Feiertags-Override ersetzt die normale Begruessung. Optional sperrt
-er zugleich Taste 1 und die Ansage der regulaeren Telefonzeiten. Taste 6 nennt
+Eine wirksame Sonderansage steht je nach Einstellung vor, nach oder anstelle der Begrüßung. Optional sperrt sie den regulären Telefonzugang und die Ansage der Telefonzeiten. Taste 6 nennt
 weiterhin die regulaeren Wochenoeffnungszeiten.
 
 Identische Vormittagsoeffnungszeiten von Montag bis Freitag werden als „jeden
@@ -126,9 +117,9 @@ die Wiedergabe und nicht den danach vorgesehenen Anrufweg.
 
 Nebenstelle `777` ist ausschliesslich intern erreichbar und besitzt keine
 PIN-Abfrage. Nach Auswahl einer stabilen Ansagenummer kann die aktive Fassung
-angehoert, eine neue Fassung ohne Signalton aufgenommen, als Kandidat
+angehoert, eine neue Fassung nach dem Signalton aufgenommen, als Kandidat
 kontrolliert und aktiviert werden. Die Rueckschaltung auf die generierte
-Piper-Fassung ist jederzeit moeglich. Die Feiertags- und Sonderansage kann
+TTS-Fassung ist jederzeit moeglich. Die Feiertags- und Sonderansage kann
 aktiviert, deaktiviert und wahlweise mit einer Sperrung der Telefonzeiten
 verbunden werden.
 

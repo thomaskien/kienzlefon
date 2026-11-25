@@ -1,6 +1,6 @@
 <!--
 kienzlefon
-Version: 2.4.1
+Version: 2.7
 Changelog:
 - 2.4.1: Kokoro-Thorsten als Standard fuer lokale Ansagen ergaenzt.
 - 2.4.0: Integriertes Webinterface und gemeinsame TTS-Erzeugungslogik dokumentiert.
@@ -107,11 +107,8 @@ verarbeitet. Neue Nachrichten werden nicht still aufgestaut.
 ## Atomare Verarbeitung
 
 `call.json` wird stets in eine neue temporaere Datei geschrieben, mit `fsync`
-gesichert und per `os.replace` aktiviert. Auf dieselbe Weise wird die fertige
-`*.json.enc`-Produktivdatei oder unverschluesselte `.json`-Demodatei geschrieben.
-Eine aktivierte Demo-Anonymisierung arbeitet ausschliesslich auf einer Kopie des
-fertigen Ausgabe-Payloads und ersetzt dort `id` und `telefon`. Die internen
-Vorgangsdaten und produktive Ausgaben werden nicht veraendert.
+gesichert und per `os.replace` aktiviert. Die Dateiausgabe unterstützt lokale JSON-Dateien, verschlüsselte JSON-Dateien und verschlüsselte Pakete mit WAV-Beilage. Die optionale Anonymisierung ersetzt bekannte Nummern in den Feldern `id` und `telefon` der lokalen JSON-Ausgabe. Aufnahmen und Spooldaten können die ursprünglichen Angaben enthalten. [Ablage und Formate](TELEPRAXIS.md)
+
 Vorgangsordner wechseln nur per atomarem
 Verzeichnis-Rename zwischen `recording`, `queue`, `processing`, `ready` und
 `error`.
@@ -129,10 +126,16 @@ Bei Root-Ausfuehrung werden Eigentumer `root` und die Gruppe des Zielverzeichnis
 gesetzt. Die erzeugte systemd-Einheit nutzt dieselbe Gruppe als Primaergruppe
 und `UMask=0007`. Die internen Spooldateien bleiben bei `0640`.
 
-**Stand Kienzlefon 2.6.0.** Die folgenden Abschnitte „Geplant“ und „Vorgemerkt“
-dokumentieren die Entscheidungen vom 17. und 18. November. Den lokalen
-Implementierungs- und Prüfstand je Funktion beschreibt der
-[Prüfbericht zu 2.6.0](TESTS-2.6.0.md).
+## Implementierungsstand 2.7
+
+| Bereich | In Kienzlefon 2.7 |
+| --- | --- |
+| IVR | Menütasten und Ansagenreihenfolge sind konfigurierbar. Ein Anruf kann mehrere Anliegen derselben Person erfassen. [IVR-Ablauf](IVR.md) |
+| Telefonie | Zwei optionale Direktnummern führen zeitunabhängig zur Praxisqueue oder zu ROT. Der Steuerungsdienst verwaltet die Rufgruppen über Asterisk und liefert Live-Zähler. Die Middleware verarbeitet die Ereignisse für die Tagesstatistik. [Anlagensteuerung](ANLAGENSTEUERUNG.md) |
+| Transkription | Bei eingerichteter Commander-IP versucht der Worker die Erkennung für die Aufnahme über `POST /v1/asr/final-block` auf Port 8185. Schlägt der Versuch fehl, übernimmt das lokale CPU-Modell. |
+| Audioübergabe | JSON und optionale WAVs gehen an die lokale Inbox oder werden der Praxis zur verschlüsselten Abholung bereitgestellt. [Audiovertrag](vorgang-v1/AUDIO.md) |
+
+Die nachfolgenden Abschnitte „Geplant“ und „Vorgemerkt“ geben die Anforderungen und offenen Fragen **vom 17. und 18. November 2026** wieder. Für Installation, Konfiguration und die Prüfung der tatsächlich freigegebenen Funktionen gelten die [Anleitung](../README.md#installation) und das [Changelog zu 2.7](../CHANGELOG.md#27).
 
 ## Geplant: einzeln konfigurierbare und deaktivierbare IVR-Menuepunkte
 
@@ -522,13 +525,9 @@ hinzunehmen.
 
 Das rote Telefon ist optional und bleibt ein eigener PJSIP-Endpunkt. Kienzlefon
 erzeugt getrennt von `praxis` die priorisierte Ringall-Sonderqueue
-`kienzlefon-sonder`. Sie enthaelt alle normalen Queue-Telefone, ein aktiviertes
-rotes Telefon sowie die im Installer ausgewaehlten Zusatztelefone jeweils mit
-Penalty `0`. Ohne rotes Telefon fuehrt Taste 9 direkt dorthin. Mit rotem Telefon
+`kienzlefon-sonder`. Zur Anfangsbesetzung gehören die normalen Queue-Telefone, ein aktiviertes rotes Telefon und die ausgewählten Zusatztelefone, jeweils mit Penalty `0`. Bei aktiver Rufgruppenverwaltung klingeln die aktuell in ROT angemeldeten Mitglieder. Ohne rotes Telefon fuehrt Taste 9 direkt dorthin. Mit rotem Telefon
 erfolgt zuerst der exklusive Waehlversuch. Nach standardmaessig 20 Sekunden oder
-bei besetzt beziehungsweise nicht erreichbar folgt die Sonderqueue. Ist das rote
-Telefon dann verfuegbar, klingelt es dort gemeinsam mit allen anderen Mitgliedern
-erneut. Ein hoeheres Queue-Gewicht gibt der Sonderqueue bei gemeinsam genutzten
+bei besetzt beziehungsweise nicht erreichbar folgt die Sonderqueue. Gehört das rote Telefon zu ROT und ist erreichbar, klingelt es in der Gruppe erneut. Ein hoeheres Queue-Gewicht gibt der Sonderqueue bei gemeinsam genutzten
 Mitgliedern Vorrang.
 
 Direkte externe Queue- und Rottelefonnummern sind optional. Auch deren

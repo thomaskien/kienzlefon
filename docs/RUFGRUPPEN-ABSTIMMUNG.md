@@ -3,8 +3,7 @@
 > **Abgelöst am 18.11.2026:** Der [gemeinsame Telefonievertrag v1](telefonie-v1/README.md)
 > legt Endpunkte, Zugriff, JSON-Typen, Live-Zähler, Rufgruppenaufträge und
 > Neustartverhalten jetzt vollständig fest. Das lokale Paket enthält dieselben
-> Schemata und Testbeispiele wie die anderen Projekte. Neue Funktionen sind
-> damit definiert, noch nicht implementiert oder produktiv abgenommen.
+> Schemata und Testbeispiele wie die anderen Projekte. Kienzlefon 2.7 implementiert den Steuerungsdienst. Einrichtung, Rechte und Abnahme auf der konkreten Anlage beschreibt die [Anlagensteuerung](ANLAGENSTEUERUNG.md).
 >
 > Der folgende Text bleibt als **historischer Abstimmungsstand** erhalten.
 > Bei Abweichungen gilt ausschließlich der neue Vertrag, insbesondere
@@ -21,11 +20,11 @@ Die fachlichen Vorgaben stehen in der
 ## Abgleich mit dem App-Entwurf
 
 Der vom Benutzer benannte
-[App-Entwurf zur Nebenstellensteuerung](../../ionos/docs/ABSTIMMUNG-NEBENSTELLENSTEUERUNG-2026-11-17.md)
+[App-Entwurf zur Nebenstellensteuerung](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/ABSTIMMUNG-NEBENSTELLENSTEUERUNG-2026-11-17.md)
 ist gelesen und in diese Abstimmung einbezogen. Sein Ablauf ueber App,
 Middleware und denselben geschuetzten Kienzlefon-Dienst fuer Administration
 und Maschinenzugriff passt zur Planung. Die aktuelle
-[Middleware-Rueckmeldung](../../T2med-asterisk/docs/NEBENSTELLENSTEUERUNG-ABSTIMMUNG.md)
+[Middleware-Rueckmeldung](https://github.com/thomaskien/kienzlefon-t2med/blob/main/docs/NEBENSTELLENSTEUERUNG-ABSTIMMUNG.md)
 unterscheidet dauerhafte administrative Grundeinstellungen/Freigaben von
 voruebergehenden Bedienaenderungen. Diese Praezisierung ersetzt die fruehere
 Annahme, jede App-Aenderung dauerhaft in die Grundkonfiguration zu schreiben.

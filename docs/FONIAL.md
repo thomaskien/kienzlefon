@@ -5,12 +5,7 @@ Die [PJSIP-Vorlage](../config/pjsip-fonial.conf.example) uebernimmt die am
 Kienzlefon, Nebenstelle 90. Sie verwendet `sip.plusnet.de` als Registrar und
 `sbc.sip.plusnet.de` als ausgehenden Proxy. Zugangsdaten sind Platzhalter.
 
-Planungsentscheidung vom 17.11.2026: Das dauerhafte Anbieterprofil wird im
-Rahmen der gemeinsamen naechsten Version zentral in Kienzlefax eingebaut.
-Die hier abgelegte Datei bleibt bis dahin die Arbeits- und Uebergabevorlage.
-Die Einbindungshinweise unten beschreiben die technische Zuordnung;
-eine automatische Aktivierung wurde noch nicht umgesetzt. Siehe
-[gemeinsame Provider-Planung](ARCHITEKTUR.md#geplant-gemeinsame-provider-vorlagen-und-voip2gsm).
+Bei einer Einrichtung mit dem modularen Kienzlefax-Installer 3.5.0 steht **Fonial / Plusnet** als Provider 7 für Fax- und Telefonieleitungen zur Wahl. Kienzlefon nutzt die konfigurierte Telefonieleitung. Die mit Kienzlefon gelieferte Beispielvorlage dient zum manuellen Abgleich bestehender Anlagen. [Modularer Kienzlefax-Installer](https://github.com/thomaskien/kienzlefax-fuer-linux/blob/main/installer-modular/kienzlefax-install-modular.sh)
 
 ## Einbindung
 

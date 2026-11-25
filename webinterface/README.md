@@ -47,8 +47,7 @@ verwendeten Hash. Das Klartextkennwort wird nicht in den für PHP lesbaren Statu
 
 Die PHP-Datei legt ausschließlich JSON-Aufträge in `/run/kienzlefon-webinterface/inbox` ab. Der
 root-Dienst prüft eine feste Positivliste, validiert eine temporäre TOML mit
-`kienzlefon-config`, ersetzt die Konfiguration atomar und startet danach immer
-`kienzlefon-ansagen --config /etc/kienzlefon/kienzlefon.toml`. Shell-Befehle oder frei wählbare
+`kienzlefon-config`, ersetzt die Konfiguration atomar und startet nach Änderungen an Ansagen oder Zeitprofilen die Ansagenerzeugung. Das reine Umschalten des KI-Assistenten, eine Google-Hörprobe und vorübergehende Rufgruppenwechsel haben eigene Abläufe. Shell-Befehle oder frei wählbare
 Dateipfade werden nicht aus Webeingaben übernommen.
 
 Text, aktive Audioquelle und die Aufnahmeaktion stehen für jede Ansage in einer gemeinsamen
@@ -66,7 +65,7 @@ Notarzt. Die technischen Abschnitte bleiben `[apothekenzeiten]` und
 hingewiesen.
 
 „Anrufsbaum“ ist ein alternativer Zugang zu den vorhandenen Ansagen. Er zeigt
-den festen Ablauf, die Tastenwege, den lautlosen AI-Versuch ueber Taste `0` und
+den konfigurierten Ablauf, die Tastenwege, den lautlosen KI-Versuch (standardmäßig Taste `0`) und
 den zeitabhaengigen Abschluss ohne Tasteneingabe. Ansagen koennen dort ohne
 Warnabfrage aktiviert oder deaktiviert und unabhaengig vom Aktivstatus
 abgespielt werden. Begruessungen und Notfallhinweis unterstuetzen die Modi
@@ -98,12 +97,13 @@ Startfrage; Betriebsart, Netzwerkbindung und Zugriffsschutz werden weiterhin int
 Der von PHP benoetigte Laufzeitstatus liegt absichtlich unter `/run` und wird
 bei einem Neustart geloescht. Der Installationshelfer fuehrt
 `kienzlefon-webinterface-refresh.service` deshalb bei jedem Boot nach dem
-Anlegen der Laufzeitverzeichnisse und vor dem Webserver ausgefuehrt. Der
+Anlegen der Laufzeitverzeichnisse und vor dem Webserver aus. Der
 passwortlose WireGuard-Modus bleibt dadurch auch nach einem Reboot wirksam.
 
 Unter **Ansagen → Automatische Spracherzeugung** ist Kokoro · Thorsten der
-Standard. Piper und Qwen bleiben auswählbar; Kokoro und Qwen setzen ihre lokale
-Installation voraus. Die Auswahl erzeugt betroffene TTS-Ansagen neu und erhält
+Standard. Weitere Optionen sind Piper, Qwen3-TTS und Google Cloud TTS. Google benötigt den eingerichteten Generator und seine Konfigurationsdatei. [Google Cloud TTS einrichten](../docs/GOOGLE_TTS.md)
+
+Die Auswahl erzeugt betroffene TTS-Ansagen neu und erhält
 manuelle Aufnahmen. Kokoro wird mit dem Hauptinstaller eingerichtet.
 
 ## KI-Assistent ab 2.5.1

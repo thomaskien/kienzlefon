@@ -7,8 +7,7 @@ Engine braucht keine GPU. Verbrauch entsteht nur beim (Neu-)Erzeugen von Ansagen
 ## Einrichtung
 
 1. In der Google Cloud Console die **Cloud Text-to-Speech API** aktivieren und
-   einen API-Schluessel anlegen, der nur diese API aufrufen darf. Ein
-   Budgetlimit/Alarm einrichten.
+   einen API-Schluessel anlegen, der nur diese API aufrufen darf. Ein Cloud-Budget kann beim Erreichen festgelegter Kostenschwellen benachrichtigen. Die Abrechnung läuft weiter. [Google-Budgetbenachrichtigungen](https://docs.cloud.google.com/billing/docs/how-to/budgets?hl=de)
 2. **Per Installer (empfohlen):** `kienzlefon-installer.sh` bietet bei der Auswahl des
    Erzeugungsmodells Punkt *4) Google Cloud TTS* an. Er fragt den Schluessel (Eingabe
    unsichtbar), Stimme und Tempo ab, installiert den Generator nach
@@ -46,13 +45,12 @@ Die Auswahl ist erst moeglich, wenn Generator und Konfigurationsdatei vorhanden 
 | `RATE` | `0.93` | Sprechtempo 0,25 bis 2,0 |
 | `ENDPOINT` | `texttospeech.googleapis.com` | API-Host |
 
-Ein Wechsel von `VOICE`, `LANG` oder `RATE` erzeugt alle automatischen Ansagen neu.
+Ändern sich Stimme, Sprache oder das wirksame Sprechtempo, erzeugt der nächste Google-Generierungslauf die automatischen Ansagen neu. Ein im Webinterface gespeichertes Tempo hat Vorrang vor `RATE`.
 Ein neuer `API_KEY` loest keine Neuerzeugung aus. Manuelle Aufnahmen bleiben erhalten.
 
 ## Hinweise
 
-- Der Text der Ansagen wird an Google uebertragen (keine Patientendaten; nur die
-  konfigurierten Ansagetexte). Bei Datenschutzbedenken die lokalen Engines nutzen.
+- Bei der Synthese wird der Ansagetext an Google übertragen. Verwende für diese Texte allgemeine Praxisinformationen. Bei Datenschutzbedenken die lokalen Engines nutzen.
 - Der Server braucht ausgehenden HTTPS-Zugriff auf `texttospeech.googleapis.com`.
 - Der API-Schluessel steht nur in der Konfigurationsdatei, nicht in `kienzlefon.toml`.
 

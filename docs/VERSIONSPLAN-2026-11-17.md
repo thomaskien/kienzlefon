@@ -74,7 +74,7 @@ Die vier fachlichen Rueckfragen sind beantwortet:
    nach dessen erfolglosem separatem Rufversuch. Der erste Rottelefon-
    Versuch bleibt vom Gruppenhaekchen unabhaengig.
 
-Die aktuelle [Middleware-Abstimmung](../../T2med-asterisk/docs/NEBENSTELLENSTEUERUNG-ABSTIMMUNG.md)
+Die aktuelle [Middleware-Abstimmung](https://github.com/thomaskien/kienzlefon-t2med/blob/main/docs/NEBENSTELLENSTEUERUNG-ABSTIMMUNG.md)
 enthaelt weitere Benutzerpraezisierungen: Beide Gruppen sind aus App und
 Middleware-Telefonmenue bedienbar, ohne Beschraenkung auf die eigene
 Arbeitsplatz-Nebenstelle, aber immer innerhalb der administrativen Freigaben.
@@ -143,7 +143,7 @@ auf dem dafuer vorgesehenen Testsystem pruefen.
 
 - [Architektur und vorgemerkte Features](ARCHITEKTUR.md)
 - [Gemeinsame Rufgruppen-Abstimmung](RUFGRUPPEN-ABSTIMMUNG.md)
-- [App-Entwurf zur Nebenstellensteuerung](../../ionos/docs/ABSTIMMUNG-NEBENSTELLENSTEUERUNG-2026-11-17.md)
-- [Middleware-Anrufstatistik](../../T2med-asterisk/docs/ANRUFSTATISTIK.md)
+- [App-Entwurf zur Nebenstellensteuerung](https://github.com/thomaskien/kienzlefon-app/blob/main/docs/ABSTIMMUNG-NEBENSTELLENSTEUERUNG-2026-11-17.md)
+- [Middleware-Anrufstatistik](https://github.com/thomaskien/kienzlefon-t2med/blob/main/docs/ANRUFSTATISTIK.md)
 - [Review PR #1](REVIEW-COMMITS-2026-11-17.md)
 - [Review PR #3 und #4](REVIEW-COMMITS-2026-11-17-NACHTRAG.md)
