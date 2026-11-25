@@ -379,7 +379,7 @@ ausserhalb dieser Auswahl in die Pflichtliste aufnehmen. Lokale Konfiguration,
 Schluessel, virtuelle Umgebungen, Laufzeitdaten und die separate
 Telepraxis-Demowebseite bleiben ausserhalb des Pakets.
 
-### Eigenstaendige Installation
+### Eigenständige Kienzlefon-Installation
 
 Auf einem unterstuetzten Kienzlefax-Linux-System oder einem frischen Server:
 
